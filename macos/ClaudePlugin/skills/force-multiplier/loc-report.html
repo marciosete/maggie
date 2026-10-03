@@ -1,0 +1,2158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agentic Engineering Dashboard</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #f9f9f7;
+        --surface: #fcfcfb;
+        --ink: #0b0b0b;
+        --ink-2: #52514e;
+        --muted: #898781;
+        --grid: #e1e0d9;
+        --axis: #c3c2b7;
+        --ring: rgba(11, 11, 11, 0.1);
+        --s1: #2a78d6;
+        --s2: #eb6834;
+        --s3: #1baf7a;
+        --s4: #eda100;
+        --s5: #e87ba4;
+        --s6: #008300;
+        --s7: #4a3aa7;
+        --s8: #e34948;
+        --team: #52514e;
+        --good: #006300;
+        --warn: #b45309;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          color-scheme: dark;
+          --page: #0d0d0d;
+          --surface: #1a1a19;
+          --ink: #ffffff;
+          --ink-2: #c3c2b7;
+          --muted: #898781;
+          --grid: #2c2c2a;
+          --axis: #383835;
+          --ring: rgba(255, 255, 255, 0.1);
+          --s1: #3987e5;
+          --s2: #d95926;
+          --s3: #199e70;
+          --s4: #c98500;
+          --s5: #d55181;
+          --s6: #008300;
+          --s7: #9085e9;
+          --s8: #e66767;
+          --team: #c3c2b7;
+          --good: #0ca30c;
+          --warn: #fab219;
+        }
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --page: #0d0d0d;
+        --surface: #1a1a19;
+        --ink: #ffffff;
+        --ink-2: #c3c2b7;
+        --muted: #898781;
+        --grid: #2c2c2a;
+        --axis: #383835;
+        --ring: rgba(255, 255, 255, 0.1);
+        --s1: #3987e5;
+        --s2: #d95926;
+        --s3: #199e70;
+        --s4: #c98500;
+        --s5: #d55181;
+        --s6: #008300;
+        --s7: #9085e9;
+        --s8: #e66767;
+        --team: #c3c2b7;
+        --good: #0ca30c;
+        --warn: #fab219;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--ink);
+        font:
+          14px/1.45 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 24px 64px;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 8px 18px;
+        margin-bottom: 20px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 15px;
+        margin: 0 0 4px;
+        font-weight: 600;
+      }
+      .sub {
+        color: var(--ink-2);
+        font-size: 13px;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 12px;
+        margin-left: auto;
+        text-align: right;
+        line-height: 1.5;
+      }
+      .meta .stamp {
+        color: var(--ink-2);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .tile {
+        background: var(--surface);
+        border: 1px solid var(--ring);
+        border-radius: 10px;
+        padding: 14px 16px 12px;
+      }
+      .tile .k {
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+      .tile .v {
+        font-size: 30px;
+        line-height: 1.1;
+        font-weight: 650;
+        margin: 4px 0 2px;
+        letter-spacing: -0.02em;
+      }
+      .tile .v.hero {
+        font-size: 40px;
+      }
+      .tile .n {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--ring);
+        border-radius: 10px;
+        padding: 16px 18px 12px;
+        margin-bottom: 16px;
+      }
+      /* A fixed grid, not a wrapping flex row: title top-left, view toggle top-right,
+     legend on its own row. The legend changes length with the view, and in a flex
+     row that moved the toggle between lines every time you switched. */
+      .card-head {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: start;
+        row-gap: 8px;
+        column-gap: 14px;
+        margin-bottom: 10px;
+      }
+      .card-head > :first-child {
+        grid-area: 1 / 1;
+      }
+      .card-head > .seg {
+        grid-area: 1 / 2;
+        justify-self: end;
+      }
+      .card-head > .legend {
+        grid-area: 2 / 1 / auto / -1;
+        margin-left: 0;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend span[hidden] {
+        display: none !important;
+      }
+      .legend i {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        display: inline-block;
+      }
+      .legend i.line {
+        width: 14px;
+        height: 2px;
+        border-radius: 1px;
+      }
+      .legend i.line.dash {
+        height: 0;
+        border-top: 2px dashed var(--ink);
+        border-radius: 0;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        margin: 4px 0 14px;
+      }
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .toolbar .seg {
+        margin-left: auto;
+      }
+      .filters button {
+        font: inherit;
+        font-size: 12.5px;
+        padding: 5px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--ring);
+        background: var(--surface);
+        color: var(--ink-2);
+        cursor: pointer;
+      }
+      .filters button[aria-pressed='true'] {
+        background: var(--ink);
+        color: var(--page);
+        border-color: var(--ink);
+        font-weight: 600;
+      }
+      .filters button:hover {
+        border-color: var(--axis);
+      }
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--ring);
+        border-radius: 999px;
+        overflow: hidden;
+        margin-left: auto;
+      }
+      .seg button {
+        font: inherit;
+        font-size: 12px;
+        padding: 4px 11px;
+        border: 0;
+        background: var(--surface);
+        color: var(--ink-2);
+        cursor: pointer;
+      }
+      .seg button + button {
+        border-left: 1px solid var(--ring);
+      }
+      .seg button[aria-pressed='true'] {
+        background: var(--ink);
+        color: var(--page);
+        font-weight: 600;
+      }
+      .legend + .seg {
+        margin-left: 0;
+      }
+      .chart {
+        position: relative;
+      }
+      .chart svg {
+        width: 100%;
+        height: auto;
+        display: block;
+        overflow: visible;
+      }
+      .tip {
+        position: absolute;
+        pointer-events: none;
+        background: var(--surface);
+        border: 1px solid var(--ring);
+        border-radius: 10px;
+        padding: 11px 14px 12px;
+        font-size: 12.5px;
+        line-height: 1.55;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+        min-width: 264px;
+        z-index: 2;
+        display: none;
+      }
+      .tip b {
+        display: block;
+        margin-bottom: 1px;
+        font-weight: 600;
+        font-size: 13.5px;
+      }
+      .tip .when {
+        color: var(--muted);
+        margin-bottom: 6px;
+        font-variant-numeric: tabular-nums;
+      }
+      .tip .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        font-variant-numeric: tabular-nums;
+      }
+      .tip .row i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        display: inline-block;
+        margin-right: 6px;
+        vertical-align: 0;
+      }
+      .tip .mixtip {
+        border-top: 1px solid var(--grid);
+        margin-top: 6px;
+        padding-top: 4px;
+      }
+      .tip .mixrow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 2px 0;
+      }
+      .tip .mixrow .mn {
+        min-width: 48px;
+      }
+      .tip .mixrow.team .mn {
+        font-weight: 600;
+      }
+      .tip .mixrow .mt {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0 10px;
+        color: var(--ink-2);
+        font-variant-numeric: tabular-nums;
+      }
+      .donut {
+        flex: none;
+        display: block;
+      }
+      .sw {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        margin-right: 5px;
+      }
+      .mk {
+        white-space: nowrap;
+      }
+      .mixhead {
+        margin: 22px 0 10px;
+        padding-top: 16px;
+        border-top: 1px solid var(--grid);
+      }
+      .mixhead h3 {
+        margin: 0 0 2px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .mixgrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+        gap: 12px;
+      }
+      .mixcard {
+        border: 1px solid var(--grid);
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+      .mixname {
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .mixname i {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        margin-right: 8px;
+      }
+      .mixbody {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .dc-n {
+        fill: var(--ink);
+        font-size: 17px;
+        font-weight: 650;
+      }
+      .dc-k {
+        fill: var(--muted);
+        font-size: 10.5px;
+      }
+      table.mixtab {
+        width: auto;
+        flex: 1;
+      }
+      table.mixtab td {
+        padding: 2px 6px;
+        border: 0;
+      }
+      table.mixtab td:not(:first-child) {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      table.mixtab tr.dim td {
+        color: var(--muted);
+      }
+      .tip .row.team {
+        border-top: 1px solid var(--grid);
+        margin-top: 4px;
+        padding-top: 4px;
+        font-weight: 600;
+      }
+      .grid text,
+      .axis text {
+        fill: var(--muted);
+        font-size: 11px;
+      }
+      .grid line {
+        stroke: var(--grid);
+        stroke-width: 1;
+        shape-rendering: crispEdges;
+      }
+      .axis line {
+        stroke: var(--axis);
+        stroke-width: 1;
+        shape-rendering: crispEdges;
+      }
+      .hit {
+        fill: transparent;
+      }
+      .hit:hover {
+        fill: var(--ring);
+      }
+      .scroll {
+        overflow-x: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      th,
+      td {
+        padding: 6px 10px;
+        text-align: right;
+        border-bottom: 1px solid var(--grid);
+      }
+      th:first-child,
+      td:first-child {
+        text-align: left;
+      }
+      thead th {
+        position: sticky;
+        top: 0;
+        background: var(--surface);
+        color: var(--ink-2);
+        font-weight: 600;
+        font-size: 12px;
+        border-bottom: 1px solid var(--axis);
+      }
+      thead th.grp {
+        text-align: center;
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+      thead th.grp i {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        margin-right: 6px;
+        vertical-align: -1px;
+      }
+      tbody tr:hover {
+        background: var(--ring);
+      }
+      tfoot td {
+        font-weight: 650;
+        border-top: 1px solid var(--axis);
+        border-bottom: none;
+      }
+      tfoot tr.days td {
+        font-weight: 400;
+        color: var(--muted);
+        font-size: 12px;
+        border-top: none;
+      }
+      td.dim {
+        color: var(--muted);
+      }
+      td.neg {
+        color: var(--warn);
+      }
+      .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      @media (max-width: 800px) {
+        .two {
+          grid-template-columns: 1fr;
+        }
+      }
+      .note {
+        color: var(--ink-2);
+        font-size: 12.5px;
+        margin: 0 0 8px;
+      }
+      .note.warn {
+        color: var(--warn);
+      }
+      dl.scope {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 16px;
+        font-size: 12.5px;
+        margin: 0;
+      }
+      dl.scope dt {
+        color: var(--ink-2);
+        font-weight: 600;
+      }
+      dl.scope dd {
+        margin: 0;
+        color: var(--ink-2);
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+      }
+      .empty {
+        padding: 40px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .bar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 18px;
+        padding: 10px 0 11px;
+        margin-bottom: 14px;
+        background: var(--page);
+        border-bottom: 1px solid var(--ring);
+      }
+      .ctl {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .ctl > label {
+        color: var(--ink-2);
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+      .lastwrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--ink-2);
+        font-size: 12.5px;
+      }
+      .lastwrap.off {
+        opacity: 0.45;
+      }
+      .bar input[type='number'],
+      .bar select {
+        font: inherit;
+        font-size: 12.5px;
+        padding: 4px 8px;
+        border-radius: 8px;
+        border: 1px solid var(--ring);
+        background: var(--surface);
+        color: var(--ink);
+      }
+      .bar input[type='number'] {
+        width: 58px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .bar .pill {
+        font: inherit;
+        font-size: 12.5px;
+        padding: 4px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--ring);
+        background: var(--surface);
+        color: var(--ink-2);
+        cursor: pointer;
+      }
+      .bar .pill[aria-pressed='true'] {
+        background: var(--ink);
+        color: var(--page);
+        border-color: var(--ink);
+        font-weight: 600;
+      }
+      .bar .seg {
+        margin-left: auto;
+      }
+      details.acc > summary {
+        list-style: none;
+        cursor: pointer;
+        display: flex;
+        align-items: baseline;
+        gap: 6px 14px;
+      }
+      details.acc > summary::-webkit-details-marker {
+        display: none;
+      }
+      /* A drawn chevron, not a glyph: the small-triangle characters render at a
+     fraction of their nominal size and, in --muted, read as a speck. */
+      details.acc > summary::before {
+        content: '';
+        flex: none;
+        align-self: center;
+        width: 8px;
+        height: 8px;
+        margin-right: 2px;
+        border-right: 2px solid var(--ink-2);
+        border-bottom: 2px solid var(--ink-2);
+        border-radius: 1px;
+        transform: rotate(-45deg);
+        transform-origin: 55% 55%;
+        transition:
+          transform 0.15s ease,
+          border-color 0.15s ease;
+      }
+      details.acc[open] > summary::before {
+        transform: rotate(45deg);
+      }
+      details.acc > summary:hover::before,
+      details.acc > summary:focus-visible::before {
+        border-color: var(--ink);
+      }
+      details.acc[open] > summary {
+        margin-bottom: 10px;
+      }
+      details.acc .ah {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 14px;
+      }
+      details.acc h2 {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app"><div class="empty">Loading loc-data.js…</div></main>
+    <script src="loc-data.js"></script>
+    <script>
+      (function () {
+        const D = window.LOC_DATA;
+        const app = document.getElementById('app');
+        if (!D) {
+          app.innerHTML =
+            '<div class="empty">No data. Run <code>/maggie:force-multiplier</code> in Maggie to generate loc-data.js beside this page.</div>';
+          return;
+        }
+
+        const BASE = D.baselinePerDay;
+        const authors = D.authorOrder;
+        const slot = (i) => `var(--s${(i % 8) + 1})`;
+        const colorOf = Object.fromEntries(authors.map((a, i) => [a, slot(i)]));
+        const first = (a) => a.split(' ')[0];
+        const fmt = (n) => n.toLocaleString('en-AU');
+        const fx = (m) => m.toFixed(1) + 'x';
+        const esc = (s) =>
+          String(s).replace(
+            /[&<>"]/g,
+            (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
+          );
+        const h = (tag, attrs, ...kids) => {
+          const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+          for (const k in attrs) el.setAttribute(k, attrs[k]);
+          for (const k of kids) el.append(k);
+          return el;
+        };
+        const store = {
+          get(k, d) {
+            try {
+              const v = localStorage.getItem('loc.' + k);
+              return v === null ? d : v;
+            } catch (e) {
+              return d;
+            }
+          },
+          set(k, v) {
+            try {
+              localStorage.setItem('loc.' + k, String(v));
+            } catch (e) {}
+          },
+        };
+
+        // ---------- Brisbane calendar ----------
+        // A commit day is a "day off" if it is a Saturday, a Sunday, or a Queensland
+        // public holiday — including Ekka (Royal Queensland Show), a holiday in the
+        // Brisbane local-government area only — or if it predates the configured
+        // start date (LOC_START_DATE), when the work was done on the engineer's own time. The movable dates
+        // are computed (Easter by the Gregorian computus, Labour Day / King's
+        // Birthday as the first Monday of their month, weekend holidays substituted
+        // forward) so other years stay right; only Ekka is a table, because the show
+        // sets its date each year. Verified against qld.gov.au for 2026.
+        const EKKA = { 2025: '08-13', 2026: '08-12' };
+        const START_DATE = (D && D.startDate) || '0000-00-00'; // LOC_START_DATE; none = no cut-off
+        const WEEKDAY = [
+          'Sunday',
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+        ];
+        const MONTH = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        const MONTH_LONG = [
+          'January',
+          'February',
+          'March',
+          'April',
+          'May',
+          'June',
+          'July',
+          'August',
+          'September',
+          'October',
+          'November',
+          'December',
+        ];
+        const utc = (y, m, d) => new Date(Date.UTC(y, m - 1, d));
+        const isoOf = (dt) => dt.toISOString().slice(0, 10);
+        const parse = (iso) => new Date(iso + 'T00:00:00Z');
+        const auDay = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`; // Australian DD/MM
+        const addDays = (dt, n) => new Date(dt.getTime() + n * 86400000);
+        const addMonths = (dt, n) => {
+          const d = new Date(dt.getTime());
+          d.setUTCDate(1);
+          d.setUTCMonth(d.getUTCMonth() + n);
+          d.setUTCDate(
+            Math.min(
+              dt.getUTCDate(),
+              new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()
+            )
+          );
+          return d;
+        };
+        const isWeekend = (dt) => dt.getUTCDay() === 0 || dt.getUTCDay() === 6;
+        function easterSunday(y) {
+          const a = y % 19,
+            b = Math.floor(y / 100),
+            c = y % 100,
+            d = Math.floor(b / 4),
+            e = b % 4,
+            f = Math.floor((b + 8) / 25),
+            g = Math.floor((b - f + 1) / 3),
+            hh = (19 * a + b - d - g + 15) % 30,
+            i = Math.floor(c / 4),
+            k = c % 4,
+            l = (32 + 2 * e + 2 * i - hh - k) % 7,
+            m = Math.floor((a + 11 * hh + 22 * l) / 451);
+          return utc(y, Math.floor((hh + l - 7 * m + 114) / 31), ((hh + l - 7 * m + 114) % 31) + 1);
+        }
+        const firstMonday = (y, m) => utc(y, m, 1 + ((8 - utc(y, m, 1).getUTCDay()) % 7));
+        const holidayCache = {};
+        function holidaysFor(y) {
+          if (holidayCache[y]) return holidayCache[y];
+          const H = {};
+          const put = (dt, name) => {
+            const k = typeof dt === 'string' ? dt : isoOf(dt);
+            if (!H[k]) H[k] = name;
+          };
+          const substitute = (dt, name) => {
+            if (!isWeekend(dt)) return;
+            let c = addDays(dt, 1);
+            while (isWeekend(c) || H[isoOf(c)]) c = addDays(c, 1);
+            put(c, name + ' (additional)');
+          };
+          put(utc(y, 1, 1), "New Year's Day");
+          substitute(utc(y, 1, 1), "New Year's Day");
+          put(utc(y, 1, 26), 'Australia Day');
+          substitute(utc(y, 1, 26), 'Australia Day');
+          const E = easterSunday(y);
+          put(addDays(E, -2), 'Good Friday');
+          put(addDays(E, -1), 'Easter Saturday');
+          put(E, 'Easter Sunday');
+          put(addDays(E, 1), 'Easter Monday');
+          put(utc(y, 4, 25), 'Anzac Day');
+          put(firstMonday(y, 5), 'Labour Day');
+          if (EKKA[y]) put(y + '-' + EKKA[y], 'Ekka — Royal Queensland Show (Brisbane)');
+          put(firstMonday(y, 10), "King's Birthday");
+          put(utc(y, 12, 25), 'Christmas Day');
+          put(utc(y, 12, 26), 'Boxing Day');
+          substitute(utc(y, 12, 25), 'Christmas Day');
+          substitute(utc(y, 12, 26), 'Boxing Day');
+          holidayCache[y] = H;
+          return H;
+        }
+        const metaCache = {};
+        function dayMeta(date) {
+          if (metaCache[date]) return metaCache[date];
+          const dt = parse(date),
+            w = dt.getUTCDay();
+          const holiday = holidaysFor(dt.getUTCFullYear())[date] || null;
+          const weekend = w === 0 || w === 6,
+            preStart = date < START_DATE;
+          const why = [holiday, preStart ? 'before the start date' : null].filter(
+            Boolean
+          );
+          return (metaCache[date] = {
+            weekday: WEEKDAY[w],
+            weekend,
+            holiday,
+            preStart,
+            off: weekend || !!holiday || preStart,
+            reason: why.join(' · '),
+            label: `${WEEKDAY[w]} ${dt.getUTCDate()} ${MONTH[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`,
+          });
+        }
+
+        // ---------- commit types ----------
+        // The Conventional Commits type of every commit, folded into five kinds of
+        // work. Five, not one per prefix: a donut stops reading past about six slices,
+        // and five is the most this palette clears colour-blind separation for when
+        // every slice borders two others (the ring wraps). The order IS that check —
+        // green, violet, red, yellow, magenta — so do not re-order it.
+        const TYPES = [
+          { k: 'feat', label: 'Feature', short: 'feat', c: 'var(--s6)' },
+          { k: 'refactor', label: 'Refactor', short: 'refactor', c: 'var(--s7)' },
+          { k: 'fix', label: 'Fix', short: 'fix', c: 'var(--s8)' },
+          { k: 'test', label: 'Test', short: 'test', c: 'var(--s4)' },
+          { k: 'other', label: 'Docs & chore', short: 'docs & chore', c: 'var(--s5)' },
+        ];
+        const FOLD = {
+          feat: 'feat',
+          fix: 'fix',
+          refactor: 'refactor',
+          perf: 'refactor',
+          style: 'refactor',
+          test: 'test',
+        };
+        const addTypes = (into, raw) => {
+          for (const t in raw || {}) {
+            const k = FOLD[t] || 'other';
+            into[k] = (into[k] || 0) + raw[t];
+          }
+          return into;
+        };
+        const typeTotal = (m) => TYPES.reduce((x, t) => x + (m[t.k] || 0), 0);
+        // A ring, one slice per kind, a surface-coloured gap between slices.
+        function donut(m, size, center) {
+          const total = typeTotal(m);
+          const r = size / 2,
+            th = Math.max(3, Math.round(size * 0.2)),
+            ri = r - th,
+            gap = size < 40 ? 1 : 2;
+          const pt = (rad, a) =>
+            `${(r + rad * Math.sin(a)).toFixed(2)},${(r - rad * Math.cos(a)).toFixed(2)}`;
+          let a0 = 0,
+            out = '';
+          const live = TYPES.filter((t) => m[t.k]);
+          for (const t of live) {
+            const v = m[t.k],
+              tip = `<title>${esc(t.label)}: ${v} of ${total} (${Math.round((100 * v) / total)}%)</title>`;
+            if (live.length === 1) {
+              out += `<circle cx="${r}" cy="${r}" r="${r - th / 2}" fill="none" stroke="${t.c}" stroke-width="${th}">${tip}</circle>`;
+              break;
+            }
+            const a1 = a0 + (2 * Math.PI * v) / total,
+              big = a1 - a0 > Math.PI ? 1 : 0;
+            out += `<path d="M${pt(r, a0)}A${r},${r} 0 ${big} 1 ${pt(r, a1)}L${pt(ri, a1)}A${ri},${ri} 0 ${big} 0 ${pt(ri, a0)}Z" fill="${t.c}" stroke="var(--surface)" stroke-width="${gap}" stroke-linejoin="round">${tip}</path>`;
+            a0 = a1;
+          }
+          if (!total)
+            out = `<circle cx="${r}" cy="${r}" r="${r - th / 2}" fill="none" stroke="var(--grid)" stroke-width="${th}"/>`;
+          return `<svg class="donut" width="${size}" height="${size}" style="width:${size}px;height:${size}px" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(
+            TYPES.filter((t) => m[t.k])
+              .map((t) => `${m[t.k]} ${t.label}`)
+              .join(', ') || 'no commits'
+          )}">${out}${center || ''}</svg>`;
+        }
+        const swatch = (c) => `<i class="sw" style="background:${c}"></i>`;
+        // "12 feat · 9 fix" in the fixed kind order, each count beside its colour.
+        const mixText = (m) =>
+          TYPES.filter((t) => m[t.k])
+            .map((t) => `<span class="mk">${swatch(t.c)}${m[t.k]} ${esc(t.short)}</span>`)
+            .join('');
+
+        // ---------- controls ----------
+        // Four dials, all at the top of the page; everything below reads them.
+        let metric = store.get('metric', 'loc') === 'ncloc' ? 'ncloc' : 'loc';
+        let periodAll = store.get('periodAll', '1') !== '0';
+        let periodN = Math.max(1, Number(store.get('periodN', 30)) || 30);
+        let periodUnit = ['days', 'weeks', 'months', 'years'].includes(
+          store.get('periodUnit', 'days')
+        )
+          ? store.get('periodUnit', 'days')
+          : 'days';
+        let group = ['days', 'weeks', 'months', 'quarters', 'years'].includes(
+          store.get('group', 'days')
+        )
+          ? store.get('group', 'days')
+          : 'days';
+        // One chart, three views of the same numbers: the lines a period added, the
+        // rate those lines represent (lines ÷ baseline ÷ engineer-days), and the
+        // running total. Each is stacked by author.
+        const VIEWS = ['lines', 'mult', 'cumulative'];
+        let view = VIEWS.includes(store.get('view', 'lines'))
+          ? store.get('view', 'lines')
+          : 'lines';
+        {
+          const q = new URLSearchParams(location.search);
+          if (['loc', 'ncloc'].includes(q.get('metric'))) metric = q.get('metric');
+          if (VIEWS.includes(q.get('view'))) view = q.get('view');
+          if (['days', 'weeks', 'months', 'quarters', 'years'].includes(q.get('group')))
+            group = q.get('group');
+          if (['days', 'weeks', 'months', 'years'].includes(q.get('unit'))) {
+            periodUnit = q.get('unit');
+            periodAll = false;
+          }
+          if (Number(q.get('last')) > 0) {
+            periodN = Math.min(999, Number(q.get('last')));
+            periodAll = false;
+          }
+          if (q.get('period') === 'all') periodAll = true;
+        }
+        // A published page is read long after it was generated, so the stamp is in the
+        // reader's own timezone with a relative age beside it — a UTC string alone
+        // leaves "is this current?" as arithmetic for the reader.
+        const stamp = (iso) => {
+          const d = new Date(iso);
+          return isNaN(d)
+            ? iso
+            : d.toLocaleString(undefined, {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              });
+        };
+        const ago = (iso) => {
+          const ms = Date.now() - new Date(iso).getTime();
+          if (isNaN(ms)) return '';
+          const m = Math.round(ms / 60000),
+            h = Math.round(ms / 3600000),
+            d = Math.round(ms / 86400000);
+          if (m < 2) return 'just now';
+          if (m < 60) return `${m} minutes ago`;
+          if (h < 24) return `${h} hour${h > 1 ? 's' : ''} ago`;
+          return `${d} day${d > 1 ? 's' : ''} ago`;
+        };
+
+        // A team-only copy (LOC_DATA.teamOnly = true) carries no author breakdown.
+        // Same page, less data: everything author-shaped folds away, and the team
+        // figures — which already carry the right engineer-days — do the work.
+        const TEAM_ONLY = !!D.teamOnly;
+
+        const isN = () => metric === 'ncloc';
+        const LV = (o) => (!o ? 0 : isN() ? o.ncloc : o.loc); // lines on a record
+        const MU = (o) => (!o || !o.days ? 0 : Math.max(0, LV(o) / (BASE * o.days)));
+        const UNIT = () => (isN() ? 'ncloc' : 'LOC');
+
+        // ---------- window + aggregation ----------
+        const lastDate = D.days.length ? D.days[D.days.length - 1].date : isoOf(new Date());
+        function windowStart() {
+          if (periodAll) return null;
+          const last = parse(lastDate),
+            n = Math.max(1, periodN | 0);
+          if (periodUnit === 'days') return isoOf(addDays(last, -(n - 1)));
+          if (periodUnit === 'weeks') return isoOf(addDays(last, -(7 * n - 1)));
+          if (periodUnit === 'months') return isoOf(addDays(addMonths(last, -n), 1));
+          return isoOf(addDays(addMonths(last, -12 * n), 1));
+        }
+        const windowDays = () => {
+          const from = windowStart();
+          return from ? D.days.filter((d) => d.date >= from) : D.days.slice();
+        };
+        // The chart opens on the start date (if set), or later when the period
+        // starts later. Earlier days are not drawn, but they stay in the headline, the
+        // table and every running figure the chart shows.
+        const CHART_FROM = START_DATE;
+        const chartFrom = () => {
+          const w = windowStart();
+          return w && w > CHART_FROM ? w : CHART_FROM;
+        };
+
+        function bucketKey(date) {
+          const dt = parse(date),
+            y = dt.getUTCFullYear(),
+            m = dt.getUTCMonth();
+          if (group === 'weeks') return isoOf(addDays(dt, -((dt.getUTCDay() + 6) % 7))); // ISO week, Monday
+          if (group === 'months') return `${y}-${String(m + 1).padStart(2, '0')}`;
+          if (group === 'quarters') return `${y}-Q${Math.floor(m / 3) + 1}`;
+          if (group === 'years') return String(y);
+          return date;
+        }
+        function bucketLabels(b) {
+          const key = b.key,
+            n = b.dates.length;
+          const active = `${n} active day${n === 1 ? '' : 's'}`;
+          if (group === 'days') {
+            const m = dayMeta(key);
+            return {
+              short: auDay(key),
+              row: key,
+              title: m.label + (m.reason ? ' · ' + m.reason : ''),
+            };
+          }
+          if (group === 'weeks') {
+            const mon = parse(key),
+              sun = addDays(mon, 6);
+            return {
+              short: `${mon.getUTCDate()} ${MONTH[mon.getUTCMonth()]}`,
+              row: `w/c ${mon.getUTCDate()} ${MONTH[mon.getUTCMonth()]} ${mon.getUTCFullYear()}`,
+              title: `Week of ${mon.getUTCDate()} ${MONTH[mon.getUTCMonth()]} — ${sun.getUTCDate()} ${MONTH[sun.getUTCMonth()]} ${sun.getUTCFullYear()} · ${active}`,
+            };
+          }
+          if (group === 'months') {
+            const [y, m] = key.split('-').map(Number);
+            return {
+              short: `${MONTH[m - 1]}`,
+              row: `${MONTH[m - 1]} ${y}`,
+              title: `${MONTH_LONG[m - 1]} ${y} · ${active}`,
+            };
+          }
+          if (group === 'quarters') {
+            const [y, q] = key.split('-Q');
+            const s = (Number(q) - 1) * 3;
+            return {
+              short: `Q${q}`,
+              row: `Q${q} ${y}`,
+              title: `Q${q} ${y} (${MONTH[s]}–${MONTH[s + 2]}) · ${active}`,
+            };
+          }
+          return { short: key, row: key, title: `${key} · ${active}` };
+        }
+        function aggregate(days) {
+          const out = [],
+            index = {};
+          for (const d of days) {
+            const key = bucketKey(d.date);
+            let b = index[key];
+            if (!b) {
+              b = index[key] = {
+                key,
+                dates: [],
+                by: {},
+                team: { commits: 0, loc: 0, ncloc: 0, days: 0, types: {} },
+                commits: 0,
+              };
+              out.push(b);
+            }
+            b.dates.push(d.date);
+            b.commits += d.team.commits;
+            b.team.commits += d.team.commits;
+            b.team.loc += d.team.loc;
+            b.team.ncloc += d.team.ncloc;
+            b.team.days += d.humans; // engineer-days
+            addTypes(b.team.types, d.team.types);
+            for (const a of authors) {
+              const o = d.by[a];
+              if (!o) continue;
+              const t = b.by[a] || (b.by[a] = { commits: 0, loc: 0, ncloc: 0, days: 0, types: {} });
+              addTypes(t.types, o.types);
+              t.commits += o.commits;
+              t.loc += o.loc;
+              t.ncloc += o.ncloc;
+              t.days += 1;
+            }
+          }
+          for (const b of out) {
+            const L = bucketLabels(b);
+            b.short = L.short;
+            b.title = L.title;
+            b.row = L.row;
+            b.single = b.dates.length === 1 && group === 'days';
+            b.off = group === 'days' && dayMeta(b.key).off;
+            let num = 0,
+              den = 0;
+            for (const a of authors) {
+              const o = b.by[a];
+              if (!o) continue;
+              const w = Math.max(0, LV(o));
+              num += MU(o) * w;
+              den += w;
+            }
+            b.teamMult = TEAM_ONLY ? MU(b.team) : den > 0 ? num / den : 0;
+          }
+          return out;
+        }
+
+        // ---------- window roll-up, for the tiles and the author table ----------
+        function summary(days) {
+          const by = {},
+            types = {};
+          let loc = 0,
+            ncloc = 0,
+            commits = 0,
+            engDays = 0,
+            codingDays = 0;
+          for (const d of days) {
+            loc += d.team.loc;
+            ncloc += d.team.ncloc;
+            commits += d.team.commits;
+            engDays += d.humans;
+            if (d.humans) codingDays++;
+            addTypes(types, d.team.types);
+            for (const a of authors) {
+              const o = d.by[a];
+              if (!o) continue;
+              const t =
+                by[a] ||
+                (by[a] = { commits: 0, loc: 0, ncloc: 0, days: 0, since: d.date, types: {} });
+              addTypes(t.types, o.types);
+              t.commits += o.commits;
+              t.loc += o.loc;
+              t.ncloc += o.ncloc;
+              t.days += 1;
+            }
+          }
+          let num = 0,
+            den = 0;
+          for (const a of authors) {
+            const o = by[a];
+            if (!o) continue;
+            const w = Math.max(0, LV(o));
+            num += MU(o) * w;
+            den += w;
+          }
+          return {
+            by,
+            types,
+            loc,
+            ncloc,
+            commits,
+            engDays,
+            codingDays,
+            lines: isN() ? ncloc : loc,
+            engineers: Object.keys(by).length,
+            teamMult: den > 0 ? num / den : 0,
+          };
+        }
+
+        // ---------- tooltip head ----------
+        const spanText = (b) => {
+          if (b.dates.length > 1) {
+            const f = parse(b.dates[0]),
+              t = parse(b.dates[b.dates.length - 1]);
+            return `${f.getUTCDate()} ${MONTH[f.getUTCMonth()]} → ${t.getUTCDate()} ${MONTH[t.getUTCMonth()]} · ${b.dates.length} active days`;
+          }
+          return '';
+        };
+        const tipHead = (b) =>
+          `<b>${esc(b.title)}</b>${spanText(b) ? `<div class="when">${esc(spanText(b))}</div>` : ''}`;
+        const tipRows = (b) =>
+          `<div class="row" style="color:var(--muted)"><span></span><span>commits · ${UNIT()} · mult</span></div>` +
+          authors
+            .filter((a) => b.by[a])
+            .map(
+              (a) =>
+                `<div class="row"><span><i style="background:${colorOf[a]}"></i>${esc(first(a))}</span><span>${b.by[a].commits} · ${fmt(LV(b.by[a]))} · ${fx(MU(b.by[a]))}</span></div>`
+            )
+            .join('') +
+          `<div class="row team"><span>Team</span><span>${b.commits} · ${fmt(LV(b.team))} · ${fx(b.teamMult)}</span></div>` +
+          (b.runMult === undefined
+            ? ''
+            : `<div class="row" style="color:var(--ink-2)"><span>running average</span><span>${fx(b.runMult)}</span></div>`);
+        // What kind of work the period was: a small ring per author, plus the team.
+        const tipMix = (b) => {
+          const who = TEAM_ONLY ? [] : authors.filter((a) => b.by[a]);
+          const rows = who.map((a) => [first(a), b.by[a].types || {}]);
+          if (TEAM_ONLY || who.length > 1) rows.push(['Team', b.team.types || {}]);
+          if (!rows.some(([, m]) => typeTotal(m))) return '';
+          return (
+            `<div class="mixtip"><div class="row" style="color:var(--muted)"><span>commit mix</span><span></span></div>` +
+            rows
+              .map(
+                ([n, m]) =>
+                  `<div class="mixrow${n === 'Team' ? ' team' : ''}">${donut(m, 22)}<span class="mn">${esc(n)}</span><span class="mt">${mixText(m)}</span></div>`
+              )
+              .join('') +
+            '</div>'
+          );
+        };
+        // ---------- chart geometry ----------
+        const W = 1120,
+          M = { t: 14, r: 16, b: 34, l: 58 };
+        // The calendar interval a bucket covers, clipped to the chart's opening date: a
+        // day, the ISO week from its Monday, or the month / quarter / year.
+        function binSpan(b, from) {
+          const k = b.key;
+          let s, e;
+          if (group === 'weeks') {
+            s = parse(k);
+            e = addDays(s, 7);
+          } else if (group === 'months') {
+            const [y, m] = k.split('-').map(Number);
+            s = utc(y, m, 1);
+            e = utc(y, m + 1, 1);
+          } else if (group === 'quarters') {
+            const [y, q] = k.split('-Q').map(Number);
+            s = utc(y, 3 * q - 2, 1);
+            e = utc(y, 3 * q + 1, 1);
+          } else if (group === 'years') {
+            s = utc(Number(k), 1, 1);
+            e = utc(Number(k) + 1, 1, 1);
+          } else {
+            s = parse(k);
+            e = addDays(s, 1);
+          }
+          return [s < from ? from : s, e];
+        }
+        // Every view shares one x axis, and it is calendar time: from the chart's
+        // opening date to the end of the last bucket. A bucket sits centred on the
+        // interval it covers, as wide as that interval, so a day with no commits is a
+        // visible gap and the month rules fall exactly on the 1st.
+        function frame(el, H, bs, yDomain, yFmt, { ticks = 5, from }) {
+          const svg = h('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+          const pw = W - M.l - M.r,
+            ph = H - M.t - M.b;
+          const n = bs.length;
+          const spans = bs.map((b) => binSpan(b, from));
+          const t0 = from.getTime(),
+            t1 = spans[n - 1][1].getTime();
+          const xt = (dt) => M.l + ((dt.getTime() - t0) / (t1 - t0)) * pw;
+          const x = (i) => (xt(spans[i][0]) + xt(spans[i][1])) / 2;
+          const bw = (i) => {
+            const w = xt(spans[i][1]) - xt(spans[i][0]);
+            return Math.max(1, w - Math.min(4, w * 0.25));
+          };
+          const [y0, y1] = yDomain;
+          const y = (v) => M.t + ph - ((v - y0) / (y1 - y0)) * ph;
+          const grid = h('g', { class: 'grid' });
+          for (const v of niceTicks(y0, y1, ticks)) {
+            grid.append(h('line', { x1: M.l, x2: W - M.r, y1: y(v), y2: y(v) }));
+            grid.append(h('text', { x: M.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, yFmt(v)));
+          }
+          svg.append(grid);
+          const axis = h('g', { class: 'axis' });
+          axis.append(
+            h('line', { x1: M.l, x2: W - M.r, y1: y(Math.max(0, y0)), y2: y(Math.max(0, y0)) })
+          );
+          const days = (t1 - t0) / 86400000;
+          const every = [1, 2, 3, 7, 14, 28].find((s) => days / s <= 10) || Math.ceil(days / 10);
+          for (let dt = from; dt.getTime() < t1; dt = addDays(dt, every))
+            axis.append(
+              h('text', { x: xt(dt), y: H - 12, 'text-anchor': 'middle' }, auDay(isoOf(dt)))
+            );
+          svg.append(axis);
+          // A faint rule on the 1st of each month, for reading month-on-month progress.
+          // Returned for the caller to lay over its marks, so the rule stays visible.
+          const monthRules = h('g', {
+            stroke: 'var(--muted)',
+            'stroke-opacity': 0.3,
+            'stroke-width': 1,
+            'shape-rendering': 'crispEdges',
+          });
+          const nextMonth = (dt) => utc(dt.getUTCFullYear(), dt.getUTCMonth() + 2, 1);
+          for (let m = nextMonth(from); m.getTime() < t1; m = nextMonth(m)) {
+            const mx = xt(m);
+            monthRules.append(h('line', { x1: mx, x2: mx, y1: M.t, y2: y(Math.max(0, y0)) }));
+            monthRules.append(
+              h(
+                'text',
+                // In the top margin, clear of any label printed at a series' end.
+                { x: mx + 4, y: M.t - 3, fill: 'var(--muted)', stroke: 'none', 'font-size': 10 },
+                MONTH[m.getUTCMonth()]
+              )
+            );
+          }
+          return { svg, x, xt, bw, y, pw, ph, n, monthRules };
+        }
+        function niceTicks(lo, hi, count) {
+          const span = hi - lo,
+            raw = span / count,
+            p = Math.pow(10, Math.floor(Math.log10(raw)));
+          const stepC =
+            [1, 2, 2.5, 5, 10].map((m) => m * p).find((s) => span / s <= count) || p * 10;
+          const out = [];
+          for (let v = Math.ceil(lo / stepC) * stepC; v <= hi + 1e-9; v += stepC)
+            out.push(Math.round(v * 1e6) / 1e6 || 0);
+          return out;
+        }
+        function tooltip(el, svg, x, n, bs, html) {
+          const tip = el.querySelector('.tip');
+          bs.forEach((b, i) => {
+            // Each point owns the band out to the midpoints with its neighbours, so a
+            // time axis with uneven gaps still hovers the nearest point.
+            const left = i ? (x(i - 1) + x(i)) / 2 : M.l;
+            const right = i < n - 1 ? (x(i) + x(i + 1)) / 2 : W - M.r;
+            const hit = h('rect', {
+              class: 'hit',
+              x: left,
+              y: M.t,
+              width: right - left,
+              height: svg.viewBox.baseVal.height - M.t - M.b,
+            });
+            hit.addEventListener('mousemove', (ev) => {
+              tip.innerHTML = html(b);
+              tip.style.display = 'block';
+              const r = el.getBoundingClientRect();
+              let left = ev.clientX - r.left + 14,
+                top = ev.clientY - r.top + 12;
+              if (left + tip.offsetWidth > r.width)
+                left = ev.clientX - r.left - tip.offsetWidth - 14;
+              tip.style.left = left + 'px';
+              tip.style.top = top + 'px';
+            });
+            hit.addEventListener('mouseleave', () => {
+              tip.style.display = 'none';
+            });
+            svg.append(hit);
+          });
+        }
+
+        // The running average of the bars: cumulative lines ÷ cumulative buckets. Like
+        // the multiplier's, `seed` carries the lines and buckets of any history the
+        // chart does not draw, so over days the last point is the period's lines ÷ its
+        // Coding days tile.
+        const runningLines = (bs, seed) => {
+          let lines = seed.lines,
+            buckets = seed.buckets;
+          return bs.map((b) => {
+            lines += LV(b.team);
+            buckets += 1;
+            return lines / buckets;
+          });
+        };
+
+        function drawBars(el, bs, from, seed) {
+          el.querySelectorAll('svg').forEach((s) => s.remove());
+          if (!bs.length) return;
+          const H = 300;
+          const run = runningLines(bs, seed);
+          let lo = Math.min(0, ...run),
+            hi = Math.max(0, ...run);
+          for (const b of bs) {
+            let p = 0,
+              q = 0;
+            if (TEAM_ONLY) {
+              const v = LV(b.team);
+              if (v > 0) p = v;
+              else q = v;
+            } else
+              for (const a of authors) {
+                const v = LV(b.by[a]);
+                if (v > 0) p += v;
+                else q += v;
+              }
+            hi = Math.max(hi, p);
+            lo = Math.min(lo, q);
+          }
+          hi = hi || 1;
+          // A denser grid than the other charts: a day's bar is read against it directly.
+          const { svg, x, bw, y, n, monthRules } = frame(
+            el,
+            H,
+            bs,
+            [lo * 1.08, hi * 1.08],
+            (v) => fmt(v),
+            { ticks: 8, from }
+          );
+          bs.forEach((b, i) => {
+            let up = 0,
+              down = 0;
+            // Saturdays, Sundays, Queensland public holidays and anything before the
+            // start date keep the author's hue in a lighter shade of it.
+            const tone = (a) => (TEAM_ONLY ? 'var(--team)' : colorOf[a]);
+            const shade = (a) =>
+              b.off
+                ? { fill: tone(a), 'fill-opacity': 0.42, stroke: tone(a), 'stroke-width': 1 }
+                : { fill: tone(a) };
+            (TEAM_ONLY ? ['Team'] : authors).forEach((a) => {
+              const v = TEAM_ONLY ? LV(b.team) : LV(b.by[a]);
+              if (!v) return;
+              const gap = 2;
+              if (v > 0) {
+                const top = y(up + v),
+                  bot = y(up) - (up ? gap : 0);
+                if (bot - top > 0.5)
+                  svg.append(
+                    h('rect', {
+                      x: x(i) - bw(i) / 2,
+                      y: top,
+                      width: bw(i),
+                      height: Math.max(0.5, bot - top),
+                      ...shade(a),
+                    })
+                  );
+                up += v;
+              } else {
+                const top = y(down) + (down ? gap : 0),
+                  bot = y(down + v);
+                if (bot - top > 0.5)
+                  svg.append(
+                    h('rect', {
+                      x: x(i) - bw(i) / 2,
+                      y: top,
+                      width: bw(i),
+                      height: Math.max(0.5, bot - top),
+                      ...shade(a),
+                    })
+                  );
+                down += v;
+              }
+            });
+          });
+          svg.append(
+            h('path', {
+              d: run
+                .map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+                .join(''),
+              fill: 'none',
+              stroke: 'var(--ink)',
+              'stroke-width': 2,
+              'stroke-dasharray': '5 4',
+              'stroke-linejoin': 'round',
+              'stroke-linecap': 'round',
+            })
+          );
+          const last = run[run.length - 1];
+          svg.append(h('circle', { cx: x(n - 1), cy: y(last), r: 3.5, fill: 'var(--ink)' }));
+          svg.append(
+            h(
+              'text',
+              {
+                x: x(n - 1) - 10,
+                y: y(last) - 16,
+                'text-anchor': 'end',
+                fill: 'var(--ink)',
+                'font-size': 11,
+                'font-weight': 600,
+              },
+              `${last > 0 ? '+' : ''}${fmt(Math.round(last))} ${UNIT()} / coding ${groupLabel()} running average`
+            )
+          );
+          svg.append(monthRules);
+          tooltip(
+            el,
+            svg,
+            x,
+            n,
+            bs,
+            (b) =>
+              `${tipHead(b)}${tipRows(b)}<div class="row" style="color:var(--ink-2)"><span>running average</span><span>${run[bs.indexOf(b)] > 0 ? '+' : ''}${fmt(Math.round(run[bs.indexOf(b)]))}</span></div>${tipMix(b)}`
+          );
+          el.append(svg);
+        }
+
+        // Running totals are computed over ALL history, then sliced to the window, so
+        // a filtered view still shows where the codebase actually stood.
+        function cumulative() {
+          const run = Object.fromEntries(authors.map((a) => [a, 0]));
+          let engDays = 0,
+            team = 0;
+          const out = {};
+          for (const d of D.days) {
+            if (TEAM_ONLY) {
+              // No author rows to sum: the day's own team totals carry the lines, and
+              // `humans` carries the engineer-days (two people on one date count twice).
+              team += LV(d.team);
+              engDays += d.humans;
+            } else {
+              for (const a of authors) {
+                if (d.by[a]) {
+                  run[a] += isN() ? d.by[a].ncloc : d.by[a].loc;
+                  engDays += 1;
+                }
+              }
+              team = authors.reduce((s, a) => s + run[a], 0);
+            }
+            out[d.date] = { by: { ...run }, team, engDays, pace: engDays * BASE };
+          }
+          return out;
+        }
+        function drawCumulative(el, bs, from) {
+          el.querySelectorAll('svg').forEach((s) => s.remove());
+          if (!bs.length) return;
+          const cum = cumulative();
+          const at = (b) => cum[b.dates[b.dates.length - 1]];
+          // Where the totals stood when the chart opens: history before the opening
+          // date is not drawn, but it is still in every running total.
+          const prior = D.days.filter((d) => d.date < isoOf(from)).at(-1);
+          const H = 300;
+          let lo = 0,
+            hi = 1;
+          for (const b of bs) {
+            const c = at(b);
+            let p = 0,
+              q = 0;
+            for (const a of authors) {
+              const v = c.by[a];
+              if (v > 0) p += v;
+              else q += v;
+            }
+            hi = Math.max(hi, p, c.pace, TEAM_ONLY ? c.team : 0);
+            lo = Math.min(lo, q);
+          }
+          const { svg, x, xt, y, n, monthRules } = frame(
+            el,
+            H,
+            bs,
+            [lo * 1.08, hi * 1.08],
+            (v) => fmt(v),
+            { from }
+          );
+          // The series: a lead-in point on the opening date carrying the prior totals,
+          // then one point per bucket.
+          const pts = [
+            ...(prior ? [{ x: xt(from), c: cum[prior.date] }] : []),
+            ...bs.map((b, i) => ({ x: x(i), c: at(b) })),
+          ];
+          const stackAt = (c, upto) => {
+            let s = 0;
+            for (const a of authors) {
+              if (a === upto) break;
+              s += c.by[a];
+            }
+            return s;
+          };
+          const line = (v) =>
+            pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${y(v(p.c)).toFixed(1)}`).join('');
+          const band = (top, bot) =>
+            `M${pts.map((p) => `${p.x.toFixed(1)},${y(top(p.c)).toFixed(1)}`).join('L')}` +
+            `L${[...pts]
+              .reverse()
+              .map((p) => `${p.x.toFixed(1)},${y(bot(p.c)).toFixed(1)}`)
+              .join('L')}Z`;
+          if (TEAM_ONLY) {
+            svg.append(
+              h('path', {
+                d: band(
+                  (c) => c.team,
+                  () => 0
+                ),
+                fill: 'var(--team)',
+                'fill-opacity': 0.22,
+                stroke: 'none',
+              })
+            );
+          }
+          authors.forEach((a) => {
+            if (!pts.some((p) => p.c.by[a])) return;
+            svg.append(
+              h('path', {
+                d: band(
+                  (c) => stackAt(c, a) + c.by[a],
+                  (c) => stackAt(c, a)
+                ),
+                fill: colorOf[a],
+                'fill-opacity': 0.85,
+                stroke: 'none',
+              })
+            );
+          });
+          svg.append(monthRules);
+          svg.append(
+            h('path', {
+              d: line((c) => c.team),
+              fill: 'none',
+              stroke: 'var(--ink)',
+              'stroke-width': 1.5,
+              'stroke-linejoin': 'round',
+            })
+          );
+          svg.append(
+            h('path', {
+              d: line((c) => c.pace),
+              fill: 'none',
+              stroke: 'var(--muted)',
+              'stroke-width': 1.5,
+              'stroke-dasharray': '5 4',
+              'stroke-linejoin': 'round',
+            })
+          );
+          const last = at(bs[n - 1]);
+          svg.append(
+            h(
+              'text',
+              {
+                x: x(n - 1),
+                y: y(last.team) - 8,
+                'text-anchor': 'end',
+                fill: 'var(--ink-2)',
+                'font-size': 11,
+              },
+              `${fmt(last.team)} ${UNIT()} · ${fx(last.pace ? last.team / last.pace : 0)} of baseline pace`
+            )
+          );
+          tooltip(el, svg, x, n, bs, (b) => {
+            const c = at(b);
+            return (
+              `${tipHead(b)}<div class="row" style="color:var(--muted)"><span></span><span>to date · this period</span></div>` +
+              authors
+                .filter((a) => c.by[a])
+                .map(
+                  (a) =>
+                    `<div class="row"><span><i style="background:${colorOf[a]}"></i>${esc(first(a))}</span><span>${fmt(c.by[a])} · ${b.by[a] ? (LV(b.by[a]) > 0 ? '+' : '') + fmt(LV(b.by[a])) : '·'}</span></div>`
+                )
+                .join('') +
+              `<div class="row team"><span>Team</span><span>${fmt(c.team)} · ${LV(b.team) > 0 ? '+' : ''}${fmt(LV(b.team))}</span></div>` +
+              `<div class="row" style="color:var(--muted)"><span>baseline pace</span><span>${fmt(c.pace)} (${c.engDays} eng-days)</span></div>`
+            );
+          });
+          el.append(svg);
+        }
+
+        // The running average: cumulative lines ÷ (baseline × cumulative engineer-days).
+        // That is the headline tile's own formula evaluated at each point, so the last
+        // point equals the Force multiplier tile rather than merely resembling it.
+        // Per-period values are NOT averaged — a mean of ratios would not converge on it.
+        // `seed` carries the lines and engineer-days of any history the chart does not
+        // draw, so the average still runs from the first commit in the period.
+        const runningMult = (bs, seed) => {
+          let lines = seed.lines,
+            days = seed.days;
+          return bs.map((b) => {
+            lines += LV(b.team);
+            days += b.team.days;
+            return days > 0 ? Math.max(0, lines / (BASE * days)) : 0;
+          });
+        };
+
+        // A team multiplier is the mean of the author multipliers weighted by each
+        // author's share of the lines: teamMult = Σ (mult_a × share_a). So the stack
+        // is that sum drawn term by term — every segment is one author's contribution
+        // to the team figure, and the segments add up to it exactly. Multipliers
+        // themselves are never summed; that would be meaningless.
+        function contributions(b) {
+          // Team-only data has no author split: the bar is a single segment at the
+          // team multiplier, which is what the stack would have summed to anyway.
+          if (TEAM_ONLY) return { parts: { Team: b.teamMult }, total: b.teamMult, share: () => 1 };
+          const w = {};
+          let den = 0;
+          for (const a of authors) {
+            const o = b.by[a];
+            if (!o) continue;
+            const v = Math.max(0, LV(o));
+            w[a] = v;
+            den += v;
+          }
+          const parts = {};
+          let total = 0;
+          for (const a in w) {
+            const p = den > 0 ? MU(b.by[a]) * (w[a] / den) : 0;
+            parts[a] = p;
+            total += p;
+          }
+          return { parts, total, share: (a) => (den > 0 ? w[a] / den : 0) };
+        }
+        const tipMult = (b, c) =>
+          `${tipHead(b)}` +
+          `<div class="row" style="color:var(--muted)"><span></span><span>mult · share of lines</span></div>` +
+          (TEAM_ONLY
+            ? ''
+            : authors
+                .filter((a) => b.by[a])
+                .map(
+                  (a) =>
+                    `<div class="row"><span><i style="background:${colorOf[a]}"></i>${esc(first(a))}</span><span>${fx(MU(b.by[a]))} · ${(100 * c.share(a)).toFixed(1)}%</span></div>`
+                )
+                .join('')) +
+          `<div class="row team"><span>Team</span><span>${fx(b.teamMult)}</span></div>` +
+          (b.runMult === undefined
+            ? ''
+            : `<div class="row" style="color:var(--ink-2)"><span>running average</span><span>${fx(b.runMult)}</span></div>`) +
+          tipMix(b);
+
+        function drawMult(el, bs, from, seed) {
+          el.querySelectorAll('svg').forEach((s) => s.remove());
+          if (!bs.length) return;
+          const H = 260;
+          const run = runningMult(bs, seed);
+          run.forEach((v, i) => {
+            bs[i].runMult = v;
+          }); // the tooltip reads it back
+          const cs = bs.map(contributions);
+          const hi = Math.max(1, ...run, ...bs.map((b) => b.teamMult));
+          const { svg, x, bw, y, pw, n, monthRules } = frame(
+            el,
+            H,
+            bs,
+            [0, hi * 1.08],
+            (v) => v + 'x',
+            { from }
+          );
+          bs.forEach((b, i) => {
+            const c = cs[i];
+            if (!c.total) return; // a net-deletion period floors at 0
+            const tone = (a) => (TEAM_ONLY ? 'var(--team)' : colorOf[a]);
+            const shade = (a) =>
+              b.off
+                ? { fill: tone(a), 'fill-opacity': 0.42, stroke: tone(a), 'stroke-width': 1 }
+                : { fill: tone(a) };
+            let acc = 0;
+            (TEAM_ONLY ? ['Team'] : authors).forEach((a) => {
+              const v = c.parts[a];
+              if (!v) return;
+              const top = y(acc + v),
+                bot = y(acc) - (acc ? 2 : 0);
+              if (bot - top > 0.5)
+                svg.append(
+                  h('rect', {
+                    x: x(i) - bw(i) / 2,
+                    y: top,
+                    width: bw(i),
+                    height: Math.max(0.5, bot - top),
+                    ...shade(a),
+                  })
+                );
+              acc += v;
+            });
+          });
+          svg.append(
+            h('path', {
+              d: run
+                .map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+                .join(''),
+              fill: 'none',
+              stroke: 'var(--ink)',
+              'stroke-width': 2,
+              'stroke-dasharray': '5 4',
+              'stroke-linejoin': 'round',
+              'stroke-linecap': 'round',
+            })
+          );
+          const last = run[run.length - 1];
+          svg.append(h('circle', { cx: x(n - 1), cy: y(last), r: 3.5, fill: 'var(--ink)' }));
+          svg.append(
+            h(
+              'text',
+              {
+                x: x(n - 1) - 10,
+                y: y(last) - 16,
+                'text-anchor': 'end',
+                fill: 'var(--ink)',
+                'font-size': 11,
+                'font-weight': 600,
+              },
+              `${fx(last)} running average`
+            )
+          );
+          const peak = bs.reduce((p, b) => (b.teamMult > p.teamMult ? b : p), bs[0]);
+          const pi = bs.indexOf(peak);
+          svg.append(
+            h(
+              'text',
+              {
+                x: x(pi),
+                y: y(peak.teamMult) - 8,
+                'text-anchor': x(pi) > M.l + pw * 0.8 ? 'end' : 'middle',
+                fill: 'var(--ink-2)',
+                'font-size': 11,
+              },
+              `${peak.short} · ${fx(peak.teamMult)}`
+            )
+          );
+          svg.append(monthRules);
+          tooltip(el, svg, x, n, bs, (b, i) => tipMult(b, cs[bs.indexOf(b)]));
+          el.append(svg);
+        }
+
+        function drawTable(el, bs) {
+          const cell = (o) =>
+            !o
+              ? `<td class="dim">·</td><td class="dim">·</td><td class="dim">·</td>`
+              : `<td>${fmt(o.c)}</td><td class="${o.n < 0 ? 'neg' : ''}">${fmt(o.n)}</td><td>${fx(o.m)}</td>`;
+          const agg = {};
+          authors.forEach((a) => {
+            agg[a] = { c: 0, n: 0, days: 0 };
+          });
+          let tn = 0,
+            tc = 0,
+            eng = 0,
+            num = 0,
+            den = 0;
+          const rows = [...bs]
+            .reverse()
+            .map((b) => {
+              authors.forEach((a) => {
+                if (b.by[a]) {
+                  agg[a].c += b.by[a].commits;
+                  agg[a].n += LV(b.by[a]);
+                  agg[a].days += b.by[a].days;
+                }
+              });
+              tn += LV(b.team);
+              tc += b.commits;
+              eng += b.team.days;
+              return (
+                `<tr><td>${esc(b.row)}</td>` +
+                authors
+                  .map((a) =>
+                    cell(b.by[a] ? { c: b.by[a].commits, n: LV(b.by[a]), m: MU(b.by[a]) } : null)
+                  )
+                  .join('') +
+                (b.team.days ? cell({ c: b.commits, n: LV(b.team), m: b.teamMult }) : cell(null)) +
+                '</tr>'
+              );
+            })
+            .join('');
+          const amult = (a) => (agg[a].days ? Math.max(0, agg[a].n / (BASE * agg[a].days)) : 0);
+          authors.forEach((a) => {
+            const w = Math.max(0, agg[a].n);
+            num += amult(a) * w;
+            den += w;
+          });
+          el.innerHTML = `<table>
+      <thead>
+        <tr><th></th>${authors.map((a) => `<th class="grp" colspan="3"><i style="background:${colorOf[a]}"></i>${esc(a)}</th>`).join('')}<th class="grp" colspan="3">Team</th></tr>
+        <tr><th>${group === 'days' ? 'Date' : 'Period'}</th>${authors.map(() => `<th>Commits</th><th>${UNIT()}</th><th>Mult</th>`).join('')}<th>Commits</th><th>${UNIT()}</th><th>Mult</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td>Aggregate</td>${authors.map((a) => cell({ c: agg[a].c, n: agg[a].n, m: amult(a) })).join('')}${cell({ c: tc, n: tn, m: den ? num / den : 0 })}</tr>
+        <tr class="days"><td>days</td>${authors.map((a) => `<td colspan="3">${agg[a].days}</td>`).join('')}<td colspan="3">${eng} engineer-days</td></tr>
+      </tfoot></table>
+      <p class="note" style="margin-top:8px">Multipliers divide by engineer-days inside the period, never by the number of periods.</p>`;
+        }
+
+        // The kind of work each author did over the period, and the team. One card
+        // each, wrapping, so a team of six reads as well as a team of two.
+        function mixSection(s) {
+          const who = authors.filter((a) => s.by[a]);
+          const cards = who.map((a) => [a, s.by[a].types, colorOf[a]]);
+          if (who.length > 1) cards.push(['Team', s.types, null]);
+          if (!cards.some(([, m]) => typeTotal(m))) return '';
+          const card = ([name, m, c]) => {
+            const total = typeTotal(m);
+            const center = `<text x="50%" y="47%" text-anchor="middle" class="dc-n">${fmt(total)}</text><text x="50%" y="63%" text-anchor="middle" class="dc-k">commit${total === 1 ? '' : 's'}</text>`;
+            return `<div class="mixcard${c ? '' : ' team'}">
+              <div class="mixname">${c ? `<i style="background:${c}"></i>` : ''}${esc(name)}</div>
+              <div class="mixbody">${donut(m, 104, center)}
+                <table class="mixtab"><tbody>${TYPES.map(
+                  (t) =>
+                    `<tr${m[t.k] ? '' : ' class="dim"'}><td>${swatch(t.c)}${esc(t.label)}</td><td>${fmt(m[t.k] || 0)}</td><td>${total ? Math.round((100 * (m[t.k] || 0)) / total) : 0}%</td></tr>`
+                ).join('')}</tbody></table>
+              </div></div>`;
+          };
+          return `<div class="mixhead"><h3>Commit mix</h3><div class="sub">What kind of work, from each commit's Conventional Commits type, over ${esc(periodLabel())} · Refactor includes perf and style · Docs &amp; chore is everything else (docs, chore, ci, build…)</div></div>
+      <div class="mixgrid">${cards.map(card).join('')}</div>`;
+        }
+
+        // ---------- paint ----------
+        // Four panels fold away; closed by default, and the choice sticks.
+        const accOpen = (k) => store.get('acc.' + k, '0') === '1';
+        const acc = (k, title, sub, body) => `
+    <details class="card acc" data-acc="${k}"${accOpen(k) ? ' open' : ''}>
+      <summary><span class="ah"><h2>${title}</h2><div class="sub">${sub}</div></span></summary>
+      ${body}
+    </details>`;
+
+        const periodLabel = () =>
+          periodAll
+            ? 'all history'
+            : `the last ${periodN} ${periodN === 1 ? periodUnit.replace(/s$/, '') : periodUnit}`;
+        const groupLabel = () =>
+          ({ days: 'day', weeks: 'week', months: 'month', quarters: 'quarter', years: 'year' })[
+            group
+          ];
+
+        function paint() {
+          const days = windowDays();
+          const bs = aggregate(days);
+          const s = summary(days);
+          const t = D.tree,
+            f = D.force;
+          const whole = periodAll;
+          // Over all history the headline is the working tree (it includes work not
+          // yet committed); inside a window only committed history can answer.
+          const lines = whole ? (isN() ? t.ncloc : t.total) : s.lines;
+          const engDays = whole ? f.engDays : s.engDays;
+          const mult = engDays ? Math.max(0, lines / (BASE * engDays)) : 0;
+          const delta = whole ? (isN() ? t.ncloc - t.nclocHistory : t.total - t.history) : 0;
+
+          app.innerHTML = `
+    <div class="bar">
+      <div class="ctl"><label for="pn">Period</label>
+        <button type="button" id="pall" class="pill" aria-pressed="${periodAll}">All history</button>
+        <span class="lastwrap">last
+          <input type="number" id="pn" min="1" max="999" value="${periodN}" aria-label="how many">
+          <select id="punit" aria-label="period unit">
+            ${['days', 'weeks', 'months', 'years'].map((u) => `<option value="${u}"${u === periodUnit ? ' selected' : ''}>${u}</option>`).join('')}
+          </select>
+        </span>
+      </div>
+      <div class="ctl"><label for="pgroup">Group by</label>
+        <select id="pgroup">
+          ${['days', 'weeks', 'months', 'quarters', 'years'].map((g) => `<option value="${g}"${g === group ? ' selected' : ''}>${g}</option>`).join('')}
+        </select>
+      </div>
+      <div class="seg" id="metric" role="group" aria-label="Line metric">
+        <button type="button" data-metric="loc" aria-pressed="${!isN()}">Raw lines</button>
+        <button type="button" data-metric="ncloc" aria-pressed="${isN()}">ncloc · code only</button>
+      </div>
+    </div>
+    <header>
+      <h1>Agentic Engineering Dashboard</h1>
+      <span class="sub">${esc(D.repo)} @ <code>${esc(D.head)}</code></span>
+      <span class="meta"><b class="stamp">Last updated ${esc(stamp(D.generatedAt))}</b><br />${esc(ago(D.generatedAt))} · cache ${esc(D.cache.state)}${D.cache.frozenThrough ? ', frozen through ' + esc(D.cache.frozenThrough) : ''}</span>
+    </header>
+    <p class="note">Showing <b>${esc(periodLabel())}</b>${whole ? '' : ` — ${bs.length ? esc(bs[0].dates[0]) + ' to ' + esc(lastDate) : 'no commits'}`}, grouped by ${esc(groupLabel())}, measured in ${isN() ? 'ncloc (code lines only)' : 'raw lines'}. Every figure on this page follows these three dials${whole ? '' : '; the tiles count what was committed inside the window'}.</p>
+    <section class="tiles">
+      <div class="tile"><div class="k">Force multiplier</div><div class="v hero">${fx(mult)}</div><div class="n">${fmt(lines)} ${UNIT()} ÷ (${BASE} × ${engDays} engineer-days)</div></div>
+      <div class="tile"><div class="k">${isN() ? 'Code lines (ncloc)' : 'Functional LOC'}</div><div class="v">${fmt(lines)}</div><div class="n">${whole ? `${fmt(isN() ? t.nclocProduct : t.product)} product + ${fmt(isN() ? t.nclocTest : t.test)} test + ${fmt(isN() ? t.nclocConfig : t.config)} config + ${fmt(isN() ? t.nclocPipeline : t.pipeline)} pipeline + ${fmt(isN() ? t.nclocInfra : t.infra)} infra` : `net, committed in ${esc(periodLabel())}`}</div></div>
+      <div class="tile"><div class="k">Output in engineer-days</div><div class="v">${fmt(Math.round(lines / BASE))}</div><div class="n">at ${BASE} ${UNIT()} / engineer / day</div></div>
+      <div class="tile"><div class="k">Engineers</div><div class="v">${whole ? f.engineers : s.engineers}</div><div class="n">${TEAM_ONLY ? 'counted, not named' : (whole ? authors : authors.filter((a) => s.by[a])).map(esc).join(', ') || '—'}</div></div>
+      <div class="tile"><div class="k">Coding days</div><div class="v">${whole ? f.codingDays : s.codingDays}</div><div class="n">${engDays} engineer-days${engDays > (whole ? f.codingDays : s.codingDays) ? ' · two people on one date count twice' : ''}</div></div>
+    </section>
+    ${delta !== 0 ? `<p class="note warn">Committed history nets ${fmt(isN() ? t.nclocHistory : t.history)} ${UNIT()} against ${fmt(isN() ? t.ncloc : t.total)} in the working tree (Δ ${delta > 0 ? '+' : ''}${fmt(delta)}): uncommitted work, or files moved and rewritten. The headline uses the working tree; the per-${TEAM_ONLY ? 'period' : 'author'} figures come from history.</p>` : ''}
+    <section class="card">
+      <div class="card-head"><div><h2 id="c1title"></h2><div class="sub" id="c1sub"></div></div>
+        <div class="seg" id="c1view" role="group" aria-label="What to plot">
+          <button type="button" data-view="lines">${isN() ? 'ncloc' : 'Lines'}</button>
+          <button type="button" data-view="mult">Multiplier</button>
+          <button type="button" data-view="cumulative">Cumulative</button>
+        </div>
+        <div class="legend">${authors.map((a) => `<span><i style="background:${colorOf[a]}"></i>${esc(a)}</span>`).join('')}<span id="c1pace"><i class="line" style="background:var(--muted)"></i>Baseline pace</span><span id="c1run"><i class="line" style="background:var(--ink)"></i>Running average</span><span id="c1off"><i style="background:${colorOf[authors[0]]};opacity:0.42;box-shadow:inset 0 0 0 1px ${colorOf[authors[0]]}"></i>Non-business day</span></div></div>
+      <div class="chart" id="c1"><div class="tip"></div></div>
+    </section>
+    ${
+      TEAM_ONLY
+        ? ''
+        : acc(
+            'author',
+            'By author',
+            `Net ${isN() ? 'ncloc' : 'functional LOC'} over ${esc(periodLabel())} · identity keyed by email`,
+            `
+      <div class="scroll"><table>
+        <thead><tr><th>Author</th><th>Commits</th><th>${isN() ? 'ncloc' : 'Functional LOC'}</th><th>Days</th><th>Multiplier</th><th>Since</th><th>Share</th></tr></thead>
+        <tbody>${
+          authors
+            .filter((a) => s.by[a])
+            .map((a) => {
+              const o = s.by[a],
+                since = (D.authors.find((x) => x.name === a) || {}).since || o.since;
+              return `<tr><td><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${colorOf[a]};margin-right:8px"></i>${esc(a)}</td><td>${fmt(o.commits)}</td><td>${fmt(LV(o))}</td><td>${o.days}</td><td>${fx(MU(o))}</td><td>${esc(since)}</td><td>${((100 * Math.max(LV(o), 0)) / Math.max(s.lines, 1)).toFixed(1)}%</td></tr>`;
+            })
+            .join('') || '<tr><td colspan="7" class="dim">no commits in this period</td></tr>'
+        }</tbody>
+        <tfoot><tr><td>Team</td><td>${fmt(s.commits)}</td><td>${fmt(s.lines)}</td><td>${s.engDays}</td><td>${fx(s.teamMult)}</td><td colspan="2" style="text-align:left;font-weight:400;color:var(--muted)">days = engineer-days · multiplier = contribution-weighted</td></tr></tfoot>
+      </table></div>
+      ${mixSection(s)}`
+          )
+    }
+    ${acc(
+      'period',
+      `By ${esc(groupLabel())}`,
+      TEAM_ONLY
+        ? `Newest first · the team's commits, ${UNIT()} and multiplier · “·” = no commit`
+        : `Newest first · commits, ${UNIT()} and multiplier per author, plus the team · “·” = no commit`,
+      `
+      <div class="scroll" id="daytable"></div>`
+    )}
+    <div class="two">
+      ${acc(
+        'language',
+        'By language',
+        'Current tree · detected from the files · not filtered by period',
+        `
+        <div class="scroll"><table>
+          <thead><tr><th>Language</th><th>Files</th><th>${isN() ? 'ncloc' : 'Functional LOC'}</th><th>Share</th></tr></thead>
+          <tbody>${(D.languages || []).map((l) => `<tr><td>${esc(l.name)}</td><td>${fmt(l.files)}</td><td>${fmt(LV(l))}</td><td>${((100 * LV(l)) / Math.max(isN() ? t.ncloc : t.total, 1)).toFixed(1)}%</td></tr>`).join('')}</tbody>
+          <tfoot><tr><td>Total</td><td>${fmt((D.languages || []).reduce((x, l) => x + l.files, 0))}</td><td>${fmt(isN() ? t.ncloc : t.total)}</td><td>100%</td></tr></tfoot>
+        </table></div>`
+      )}
+      ${acc(
+        'workspace',
+        'By workspace',
+        'Current tree · folders with a package manifest · a file counts in its deepest package',
+        `
+        <div class="scroll"><table>
+          <thead><tr><th>Workspace</th><th>${isN() ? 'ncloc' : 'Functional LOC'}</th><th>Share</th></tr></thead>
+          <tbody>${D.workspaces.map((w) => `<tr><td>${esc(w.name)}</td><td>${fmt(LV(w))}</td><td>${((100 * LV(w)) / Math.max(isN() ? t.ncloc : t.total, 1)).toFixed(1)}%</td></tr>`).join('')}
+            <tr><td class="dim">(everything not under a listed package)</td><td class="dim">${fmt((isN() ? t.ncloc : t.total) - D.workspaces.reduce((x, w) => x + LV(w), 0))}</td><td class="dim">${((100 * ((isN() ? t.ncloc : t.total) - D.workspaces.reduce((x, w) => x + LV(w), 0))) / Math.max(isN() ? t.ncloc : t.total, 1)).toFixed(1)}%</td></tr></tbody>
+          <tfoot><tr><td>Total</td><td>${fmt(isN() ? t.ncloc : t.total)}</td><td>100%</td></tr></tfoot>
+        </table></div>
+        <p class="note" style="margin-top:8px">UI assets (css/html): ${fmt(t.ui)} lines, reported but not counted.</p>`
+      )}
+    </div>
+    ${acc(
+        'scope',
+        'Scope',
+        'What these numbers count',
+        `
+        <dl class="scope">
+          <dt>Metric</dt><dd>${
+            isN()
+              ? '<b>ncloc</b> — a physical line counts only if it holds a character that is neither whitespace nor part of a comment. A trailing comment or a lone <code>}</code> still counts; blank and comment-only lines do not. Sonar&rsquo;s rule. <code>//</code> and <code>/* */</code> open a comment in the C family (C, C++, Objective-C, Swift, Go, Rust, Java, Kotlin, C#, JS/TS, shaders); <code>//</code> in Zig; <code>#</code> in Python, Ruby, YAML, Dockerfiles, Make and CMake; both in Terraform, Nix and PHP; <code>--</code> in Lua and Haskell. Python docstrings count as code.'
+              : '<b>Raw lines</b> — every physical line in a counted file, blanks and comments included.'
+          }</dd>
+          <dt>Languages</dt><dd>Detected from the files, not configured: every programming language the counter knows that this repository holds (the By language table).</dd>
+          <dt>Counted</dt><dd>The product surface, aggregated as product + test + config + pipeline + infrastructure. Config, pipeline and infrastructure count for the same reason tests do: without them the product is fragile and cannot move at speed with confidence.</dd>
+          <dt>Product</dt><dd>Executable code. A <code>scripts/</code> directory inside a package is that package&rsquo;s code and counts.</dd>
+          <dt>Test</dt><dd>Code at a test path: <code>tests/</code> <code>test/</code> <code>spec/</code> <code>__tests__/</code> <code>*Tests/</code> <code>e2e/</code> <code>fixtures/</code>; <code>.test.</code> <code>.spec.</code> <code>.setup.</code>; <code>_test.</code> <code>_spec.</code>; <code>test_*.py</code> <code>conftest.py</code>; <code>*Test.java</code> <code>*Tests.swift</code>. Tests inline in a source file (Zig, Rust) count as product.</dd>
+          <dt>Config</dt><dd>Build and tool configuration written as code: Makefile, CMake, <code>build.zig</code>, <code>Package.swift</code>, <code>*.gradle</code>, <code>*.config.*</code>, <code>.*rc.js</code>, Nix, Bazel, <code>setup.py</code>, <code>build.rs</code>.</dd>
+          <dt>Pipeline</dt><dd>CI/CD: <code>.github/</code>, <code>.gitlab-ci.yml</code>, <code>.circleci/</code>, <code>Jenkinsfile</code>, <code>.buildkite/</code>, Azure Pipelines, <code>fastlane/</code> and the like.</dd>
+          <dt>Infrastructure</dt><dd>Terraform and HCL, Dockerfiles, compose files, k8s and Helm, <code>infra/</code> <code>deploy/</code> <code>terraform/</code> <code>cdk/</code> <code>pulumi/</code> trees, <code>render.yaml</code>.</dd>
+          <dt>Not the team&rsquo;s code</dt><dd>Vendored and generated code (<code>vendor/</code> <code>third_party/</code> <code>node_modules/</code> <code>Pods/</code>, <code>*.min.js</code> <code>*.pb.go</code> <code>generated/</code>, and whatever <code>.gitattributes</code> marks <code>linguist-vendored</code>, <code>-generated</code> or <code>-documentation</code>); lockfiles; <code>docs/</code> <code>examples/</code> <code>samples/</code>.</dd>
+          <dt>Checked against</dt><dd>the ncloc rule mirrors SonarQube&rsquo;s; on a large TypeScript repo the two agreed within 0.15%.</dd>
+          <dt>Reported, not counted</dt><dd><code>.css</code> <code>.scss</code> <code>.html</code></dd>
+          <dt>Excluded</dt><dd>Data and prose formats (<code>.json</code> <code>.toml</code> <code>.xml</code> <code>.md</code> <code>.txt</code>), shell scripts, YAML outside pipelines and infrastructure, and anything gitignored</dd>
+          <dt>Authors</dt><dd>keyed by email (<code>LOC_AUTHOR_MAP</code>); the release bot and every GitHub <code>[bot]</code> account are dropped from the walk entirely, so no figure here counts or shows them</dd>
+          <dt>Engineer-days</dt><dd>${esc(f.how)}${whole ? '' : ', counted inside the selected period'}</dd>
+          <dt>Team multiplier</dt><dd>mean of the author multipliers weighted by share of lines, never total ÷ headcount; a negative share weighs 0</dd>
+          <dt>Floors</dt><dd>a net-deletion period shows its negative lines but a 0.0x multiplier</dd>
+        </dl>`
+      )}`;
+
+          // --- wire the dials ---
+          const pall = document.getElementById('pall');
+          pall.onclick = () => {
+            periodAll = !periodAll;
+            store.set('periodAll', periodAll ? '1' : '0');
+            paint();
+          };
+          const pn = document.getElementById('pn');
+          const commitN = () => {
+            const v = Math.max(1, Math.min(999, Number(pn.value) || 1));
+            periodN = v;
+            periodAll = false;
+            store.set('periodN', v);
+            store.set('periodAll', '0');
+            paint();
+          };
+          pn.onchange = commitN;
+          pn.onkeydown = (e) => {
+            if (e.key === 'Enter') commitN();
+          };
+          document.getElementById('punit').onchange = (e) => {
+            periodUnit = e.target.value;
+            periodAll = false;
+            store.set('periodUnit', periodUnit);
+            store.set('periodAll', '0');
+            paint();
+          };
+          document.getElementById('pgroup').onchange = (e) => {
+            group = e.target.value;
+            store.set('group', group);
+            paint();
+          };
+          [...document.querySelectorAll('#metric button')].forEach((b) => {
+            b.onclick = () => {
+              metric = b.dataset.metric;
+              store.set('metric', metric);
+              paint();
+            };
+          });
+          [...document.querySelectorAll('#c1view button')].forEach((b) => {
+            b.setAttribute('aria-pressed', String(b.dataset.view === view));
+            b.onclick = () => {
+              view = b.dataset.view;
+              store.set('view', view);
+              paint();
+            };
+          });
+          document.querySelector('.lastwrap').classList.toggle('off', periodAll);
+          [...document.querySelectorAll('details.acc')].forEach((d) => {
+            d.addEventListener('toggle', () =>
+              store.set('acc.' + d.dataset.acc, d.open ? '1' : '0')
+            );
+          });
+
+          const G = groupLabel(),
+            U = UNIT();
+          document.getElementById('c1title').textContent =
+            view === 'mult'
+              ? `Multiplier per ${G}`
+              : view === 'cumulative'
+                ? `Cumulative ${U}`
+                : `Net ${isN() ? 'ncloc' : 'functional LOC'} per ${G}`;
+          document.getElementById('c1sub').textContent = TEAM_ONLY
+            ? view === 'mult'
+              ? `The team multiplier for each ${G} · dashed = the running average, which ends on the headline figure`
+              : view === 'cumulative'
+                ? `Running total from the first commit · dashed = what ${BASE} ${U} / engineer / day would have reached`
+                : `The team's net total per ${G} · a bar below the baseline is a net-deletion ${G} · dashed = the running average per coding ${G}`
+            : view === 'mult'
+              ? `Each segment is one author's multiplier weighted by their share of the lines, so the bar equals the team multiplier`
+              : view === 'cumulative'
+                ? `Running total from the first commit, stacked by author · dashed = what ${BASE} ${U} / engineer / day would have reached`
+                : `Stacked by author · a bar below the baseline is a net-deletion ${G} · dashed = the running average per coding ${G}`;
+          document.getElementById('c1sub').textContent +=
+            ` · drawn from ${auDay(chartFrom())}/${chartFrom().slice(2, 4)}`;
+          document.getElementById('c1pace').hidden = view !== 'cumulative';
+          document.getElementById('c1run').hidden = view === 'cumulative';
+          document.getElementById('c1off').hidden = view === 'cumulative' || group !== 'days';
+          if (!bs.length) {
+            document.getElementById('c1').innerHTML =
+              '<div class="empty">No commits in this period.</div>';
+            document.getElementById('daytable').innerHTML = '';
+            return;
+          }
+          drawTable(document.getElementById('daytable'), bs);
+          const c1 = document.getElementById('c1');
+          const fromIso = chartFrom(),
+            from = parse(fromIso);
+          const drawn = aggregate(days.filter((d) => d.date >= fromIso));
+          if (!drawn.length) {
+            c1.innerHTML = `<div class="empty">No commits since ${auDay(fromIso)}/${fromIso.slice(0, 4)}.</div>`;
+            return;
+          }
+          const hidden = days.filter((d) => d.date < fromIso);
+          const seed = {
+            lines: hidden.reduce((s, d) => s + LV(d.team), 0),
+            days: hidden.reduce((s, d) => s + d.humans, 0),
+          };
+          if (view === 'cumulative') drawCumulative(c1, drawn, from);
+          else if (view === 'mult') drawMult(c1, drawn, from, seed);
+          // Every drawn bucket is also a period bucket, so the rest are the undrawn ones.
+          else drawBars(c1, drawn, from, { lines: seed.lines, buckets: bs.length - drawn.length });
+        }
+
+        paint();
+      })();
+    </script>
+  </body>
+</html>

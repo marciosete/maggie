@@ -398,6 +398,8 @@ extension Ghostty {
             // its replies, behind the capture proxy while requests are captured.
             surface_cfg.environmentVariables.merge(SystemPromptCapture.shared.environment) { current, _ in current }
             ClaudeStreams.shared.addEnvironment(to: &surface_cfg)
+            // Claude Code there has the commands Maggie ships.
+            ClaudePlugin.addEnvironment(to: &surface_cfg)
             // A new session starts the chosen agent; a restored one resumes its own.
             AgentStart.shared.apply(to: &surface_cfg)
             let surface = surface_cfg.withCValue(view: self) { surface_cfg_c in

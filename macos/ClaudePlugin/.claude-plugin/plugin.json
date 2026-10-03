@@ -1,0 +1,6 @@
+{
+  "name": "maggie",
+  "description": "Commands Maggie gives every Claude Code session it starts",
+  "version": "1.0.0",
+  "author": { "name": "Marcio Sete" }
+}
