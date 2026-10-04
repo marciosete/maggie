@@ -79,8 +79,23 @@ struct TerminalCommandPaletteView: View {
         // Sort the rest. We replace ":" with a character that sorts before space
         // so that "Foo:" sorts before "Foo Bar:". Use sortKey as a tie-breaker
         // for stable ordering when titles are equal.
-        options.append(contentsOf: sortedTerminalPaletteOptions(jumpOptions + terminalOptions))
+        options.append(contentsOf: sortedTerminalPaletteOptions(jumpOptions + terminalOptions + claudeOptions))
         return options
+    }
+
+    /// The commands of Maggie's Claude Code plugin, when this terminal runs Claude Code.
+    private var claudeOptions: [CommandOption] {
+        guard ClaudePlugin.canRun(in: surfaceView) else { return [] }
+        return ClaudePlugin.commands.map { command in
+            CommandOption(
+                title: "\(ClaudePluginMenu.title): \(command.title)",
+                subtitle: command.slashCommand,
+                description: command.description,
+                leadingIcon: ClaudePluginMenu.symbol(for: command)
+            ) {
+                ClaudePlugin.run(command, in: surfaceView)
+            }
+        }
     }
 
     /// Commands for installing or canceling available updates.

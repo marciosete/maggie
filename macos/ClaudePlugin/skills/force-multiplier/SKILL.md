@@ -45,6 +45,7 @@ It takes no arguments: the baseline is always derived from history.
 
   Every GitHub `[bot]` account (Dependabot and the like) is dropped automatically: bots carry no LOC, earn no engineer-days and appear in no table.
 - **TEAM is contribution-weighted.** The team multiplier (per day and in aggregate) is the mean of the author multipliers, weighted by each author's share of the lines. It is never total ÷ headcount, so a part-timer cannot halve the team figure just by being present. A negative share weighs 0.
+- **Merged branches are credited with what landed.** Each merge on the default branch is held to its own diff against its first parent; the branch commits it brought in share that figure by how many lines each changed. Lines a branch added and its merge then dropped (a stray snapshot, a conflict resolution) count for nobody, so history nets to the working tree.
 - **Engineer-days, not engineers × days.** The baseline is the sum, over human authors, of each author's distinct commit dates. An engineer who joins on day 40 adds one engineer-day, not forty.
 - **Per-day multiplier floors at 0.** A net-deletion day prints its negative net LOC (honest) but a `0.0x` multiplier, never a negative one.
 - **Past days are cached** in `.git/loc/cache.tsv` (per machine, never in the work tree). Every day before today is frozen, and only history from the newest cached day onward is re-walked.
@@ -92,6 +93,6 @@ Do NOT paste the tables into the terminal. Reply with:
   - State the baseline assumption actually used (engineer-days = the sum of each author's distinct commit dates).
   - Flag it only if:
     - an assumption looks off (e.g. coding days = 1 because every commit landed on the same date), or
-    - the reconciliation "note:" line appears (history net ≠ working tree: uncommitted work in flight, or changes made inside merge commits, which history cannot attribute).
+    - the reconciliation "note:" line shows a large gap (history net ≠ working tree, meaning uncommitted work is in flight). A gap of a few dozen lines on a large repository is noise; say so rather than flagging it.
 
 Trust the script's numbers. Do not recount yourself.

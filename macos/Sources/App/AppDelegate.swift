@@ -243,6 +243,8 @@ class AppDelegate: NSObject,
         // Add the tab sidebar items to the View menu.
         installTabSidebarMenuItems()
         installSettingsMenuItem()
+        // The commands of Maggie's Claude Code plugin get a menu of their own.
+        MainActor.assumeIsolated { ClaudePluginMenu.shared.install() }
 
         // Keep the open windows and tabs saved so they can be opened again, and offer the
         // kept versions in the File menu, after the close items.

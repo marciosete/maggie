@@ -56,6 +56,9 @@
 #   LOC_AUTHOR_MAP='a@x.com=Ann Lee;ann@home.com=Ann Lee'  merge identities by email
 #
 set -uo pipefail
+# Every path git prints here is compared with the classifier and the disk, so
+# git must print it as it is, not with its non-ASCII bytes escaped.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=false
 # The page ships beside this script; find it before leaving the caller's directory.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || { echo '  ! not inside a git repository' >&2; exit 1; }
@@ -343,6 +346,35 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
   local attrs; attrs=$(mktemp)
   printf '%s diff\n' "${PATHSPECS[@]}" > "$attrs"
   add_linguist_history "$since"
+  # A merge's own changes never show in `git log -p`: lines a branch added and
+  # its merge then dropped would count forever (2026-10-04: a branch committed
+  # 1.4M lines of .jjconflict-* snapshots that a merge threw away). So every
+  # merge on the default branch's first-parent line is held to what it landed —
+  # its diff against its first parent — and the branch commits it brought in
+  # are credited with exactly that: the difference from their own sum is spread
+  # over them by how many counted lines each changed (on the merge itself when
+  # they changed none). History then nets to the tree, and a branch's authors
+  # keep its lines. A repository that squash-merges has nothing to correct.
+  #
+  # "commit<TAB>merge" for every commit a first-parent merge brought in: walk
+  # the first-parent line oldest first, and give each merge whatever its other
+  # parents reach that no earlier commit has claimed.
+  local owners; owners=$(mktemp)
+  git log --format='%H %P' 2>/dev/null | awk -v head="$(git rev-parse HEAD 2>/dev/null)" '
+    { n = split($0, F, " "); np[F[1]] = n - 1; for (i = 2; i <= n; i++) par[F[1], i - 1] = F[i] }
+    END {
+      m = 0; h = head
+      while (h != "") { fp[h]; chain[++m] = h; h = ((h, 1) in par) ? par[h, 1] : "" }
+      for (k = m; k >= 1; k--) {
+        M = chain[k]; if (np[M] < 2) continue
+        top = 0; for (i = np[M]; i >= 2; i--) st[++top] = par[M, i]
+        while (top > 0) {
+          x = st[top--]; if ((x in fp) || (x in own)) continue
+          own[x] = M; print x "\t" M
+          for (i = 1; i <= np[x]; i++) st[++top] = par[x, i]
+        }
+      }
+    }' > "$owners"
   # committer date >= author date, so --since on the committer clock is a safe
   # superset; the exact author-date cut happens in awk.
   {
@@ -350,18 +382,26 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
     # including ones that touched no counted file.
     # stream 2 (#C): the patch itself, limited to the counted languages so the
     # walk stays cheap. --unified=0 emits only changed lines, no context.
+    # --full-history keeps a branch commit whose merge later dropped its work.
+    # stream 3 (#M): what each first-parent merge landed, against its first parent.
     if [[ -n "$since" ]]; then
-      git log --since="$since 00:00:00" --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%s' --date=short
+      git log --since="$since 00:00:00" --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%H%x09%s' --date=short
       printf '\n'
-      git -c core.attributesFile="$attrs" log --since="$since 00:00:00" -p --unified=0 --no-renames \
-        --pretty=format:'#C%x09%ad%x09%aE%x09%aN' --date=short -- "${PATHSPECS[@]}"
+      git -c core.attributesFile="$attrs" log --since="$since 00:00:00" --full-history -p --unified=0 --no-renames \
+        --pretty=format:'#C%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
+      printf '\n'
+      git -c core.attributesFile="$attrs" log --since="$since 00:00:00" --first-parent --merges --diff-merges=first-parent \
+        -p --unified=0 --no-renames --pretty=format:'#M%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
     else
-      git log --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%s' --date=short
+      git log --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%H%x09%s' --date=short
       printf '\n'
-      git -c core.attributesFile="$attrs" log -p --unified=0 --no-renames \
-        --pretty=format:'#C%x09%ad%x09%aE%x09%aN' --date=short -- "${PATHSPECS[@]}"
+      git -c core.attributesFile="$attrs" log --full-history -p --unified=0 --no-renames \
+        --pretty=format:'#C%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
+      printf '\n'
+      git -c core.attributesFile="$attrs" log --first-parent --merges --diff-merges=first-parent \
+        -p --unified=0 --no-renames --pretty=format:'#M%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
     fi
-  } 2>/dev/null | awk -F'\t' -v since="$since" -v amap="$AUTHOR_MAP" "$AWK_RULES"' 
+  } 2>/dev/null | LOC_OWNERS="$owners" awk -F'\t' -v since="$since" -v amap="$AUTHOR_MAP" "$AWK_RULES"'
     # The Conventional Commits type of a subject ("fix(harness)!: ..." -> fix);
     # anything else (a merge, a free-form message) is "other".
     function ctype(subj,   t) { if (match(subj, /^[a-z]+(\([^)]*\))?!?:/)) { t=substr(subj, 1, RLENGTH); sub(/[(!:].*$/, "", t); return t } return "other" }
@@ -370,21 +410,31 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
       for (i=1;i<=n;i++) { if (P[i]=="") continue; split(P[i], kv, ":"); if (kv[1]==t) { kv[2]++; hit=1 }; out=out (out==""?"":",") kv[1] ":" kv[2] }
       return hit ? out : out (out==""?"":",") t ":1" }
     function author(email, name) { return (email in m) ? m[email] : (index(email "\t" name, "[bot]") ? "bot" : name) }
+    # The path in a ---/+++ header. Git ends the header with a tab when the path
+    # holds a space (2026-10-04: every Swift file under "App Intents/" was
+    # dropped, 19k lines), and quotes a path holding a quote or a backslash.
+    function hdrpath(s, side) {
+      sub(/\t$/, "", s)
+      if (substr(s,1,1)=="\"" && substr(s,length(s),1)=="\"") { s=substr(s,2,length(s)-2); gsub(/\\"/, "\"", s); gsub(/\\\\/, "\\", s) }
+      if (substr(s,1,2)==side) s=substr(s,3)
+      return s }
     BEGIN { n=split(amap, L, ";"); for (i=1;i<=n;i++) if (L[i]!="") { k=index(L[i],"="); m[substr(L[i],1,k-1)]=substr(L[i],k+1) } }
     {
+      # KD/KA: the day and author of every commit in the walk, by hash
       if ($1=="#K") { day=$2; who=author($3, $4)
-                      if (since=="" || day>=since) { commits[day SUBSEP who]++; types[day SUBSEP who] = tally(types[day SUBSEP who], ctype($5)) }
+                      if (since=="" || day>=since) { KD[$5]=day; KA[$5]=who; commits[day SUBSEP who]++; types[day SUBSEP who] = tally(types[day SUBSEP who], ctype($6)) }
                       next }
-      if ($1=="#C") { cday=$2; cwho=author($3, $4)
-                      cskip=(since!="" && cday<since); ckey=cday SUBSEP cwho; path=""
+      # a commit (C) or what a merge landed (M); lines accrue to its hash
+      if ($1=="#C" || $1=="#M") { mode=substr($1,2,1); cskip=(since!="" && $2<since); h=$5; path=""
+                      if (mode=="M" && !cskip) landed[h]
                       next }
       if (cskip) next
       # The file a hunk edits. A new file is "--- /dev/null", a deleted one is
       # "+++ /dev/null", so take whichever side names a real path — miss the
       # delete side and every removed line vanishes from the net.
-      if (substr($0,1,4)=="--- ") { apath=substr($0,5); if (substr(apath,1,2)=="a/") apath=substr(apath,3); next }
+      if (substr($0,1,4)=="--- ") { apath=hdrpath(substr($0,5), "a/"); next }
       if (substr($0,1,4)=="+++ ") {
-        p=substr($0,5); if (substr(p,1,2)=="b/") p=substr(p,3)
+        p=hdrpath(substr($0,5), "b/")
         if (p=="/dev/null") p=apath
         # the same classifier as the working tree; a UI asset is never counted
         cls = (p=="/dev/null") ? "" : classify(p)
@@ -398,16 +448,39 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
       if (substr($0,1,1)=="\\") next                    # "\ No newline at end of file"
       if (path=="") next
       c=substr($0,1,1); if (c!="+" && c!="-") next
-      d=(c=="+") ? 1 : -1; body=substr($0,2)
-      if (isT) { traw[ckey]+=d; if (isCode(body, style)) tcode[ckey]+=d }
-      else     { praw[ckey]+=d; if (isCode(body, style)) pcode[ckey]+=d }
+      d=(c=="+") ? 1 : -1; body=substr($0,2); code=isCode(body, style)
+      if (mode=="M") {
+        if (isT) { LTR[h]+=d; if (code) LTC[h]+=d } else { LPR[h]+=d; if (code) LPC[h]+=d }
+      } else {
+        W[h]++
+        if (isT) { TR[h]+=d; if (code) TC[h]+=d } else { PR[h]+=d; if (code) PC[h]+=d }
+      }
     }
-    END { for (k in commits) { split(k, parts, SUBSEP)
-            if (parts[2] == "bot") continue          # release bot, [bot] accounts: never counted, never shown
-            printf "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n", parts[1], parts[2],
-              (praw[k]+0), (traw[k]+0), (pcode[k]+0), (tcode[k]+0), commits[k], types[k] } }
+    END {
+      of = ENVIRON["LOC_OWNERS"]
+      while ((getline ol < of) > 0) { split(ol, O, "\t"); if ((O[1] in KD) && (O[2] in KD)) { members[O[2]] = members[O[2]] " " O[1]; merge[O[2]] } }
+      for (M in landed) merge[M]
+      for (M in merge) {
+        if (!(M in KD)) continue
+        n = split(members[M], MB, " "); sp=st=sc=stc=0; w=0; heavy=""
+        for (i=1;i<=n;i++) { c=MB[i]; sp+=PR[c]; st+=TR[c]; sc+=PC[c]; stc+=TC[c]; w+=W[c]; if (heavy=="" || W[c]>W[heavy]) heavy=c }
+        dp=LPR[M]-sp; dt=LTR[M]-st; dc=LPC[M]-sc; dtc=LTC[M]-stc
+        if (dp==0 && dt==0 && dc==0 && dtc==0) continue
+        if (w==0) { PR[M]+=dp; TR[M]+=dt; PC[M]+=dc; TC[M]+=dtc; continue }
+        # whole lines: each commit its share rounded toward zero, the rest on the heaviest
+        rp=dp; rt=dt; rc=dc; rtc=dtc
+        for (i=1;i<=n;i++) { c=MB[i]; if (!W[c]) continue
+          x=int(dp*W[c]/w); PR[c]+=x; rp-=x;  x=int(dt*W[c]/w); TR[c]+=x; rt-=x
+          x=int(dc*W[c]/w); PC[c]+=x; rc-=x;  x=int(dtc*W[c]/w); TC[c]+=x; rtc-=x }
+        PR[heavy]+=rp; TR[heavy]+=rt; PC[heavy]+=rc; TC[heavy]+=rtc
+      }
+      for (c in KD) { k=KD[c] SUBSEP KA[c]; praw[k]+=PR[c]; traw[k]+=TR[c]; pcode[k]+=PC[c]; tcode[k]+=TC[c] }
+      for (k in commits) { split(k, parts, SUBSEP)
+        if (parts[2] == "bot") continue          # release bot, [bot] accounts: never counted, never shown
+        printf "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n", parts[1], parts[2],
+          (praw[k]+0), (traw[k]+0), (pcode[k]+0), (tcode[k]+0), commits[k], types[k] } }
   ' | sort
-  rm -f "$attrs"
+  rm -f "$attrs" "$owners"
 }
 commits_through() { git log --pretty=%ad --date=short 2>/dev/null | awk -v d="$1" '$1<=d' | wc -l | tr -d ' '; }
 
