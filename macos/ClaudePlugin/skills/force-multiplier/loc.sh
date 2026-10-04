@@ -4,11 +4,9 @@
 #
 # Counts the product surface in whatever languages the repository holds. Every
 # path goes through one classifier (AWK_RULES below) that names its language
-# and comment rule and puts it in one of five categories:
+# and comment rule and puts it in one of four categories:
 #   product    executable code in a programming language
 #   test       code at a test path (tests/, __tests__/, *Tests/, .test., _test., test_*.py ...)
-#   config     build and tool configuration written as code (Makefile, build.zig,
-#              Package.swift, *.gradle, *.config.ts, CMake, Nix, Bazel ...)
 #   pipeline   CI/CD definitions (.github/, .gitlab-ci.yml, Jenkinsfile, fastlane/ ...)
 #   infra      infrastructure as code (Terraform, Dockerfiles, compose, k8s/helm,
 #              infra/ and deploy/ trees, render.yaml ...)
@@ -17,12 +15,14 @@
 #   - vendored and generated code         (vendor/, third_party/, node_modules/, Pods/,
 #                                          *.min.js, *.pb.go, linguist-vendored/-generated)
 #   - lockfiles                           (*-lock.*, *.lock)
+#   - build and tool configuration        (*.config.*, .*rc.js, build.gradle, Makefile,
+#     and test setup                       build.zig, *.setup.*, conftest.py ...)
 #   - docs/, examples/, samples/          (documentation, not the product)
 #   - data and prose formats              (.json .toml .xml .md .txt, YAML outside
 #                                          pipeline and infra, shell scripts)
 #   - .css / .html                        (UI assets — reported separately, not counted)
 #
-# Functional code = product + test + config + pipeline + infra, aggregated into one count.
+# Functional code = product + test + pipeline + infra, aggregated into one count.
 #
 # Four views of the same counted set:
 #   BY COMMIT DAY  net functional LOC (added-removed) attributed to each commit date
@@ -124,12 +124,14 @@ BASELINE_PER_DAY="${LOC_BASELINE:-150}"
 # The principles, whatever the language:
 #   - Executable code in a programming language is product.
 #   - Test code counts, at the paths each ecosystem keeps it: without tests the
-#     product is fragile and cannot be moved at speed. Test-harness setup
-#     (*.setup.*, conftest.py) is test code.
-#   - Infrastructure as code, CI/CD pipelines and build configuration count for
-#     the same reason: they are what lets the product ship. They count when they
-#     are written as code or as a pipeline/deployment definition — never a data
-#     manifest (.json .toml .xml), a lockfile or app content.
+#     product is fragile and cannot be moved at speed.
+#   - Infrastructure as code and CI/CD pipelines count for the same reason: they
+#     are what lets the product ship. They count when they are written as code or
+#     as a pipeline/deployment definition — never a data manifest (.json .toml
+#     .xml), a lockfile or app content.
+#   - Build and tool configuration (*.config.*, .*rc.js, build.gradle, Makefile,
+#     build.zig, Package.swift ...) and test setup (*.setup.*, setupTests.*,
+#     conftest.py) are not product code, and are excluded.
 #   - Vendored, generated and documentation code is not the team's output:
 #     vendor/-style folders, generated suffixes, docs/ and examples/, and
 #     whatever .gitattributes marks linguist-vendored, -generated or
@@ -198,6 +200,14 @@ function classify(p,   L, cat) {
   if (p ~ /(^|\/)assets?\//) return "ui|" L
   # a shell script is tooling, except in the root scripts/ that ships the product
   if (L ~ /^Shell\|/ && p !~ /^scripts\//) return ""
+  # build and tool configuration, and test setup, are not product code: they set
+  # up how the code is built, linted and tested (babel.config.js, jest.config.ts,
+  # .eslintrc.js, build.gradle, Makefile, jest.setup.ts, conftest.py ...), wherever
+  # they sit, a test folder included (2026-10-04)
+  if (p ~ /\.(config|setup)\.[A-Za-z0-9]+$/ || p ~ /(^|\/)\.[A-Za-z0-9_-]+rc\.[cm]?[jt]s$/ \
+      || p ~ /(^|\/)(setupTests|conftest)\.[A-Za-z]+$/ \
+      || p ~ /(^|\/)(Makefile|GNUmakefile|makefile|CMakeLists\.txt|Justfile|justfile|Rakefile|Gemfile|Podfile|Brewfile|Dangerfile|build\.zig|Package\.swift|setup\.py|noxfile\.py|build\.rs|BUILD|BUILD\.bazel|WORKSPACE|WORKSPACE\.bazel|MODULE\.bazel|[Gg]ulpfile\.[cm]?[jt]s|Gruntfile\.[cm]?[jt]s)$/ \
+      || p ~ /\.(gradle|gradle\.kts|cmake|mk|bzl|nix|gemspec)$/) return ""
   # pipeline: what builds, checks and ships the product
   if (p ~ /^\.(github|gitlab|circleci|buildkite|forgejo|gitea|woodpecker|tekton|drone)\// \
       || p ~ /^(\.gitlab-ci|\.travis|\.drone|\.woodpecker|\.cirrus|appveyor|\.appveyor|azure-pipelines[^\/]*|bitbucket-pipelines|cloudbuild[^\/]*|codemagic|buildspec)\.ya?ml$/ \
@@ -214,13 +224,9 @@ function classify(p,   L, cat) {
   else if (L ~ /^YAML\|/) return ""
   # test: where each ecosystem keeps it
   else if (p ~ /(^|\/)(__tests__|__mocks__|tests?|specs?|testing|testdata|fixtures|e2e|cypress|androidTest|[A-Za-z0-9_-]*Tests|[A-Za-z0-9_]+-tests?)\// \
-      || p ~ /\.(test|spec|setup)\.[^\/]*$/ || p ~ /_(test|tests|spec|unittest)\.[A-Za-z0-9]+$/ \
-      || p ~ /(^|\/)(test_[^\/]*|conftest)\.py$/ \
+      || p ~ /\.(test|spec)\.[^\/]*$/ || p ~ /_(test|tests|spec|unittest)\.[A-Za-z0-9]+$/ \
+      || p ~ /(^|\/)test_[^\/]*\.py$/ \
       || p ~ /(Test|Tests|Spec|Specs)\.(java|kt|kts|scala|swift|cs|php|groovy|m|mm)$/) cat = "test"
-  # build and tool configuration written as code
-  else if (p ~ /\.config\.[A-Za-z0-9]+$/ || p ~ /(^|\/)\.[A-Za-z0-9_-]+rc\.[cm]?[jt]s$/ \
-      || p ~ /(^|\/)(Makefile|GNUmakefile|makefile|CMakeLists\.txt|Justfile|justfile|Rakefile|Gemfile|Podfile|Brewfile|Dangerfile|build\.zig|Package\.swift|setup\.py|noxfile\.py|build\.rs|BUILD|BUILD\.bazel|WORKSPACE|WORKSPACE\.bazel|MODULE\.bazel|[Gg]ulpfile\.[cm]?[jt]s|Gruntfile\.[cm]?[jt]s)$/ \
-      || p ~ /\.(gradle|gradle\.kts|cmake|mk|bzl|nix|gemspec)$/) cat = "config"
   else cat = "product"
   return cat "|" L
 }
@@ -344,11 +350,10 @@ tree_sum() {  # $1 = CAT|LANG|WS, $2 = key -> "raw<TAB>code"
 }
 IFS=$'\t' read -r PROD PROD_N <<< "$(tree_sum CAT product)"
 IFS=$'\t' read -r TEST TEST_N <<< "$(tree_sum CAT test)"
-IFS=$'\t' read -r CONFIG CONFIG_N <<< "$(tree_sum CAT config)"
 IFS=$'\t' read -r PIPELINE PIPELINE_N <<< "$(tree_sum CAT pipeline)"
 IFS=$'\t' read -r INFRA INFRA_N <<< "$(tree_sum CAT infra)"
 IFS=$'\t' read -r UI _ <<< "$(tree_sum CAT ui)"
-TOTAL=$((PROD + TEST + CONFIG + PIPELINE + INFRA)); TOTAL_N=$((PROD_N + TEST_N + CONFIG_N + PIPELINE_N + INFRA_N))
+TOTAL=$((PROD + TEST + PIPELINE + INFRA)); TOTAL_N=$((PROD_N + TEST_N + PIPELINE_N + INFRA_N))
 # "language<TAB>raw<TAB>code<TAB>files" and "package<TAB>raw<TAB>code", largest first
 LANG_ROWS=$(printf '%s\n' "$TREE_SUMS" | awk -F'\t' '$1 == "LANG" { printf "%s\t%d\t%d\t%d\n", $2, $3, $4, $5 }' | sort -t$'\t' -k2,2nr)
 WS_ROWS=$(printf '%s\n' "$TREE_SUMS" | awk -F'\t' '$1 == "WS" && $3 > 0 { printf "%s\t%d\t%d\n", $2, $3, $4 }' | sort -t$'\t' -k2,2nr)
@@ -669,10 +674,9 @@ done <<< "$WS_ROWS"
 printf '  %-28s %11s %10s\n' '----------------------------' '----------' '--------'
 printf '  %-28s %11s %10s\n\n' 'TOTAL' "$TOTAL" "$TOTAL_N"
 
-printf '  Functional LOC            %8s   (product + test + config + pipeline + infrastructure)\n' "$TOTAL"
+printf '  Functional LOC            %8s   (product + test + pipeline + infrastructure)\n' "$TOTAL"
 printf '    product                 %8s   (executable code)\n' "$PROD"
 printf '    test                    %8s   (code at a test path)\n' "$TEST"
-printf '    config                  %8s   (build and tool configuration written as code)\n' "$CONFIG"
 printf '    pipeline                %8s   (CI/CD definitions)\n' "$PIPELINE"
 printf '    infrastructure          %8s   (terraform, Dockerfiles, compose, k8s/helm, infra/ and deploy/)\n' "$INFRA"
 printf '  ncloc (code only)         %8s   (%s%% of raw — blank + comment lines dropped)\n' "$TOTAL_N" "$(awk -v a="$TOTAL_N" -v b="$TOTAL" 'BEGIN{printf "%.0f", (b>0?100*a/b:0)}')"
@@ -699,26 +703,27 @@ printf '                         programming language the classifier knows (the\
 printf '                         BY LANGUAGE table lists the ones found here).\n'
 printf '  Counted (multiplier)   what landed on the default branch (its first-parent\n'
 printf '                         history, so a change merged by two routes counts once),\n'
-printf '                         aggregated: product + test + config + pipeline +\n'
+printf '                         aggregated: product + test + pipeline +\n'
 printf '                         infrastructure.\n'
 printf '  Product                executable code. A scripts/ dir inside a package\n'
 printf '                         IS that package.\n'
 printf '  Test                   code at a test path: tests/ test/ spec/ __tests__/\n'
-printf '                         *Tests/ *-tests/ e2e/ fixtures/; .test. .spec. .setup.;\n'
-printf '                         _test. _spec.; test_*.py conftest.py; *Test.java\n'
+printf '                         *Tests/ *-tests/ e2e/ fixtures/; .test. .spec.;\n'
+printf '                         _test. _spec.; test_*.py; *Test.java\n'
 printf '                         *Tests.swift; Maestro flows (integration-tests/ YAML).\n'
 printf '                         Tests inline in a source file (Zig, Rust) count as\n'
 printf '                         product: a line has no path of its own.\n'
-printf '  Config                 build and tool configuration written as code:\n'
-printf '                         Makefile, CMake, build.zig, Package.swift, *.gradle,\n'
-printf '                         *.config.*, .*rc.js, Nix, Bazel, setup.py, build.rs.\n'
 printf '  Pipeline               CI/CD: .github/ .gitlab-ci.yml .circleci/ Jenkinsfile\n'
 printf '                         .buildkite/ azure-pipelines fastlane/ and the like.\n'
 printf '  Infrastructure         Terraform/HCL, Dockerfiles, compose, k8s/helm,\n'
 printf '                         infra/ deploy/ terraform/ cdk/ pulumi/ trees,\n'
 printf '                         render.yaml, root scripts/ (shell included).\n'
-printf '  Why all five           same reason tests count: without them the product\n'
+printf '  Why all four           same reason tests count: without them the product\n'
 printf '                         is fragile and cannot move at speed with confidence.\n'
+printf '  Not product code       build and tool configuration: *.config.*, .*rc.js,\n'
+printf '                         *.gradle, Makefile, CMake, build.zig, Package.swift,\n'
+printf '                         Nix, Bazel, setup.py, build.rs, Gemfile, Podfile;\n'
+printf '                         test setup: *.setup.*, setupTests.*, conftest.py.\n'
 printf '  Not the team\x27s code   vendor/ third_party/ node_modules/ Pods/ Carthage/\n'
 printf '                         .yarn/; *.min.js, *.pb.go, _pb2.py, *.g.dart,\n'
 printf '                         generated/; lockfiles; docs/ examples/ samples/ poc/;\n'
@@ -730,7 +735,7 @@ printf '                         such as SVG wrapped as TSX) — the UI-assets l
 printf '  Excluded formats       data and prose (.json .toml .xml .md .txt .snap),\n'
 printf '                         shell outside root scripts/, other YAML.\n'
 printf '  Excluded folders       anything .gitignored\n'
-printf '  Authors                the author map (%s): each git\n' "${AUTHOR_FILE:+${AUTHOR_FILE##*/}}${AUTHOR_FILE:-none found}"
+printf '  Authors                the author map (%s): each git\n' "${AUTHOR_FILE:-none found}"
 printf '                         identity to a person and a role. Managers and\n'
 printf '                         excluded contributors keep their lines in the team\n'
 printf '                         total but are out of headcount, engineer-days and\n'
@@ -809,9 +814,9 @@ window.LOC_DATA = {
   "days": $DAYS_JSON,
   "workspaces": [$WS_JSON],
   "languages": [$LANG_JSON],
-  "tree": {"total": $TOTAL, "product": $PROD, "test": $TEST, "config": $CONFIG, "pipeline": $PIPELINE, "infra": $INFRA,
+  "tree": {"total": $TOTAL, "product": $PROD, "test": $TEST, "pipeline": $PIPELINE, "infra": $INFRA,
            "ui": $UI, "history": $HIST_TOTAL, "historyCommits": $HIST_COMMITS,
-           "ncloc": $TOTAL_N, "nclocProduct": $PROD_N, "nclocTest": $TEST_N, "nclocConfig": $CONFIG_N,
+           "ncloc": $TOTAL_N, "nclocProduct": $PROD_N, "nclocTest": $TEST_N,
            "nclocPipeline": $PIPELINE_N, "nclocInfra": $INFRA_N, "nclocHistory": $HIST_TOTAL_N,
            "clean": $([[ "$CLONE_DIRTY" = 1 ]] && echo false || echo true)},
   "force": {"engineers": $HUMANS, "codingDays": $DAYS_ACTUAL, "engDays": $BASELINE_ENG_DAYS, "how": "$BASELINE_HOW", "baseline": $BASELINE, "mult": $MULT, "engDaysOut": $ENG_DAYS_OUT, "nmult": $MULT_N, "nclocEngDaysOut": $ENG_DAYS_OUT_N}

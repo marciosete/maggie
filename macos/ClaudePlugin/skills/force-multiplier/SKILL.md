@@ -1,6 +1,6 @@
 ---
 name: force-multiplier
-description: Measure the engineering force multiplier of this repository — functional lines of code shipped per engineer-day against a 150 LOC/day baseline, across every language it holds (product, test, config, pipeline, infrastructure) — with time and cost per milestone, and open the dashboard
+description: Measure the engineering force multiplier of this repository — functional lines of code shipped per engineer-day against a 150 LOC/day baseline, across every language it holds (product, test, pipeline, infrastructure) — with time and cost per milestone, and open the dashboard
 allowed-tools: Bash(bash ${CLAUDE_SKILL_DIR}/loc.sh:*)
 ---
 
@@ -20,25 +20,29 @@ default; see `LOC_TEAM_ONLY`.
 ### Scope (the report prints the authoritative Scope block)
 
 - **Principle:** whatever the language, the product surface is the team's
-  executable code plus what lets it ship with confidence — its tests, build
-  configuration, pipelines and infrastructure. Data manifests (`.json` `.toml`
-  `.xml`), lockfiles, prose and app content are not.
+  executable code plus what lets it ship with confidence — its tests,
+  pipelines and infrastructure. Build and tool configuration, test setup, data
+  manifests (`.json` `.toml` `.xml`), lockfiles, prose and app content are not.
 - **Product:** code in a known programming language (TypeScript/JavaScript,
   Swift, Kotlin, Zig, C/C++/Objective-C, Go, Rust, Python, Ruby, Java, C#, Dart,
   PHP, shaders, Lua, Elixir and more). A `scripts/` dir inside a package IS
   that package's code.
 - **Test:** `tests/` `test/` `spec/` `__tests__/` `*Tests/` `*-tests/` `e2e/`
-  `fixtures/` folders; `.test.` `.spec.` `.setup.`; `_test.` `_spec.`;
-  `test_*.py` `conftest.py`; `*Test.java` `*Tests.swift`; Maestro flows (YAML
+  `fixtures/` folders; `.test.` `.spec.`; `_test.` `_spec.`; `test_*.py`;
+  `*Test.java` `*Tests.swift`; Maestro flows (YAML
   under `integration-tests/`). Tests written inline in a source file (Zig, Rust)
   count as product, because a line carries no path of its own.
-- **Config:** Makefile, CMake, `build.zig`, `Package.swift`, `*.gradle`,
-  `*.config.*`, `.*rc.js`, Nix, Bazel, `setup.py`, `build.rs`.
 - **Pipeline:** `.github/`, `.gitlab-ci.yml`, `.circleci/`, `Jenkinsfile`,
   `.buildkite/`, Azure Pipelines, `fastlane/` and the like.
 - **Infrastructure:** Terraform/HCL, Dockerfiles, compose files, k8s/Helm,
   `infra/` `deploy/` `terraform/` `cdk/` `pulumi/` trees, `render.yaml`, and the
   root `scripts/` folder (release, CI and E2E tooling, shell included).
+- **Not product code, wherever it sits:** build and tool configuration —
+  `*.config.*` (`babel.config.js`, `jest.config.ts` …), `.*rc.js`
+  (`.eslintrc.js`), `*.gradle` (Android `build.gradle`), Makefile, CMake,
+  `build.zig`, `Package.swift`, Nix, Bazel, `setup.py`, `build.rs`, Gemfile,
+  Podfile — and test setup: `*.setup.*` (`jest.setup.ts`), `setupTests.*`,
+  `conftest.py`.
 - **Not the team's code:** `vendor/` `third_party/` `node_modules/` `Pods/`
   `.yarn/`; `*.min.js` `*.pb.go` `_pb2.py` `*.g.dart` `generated/`; lockfiles;
   `docs/` `examples/` `samples/` `poc/`; AI-agent tooling (`.agents/`,
@@ -117,7 +121,7 @@ opens it in the default browser. Nothing it writes is in the work tree.
 Do not read the figures off a truncated terminal tail. The last lines print the
 page's `file://` link and the `data:` path; read that data file:
 - `force`: `mult`, `nmult`, `engDaysOut`, `engDays`, `codingDays`, `how`;
-- `tree`: `product`, `test`, `config`, `pipeline`, `infra` and their `ncloc*`
+- `tree`: `product`, `test`, `pipeline`, `infra` and their `ncloc*`
   twins, `history` against `total`, and `clean`;
 - `languages`: the detected languages, largest first;
 - `team.mult`; `authors`: per-author `mult`, `days`, `since`;
@@ -129,8 +133,8 @@ plain words:
 - The `file://` link on its own line, first. Say the page was opened in the browser.
 - Then two or three sentences:
   - Lead with the force multiplier (raw and ncloc) and the engineer-days of output.
-  - Name the main languages and the category split (product / test / config /
-    pipeline / infra).
+  - Name the main languages and the category split (product / test / pipeline /
+    infra).
   - Call out the trend: the best day, and the strongest and weakest stretches.
   - Stay at team level while `teamOnly` is true: do not rank or name
     individual authors unless the user asks.
