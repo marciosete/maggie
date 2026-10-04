@@ -3,7 +3,7 @@ import Foundation
 /// The Claude Code plugin Maggie ships in its bundle (`ClaudePlugin`, in Resources). Its
 /// skills are commands every Claude Code session in the app has, out of the box, as
 /// `/maggie:<skill>`: nothing is installed into `~/.claude`, so they come and go with
-/// the app and a session outside it never sees them. The Claude menu and the command
+/// the app and a session outside it never sees them. The View menu and the command
 /// palette list them (`ClaudePluginMenu`).
 ///
 /// Claude Code loads it from `CLAUDE_CODE_PLUGIN_DIRS`, which it reads like a

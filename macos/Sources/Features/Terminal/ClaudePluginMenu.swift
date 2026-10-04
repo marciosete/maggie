@@ -1,36 +1,32 @@
 import AppKit
 
-/// The Claude menu, between View and Window: one item per command Maggie's Claude Code
-/// plugin ships (`ClaudePlugin`), so they can be found without knowing to type `/`. An
-/// item runs its command in the focused terminal's Claude Code session, and is greyed
-/// out when that terminal isn't running Claude Code.
+/// The commands Maggie's Claude Code plugin ships (`ClaudePlugin`), in the View menu
+/// after Show Usage — View > Force Multiplier — so they can be found without knowing to
+/// type `/`. An item runs its command in the focused terminal's Claude Code session, and
+/// is greyed out when that terminal isn't running Claude Code.
 @MainActor
 final class ClaudePluginMenu: NSObject, NSMenuItemValidation {
     static let shared = ClaudePluginMenu()
 
-    static let title = "Claude"
-
-    /// Adds the menu to the main menu, before the Window menu. Nothing when the build
-    /// ships no plugin commands.
+    /// Adds an item per command to the View menu, after Show Usage (or at its end).
+    /// Nothing when the build ships no plugin commands.
     func install() {
         let commands = ClaudePlugin.commands
-        guard !commands.isEmpty, let mainMenu = NSApp.mainMenu,
-              !mainMenu.items.contains(where: { $0.submenu?.title == Self.title }) else { return }
+        guard !commands.isEmpty,
+              let view = NSApp.mainMenu?.items.first(where: { $0.submenu?.title == "View" })?.submenu,
+              !view.items.contains(where: { $0.action == #selector(run(_:)) }) else { return }
 
-        let menu = NSMenu(title: Self.title)
+        let usage = view.items.firstIndex { $0.action == #selector(TerminalController.toggleUsage(_:)) }
+        var index = usage.map { $0 + 1 } ?? view.items.count
         for command in commands {
             let item = NSMenuItem(title: command.title, action: #selector(run(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = command.name
             item.toolTip = "\(command.slashCommand) — \(command.description)"
             item.setImageIfDesired(systemSymbolName: Self.symbol(for: command))
-            menu.addItem(item)
+            view.insertItem(item, at: index)
+            index += 1
         }
-
-        let top = NSMenuItem(title: Self.title, action: nil, keyEquivalent: "")
-        top.submenu = menu
-        let window = mainMenu.items.firstIndex { $0.submenu?.title == "Window" } ?? mainMenu.items.count
-        mainMenu.insertItem(top, at: window)
     }
 
     /// The SF Symbol beside a command's item.

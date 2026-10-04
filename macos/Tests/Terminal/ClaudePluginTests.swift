@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 @testable import Ghostty
 
@@ -40,6 +40,19 @@ struct ClaudePluginTests {
         let manifest = try Data(contentsOf: directory.appendingPathComponent(".claude-plugin/plugin.json"))
         let plugin = try #require(try JSONSerialization.jsonObject(with: manifest) as? [String: Any])
         #expect(plugin["name"] as? String == ClaudePlugin.name)
+    }
+
+    @MainActor
+    @Test func theCommandsAreInTheViewMenuAfterShowUsage() throws {
+        ClaudePluginMenu.shared.install()
+        let mainMenu = try #require(NSApp.mainMenu)
+        #expect(!mainMenu.items.contains { $0.title == "Claude" })
+        let view = try #require(mainMenu.items.first { $0.submenu?.title == "View" }?.submenu)
+        let usage = try #require(view.items.firstIndex { $0.action == #selector(TerminalController.toggleUsage(_:)) })
+        #expect(view.items[usage + 1].title == "Force Multiplier")
+        // installing again adds nothing
+        ClaudePluginMenu.shared.install()
+        #expect(view.items.filter { $0.title == "Force Multiplier" }.count == 1)
     }
 
     @MainActor

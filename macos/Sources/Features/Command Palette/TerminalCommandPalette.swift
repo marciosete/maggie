@@ -88,7 +88,7 @@ struct TerminalCommandPaletteView: View {
         guard ClaudePlugin.canRun(in: surfaceView) else { return [] }
         return ClaudePlugin.commands.map { command in
             CommandOption(
-                title: "\(ClaudePluginMenu.title): \(command.title)",
+                title: command.title,
                 subtitle: command.slashCommand,
                 description: command.description,
                 leadingIcon: ClaudePluginMenu.symbol(for: command)
