@@ -68,6 +68,10 @@ extension Ghostty {
             if let path {
                 ghostty_config_load_file(cfg, path)
             } else {
+                // Maggie's own defaults come first, so the user's files override them.
+                if let defaults = Maggie.defaultConfigurationFile() {
+                    ghostty_config_load_file(cfg, defaults.path)
+                }
                 ghostty_config_load_default_files(cfg)
             }
 

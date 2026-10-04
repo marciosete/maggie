@@ -42,6 +42,12 @@ a shell startup file that starts an agent itself can check
 `MAGGIE_CLAUDE_CODE_START`, set in these terminals (with `MAGGIE_AGENT` naming
 the agent), and stand down.
 
+**Set up for agents out of the box.** ⌘V pastes text as usual, and with only an
+image on the clipboard it pastes the image into the agent: Maggie sends Claude
+Code or Codex the ⌃V they read images on. New terminals start in `~/projects`
+when you have one, rather than your home directory; `working-directory` in the
+configuration file still decides if you set it.
+
 **Pivot between agents.** A session's menu in the sidebar hands it to the other
 agent, in the same worktree: **New Session** starts it fresh, **Continue the
 Conversation** writes the conversation so far out as Markdown and starts the

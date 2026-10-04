@@ -23,6 +23,26 @@ struct MaggieTests {
             == "https://github.com/ghostty-org/ghostty/commit/abc1234")
     }
 
+    @Test func newTerminalsStartInProjectsWhereThereIsOne() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("maggie-home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // Without the folder the home directory stays the default, and a file by the
+        // name isn't one.
+        #expect(Maggie.defaultConfiguration(home: home).isEmpty)
+        let projects = home.appendingPathComponent("projects")
+        try Data().write(to: projects)
+        #expect(Maggie.defaultConfiguration(home: home).isEmpty)
+
+        try FileManager.default.removeItem(at: projects)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        #expect(Maggie.defaultConfiguration(home: home) == "working-directory = \(projects.path)\n")
+
+        // A test host isn't Maggie, and Ghostty's defaults stay Ghostty's.
+        #expect(Maggie.defaultConfigurationFile() == nil)
+    }
+
     @Test func anUpdateLinksToTheBuildsOwnReleaseNotes() {
         // A test host isn't Maggie, so the update points at Ghostty's notes here; the
         // Maggie case is the helper above.

@@ -64,6 +64,41 @@ enum Maggie {
             .replacingOccurrences(of: "Ghostty", with: appName)
     }
 
+    // MARK: Configuration
+
+    /// The configuration Maggie starts from where Ghostty's defaults aren't its own. It
+    /// is read before the user's configuration files, so anything they set wins.
+    ///
+    /// New terminals start in `~/projects`, where there is one, instead of the home
+    /// directory. Tabs and windows opened from a terminal still start in its directory.
+    static func defaultConfiguration(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
+        var lines: [String] = []
+        let projects = home.appendingPathComponent("projects")
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: projects.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            lines.append("working-directory = \(projects.path)")
+        }
+        return lines.map { $0 + "\n" }.joined()
+    }
+
+    /// `defaultConfiguration` in a file the configuration can be loaded from. Nil when
+    /// this app isn't Maggie, there is nothing to set, or the file can't be written.
+    static func defaultConfigurationFile() -> URL? {
+        guard isMaggie else { return nil }
+        let configuration = defaultConfiguration()
+        guard !configuration.isEmpty,
+              let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let directory = caches.appendingPathComponent(bundleID)
+        let file = directory.appendingPathComponent("defaults.ghostty")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try configuration.write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            return nil
+        }
+        return file
+    }
+
     /// The first item under `menu`, at any depth, whose action is `action`.
     static func item(withAction action: Selector, in menu: NSMenu) -> NSMenuItem? {
         for item in menu.items {
