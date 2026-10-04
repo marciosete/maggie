@@ -438,6 +438,11 @@ final class ClaudeCodeLights {
     /// Processes whose entry is being looked for.
     private var locating: Set<Int> = []
 
+    /// Sessions with a read queued, and those asked to be read again while it was, which
+    /// are read once more after it. A session never has more than one read queued.
+    private var readsQueued: Set<Int> = []
+    private var readAgain: Set<Int> = []
+
     /// A watch on the registry directory, while any tab is `auto`.
     private var directoryWatch: DispatchSourceFileSystemObject?
     private var rescanTimer: Timer?
@@ -528,9 +533,12 @@ final class ClaudeCodeLights {
         for pid in shown {
             if entryGenerations[pid] == nil {
                 locate(pid)
-            } else {
-                // /new and /resume keep the TUI's process; reading again also catches a
-                // model or status change that didn't append to the rollout.
+            } else if entryURLs[pid] != ClaudeCodeSession.registryFile(pid: pid) {
+                // A Codex session. /new and /resume keep the TUI's process; reading again
+                // also catches a model or status change that didn't append to the rollout.
+                // A Claude Code session's entry, transcript and git are watched, so it is
+                // read when they change, and reading every one each rescan runs more git
+                // than the queue can keep up with.
                 read(pid)
             }
         }
@@ -610,10 +618,18 @@ final class ClaudeCodeLights {
 
     private func read(_ pid: Int, retriesLeft: Int = ClaudeCodeLights.retries) {
         guard let generation = entryGenerations[pid] else { return }
+        guard readsQueued.insert(pid).inserted else {
+            readAgain.insert(pid)
+            return
+        }
         let reader = reader
         queue.async {
             let reading = reader.read(pid: pid)
             DispatchQueue.main.async {
+                self.readsQueued.remove(pid)
+                defer {
+                    if self.readAgain.remove(pid) != nil { self.read(pid) }
+                }
                 guard self.entryGenerations[pid] == generation else { return }
                 switch reading {
                 case .unreadable where retriesLeft > 0:
