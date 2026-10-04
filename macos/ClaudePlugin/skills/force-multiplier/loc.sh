@@ -50,6 +50,14 @@
 #
 # Usage: bash loc.sh   (from anywhere in the repository; no arguments — the baseline is always derived)
 #   LOC_NO_OPEN=1          do not open the report in the browser
+#   LOC_TEAM_ONLY=1        the page shows the team aggregate only, and the team multiplier
+#                          is team lines / (150 x engineer-days); 0 = per author, weighted
+#   LOC_DAY_TABLE_MAX=8    above this many authors the terminal day table is page-only
+#   LOC_COST_ANNUAL=150000 all-inclusive annual cost per engineer, for "Time and cost"
+#   LOC_COST_CURRENCY=AUD  its currency
+#   LOC_WORK_DAYS=220      working days a year (260 weekdays less holidays and leave)
+#   LOC_AUTHOR_FILE=path   the author map (see "authors" below)
+#   LOC_LIST_AUTHORS=1     list every commit identity and stop, to build the author map
 #   LOC_BASELINE=150       LOC / engineer / coding day
 #   LOC_START_DATE=YYYY-MM-DD  optional: the chart starts here, and earlier days are
 #                          shaded as "own time" (e.g. before the project officially began)
@@ -91,6 +99,20 @@ fi
 # entry for them.
 OUT_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/loc"
 mkdir -p "$OUT_DIR" || exit 1
+
+# Local changes in the counted checkout: the headline counts them, history does
+# not, so the page says so.
+CLONE_DIRTY=$([[ -n "$(git status --porcelain 2>/dev/null)" ]] && echo 1 || echo 0)
+
+# LOC_LIST_AUTHORS=1: list every commit identity (email, name, commits, first and
+# last commit date) and stop. The input for the author map.
+if [[ -n "${LOC_LIST_AUTHORS:-}" ]]; then
+  printf 'email\tname\tcommits\tfirst\tlast\n'
+  git log --format='%aE%x09%aN%x09%ad' --date=short | awk -F'\t' '
+    { k=$1 "\t" $2; c[k]++; if (!(k in l) || $3>l[k]) l[k]=$3; if (!(k in f) || $3<f[k]) f[k]=$3 }
+    END { for (k in c) printf "%s\t%d\t%s\t%s\n", k, c[k], f[k], l[k] }' | sort -t$'\t' -k3,3nr
+  exit 0
+fi
 
 BASELINE_PER_DAY="${LOC_BASELINE:-150}"
 
@@ -138,6 +160,7 @@ function rules() {
   lang("Crystal", "hash", "cr"); lang("Nim", "hash", "nim"); lang("PowerShell", "hash", "ps1 psm1")
   lang("Nix", "hashc", "nix"); lang("CMake", "hash", "cmake"); lang("Make", "hash", "mk")
   lang("Starlark", "hash", "bzl star"); lang("YAML", "hash", "yml yaml")
+  lang("Shell", "hash", "sh bash zsh")
   lang("Lua", "dash", "lua"); lang("Haskell", "dash", "hs"); lang("Elm", "dash", "elm")
   lang("Clojure", "semi", "clj cljs cljc"); lang("Emacs Lisp", "semi", "el")
   lang("Erlang", "pct", "erl hrl")
@@ -167,10 +190,14 @@ function langOf(p,   b, k) {
 }
 function classify(p,   L, cat) {
   if (p == "" || (p in VENDORED)) return ""
-  if (p ~ /(^|\/)(node_modules|vendor|vendored|third_party|third-party|thirdparty|bower_components|jspm_packages|Pods|Carthage|docs?|documentation|examples?|samples?)\//) return ""
+  if (p ~ /(^|\/)(node_modules|vendor|vendored|third_party|third-party|thirdparty|bower_components|jspm_packages|Pods|Carthage|docs?|documentation|examples?|samples?|\.yarn|poc|\.agents|prompts)\//) return ""
   if (p ~ /(-lock\.|\.lock$|\.min\.(js|css)$|\.pb\.(go|cc|h)$|_pb2(_grpc)?\.py$|\.g\.dart$|\.freezed\.dart$|\.generated\.[A-Za-z]+$|(^|\/)generated\/)/) return ""
   L = langOf(p); if (L == "") return ""
   if (L ~ /\|ui$/) return "ui|" L
+  # code under assets/ is drawings (SVG wrapped as TSX and the like): a UI asset
+  if (p ~ /(^|\/)assets?\//) return "ui|" L
+  # a shell script is tooling, except in the root scripts/ that ships the product
+  if (L ~ /^Shell\|/ && p !~ /^scripts\//) return ""
   # pipeline: what builds, checks and ships the product
   if (p ~ /^\.(github|gitlab|circleci|buildkite|forgejo|gitea|woodpecker|tekton|drone)\// \
       || p ~ /^(\.gitlab-ci|\.travis|\.drone|\.woodpecker|\.cirrus|appveyor|\.appveyor|azure-pipelines[^\/]*|bitbucket-pipelines|cloudbuild[^\/]*|codemagic|buildspec)\.ya?ml$/ \
@@ -180,11 +207,13 @@ function classify(p,   L, cat) {
       || p ~ /(^|\/)(docker-)?compose[^\/]*\.ya?ml$/ \
       || p ~ /(^|\/)(infra|infrastructure|terraform|deploy|deployments?|k8s|kubernetes|helm|kustomize|ansible|cloudformation|cdk|pulumi)\// \
       || p ~ /(^|\/)charts\/.*\.ya?ml$/ || p ~ /^(render|serverless|skaffold)\.ya?ml$/ \
-      || p ~ /(^|\/)(Vagrantfile|Tiltfile)$/) cat = "infra"
+      || p ~ /(^|\/)(Vagrantfile|Tiltfile)$/ || p ~ /^scripts\//) cat = "infra"
+  # end-to-end flows written as YAML (Maestro) are test code
+  else if (L ~ /^YAML\|/ && p ~ /(^|\/)(integration-tests|\.maestro)\//) cat = "test"
   # YAML is code only as a pipeline or a deployment; anywhere else it is content or app config
   else if (L ~ /^YAML\|/) return ""
   # test: where each ecosystem keeps it
-  else if (p ~ /(^|\/)(__tests__|__mocks__|tests?|specs?|testing|testdata|fixtures|e2e|cypress|androidTest|[A-Za-z0-9_-]*Tests)\// \
+  else if (p ~ /(^|\/)(__tests__|__mocks__|tests?|specs?|testing|testdata|fixtures|e2e|cypress|androidTest|[A-Za-z0-9_-]*Tests|[A-Za-z0-9_]+-tests?)\// \
       || p ~ /\.(test|spec|setup)\.[^\/]*$/ || p ~ /_(test|tests|spec|unittest)\.[A-Za-z0-9]+$/ \
       || p ~ /(^|\/)(test_[^\/]*|conftest)\.py$/ \
       || p ~ /(Test|Tests|Spec|Specs)\.(java|kt|kts|scala|swift|cs|php|groovy|m|mm)$/) cat = "test"
@@ -237,6 +266,25 @@ export LOC_VENDORED="$OUT_DIR/vendored.txt"
 # Set LOC_AUTHOR_MAP to merge one person's several emails into one name, e.g.
 #   LOC_AUTHOR_MAP='ann@work.com=Ann Lee;ann@home.com=Ann Lee;release-bot@acme.com=bot'
 AUTHOR_MAP="${LOC_AUTHOR_MAP:-}"
+# The author map: one git identity (its author NAME) per line, tab-separated:
+#   identity  person  role  evidence
+# role: engineer | tester (both counted as engineers) | manager or excluded (their
+# lines count for the team; they are out of engineer counts, engineer-days and
+# cost) | bot (dropped entirely). Keyed by name, so no email need be written down;
+# LOC_AUTHOR_MAP (email-keyed) still works and wins on a clash. The first found
+# of: LOC_AUTHOR_FILE, the repository's .claude/force-multiplier/author-map.tsv
+# (committed, for the team), or .git/loc/author-map.tsv (this machine only).
+AUTHOR_FILE="${LOC_AUTHOR_FILE:-}"
+for f in "$PWD/.claude/force-multiplier/author-map.tsv" "$OUT_DIR/author-map.tsv"; do
+  [[ -z "$AUTHOR_FILE" && -f "$f" ]] && AUTHOR_FILE="$f"
+done
+if [[ -n "$AUTHOR_FILE" && -f "$AUTHOR_FILE" ]]; then
+  # manager / excluded -> the reserved name "staff" (lines for the team, no
+  # headcount, engineer-days or cost); bot -> "bot"
+  AUTHOR_MAP="${AUTHOR_MAP:+$AUTHOR_MAP;}$(awk -F'\t' '!/^#/ && NF>=2 && $1!="" {
+    p = ($3=="manager" || $3=="excluded") ? "staff" : ($3=="bot") ? "bot" : $2
+    printf "%s%s=%s", (n++ ? ";" : ""), $1, p }' "$AUTHOR_FILE")"
+fi
 
 # ---- current-tree snapshot (authoritative for "what exists now") --------
 # Working-tree files: tracked + new, minus .gitignored, minus anything not on
@@ -338,6 +386,9 @@ add_linguist_history() {
 }
 TODAY=$(date +%F)
 
+# The day the default branch began: its first commit, by committer date.
+FIRST_DAY=$(git log --first-parent --max-parents=0 --format=%cd --date=short 2>/dev/null | sort | head -1)
+
 day_rows() {  # $1 = only commits authored on/after this date ("" = whole history)
   local since="${1:-}"
   # A raw NUL byte in a source file makes git call it binary and the patch is
@@ -346,62 +397,33 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
   local attrs; attrs=$(mktemp)
   printf '%s diff\n' "${PATHSPECS[@]}" > "$attrs"
   add_linguist_history "$since"
-  # A merge's own changes never show in `git log -p`: lines a branch added and
-  # its merge then dropped would count forever (2026-10-04: a branch committed
-  # 1.4M lines of .jjconflict-* snapshots that a merge threw away). So every
-  # merge on the default branch's first-parent line is held to what it landed —
-  # its diff against its first parent — and the branch commits it brought in
-  # are credited with exactly that: the difference from their own sum is spread
-  # over them by how many counted lines each changed (on the merge itself when
-  # they changed none). History then nets to the tree, and a branch's authors
-  # keep its lines. A repository that squash-merges has nothing to correct.
-  #
-  # "commit<TAB>merge" for every commit a first-parent merge brought in: walk
-  # the first-parent line oldest first, and give each merge whatever its other
-  # parents reach that no earlier commit has claimed.
-  local owners; owners=$(mktemp)
-  git log --format='%H %P' 2>/dev/null | awk -v head="$(git rev-parse HEAD 2>/dev/null)" '
-    { n = split($0, F, " "); np[F[1]] = n - 1; for (i = 2; i <= n; i++) par[F[1], i - 1] = F[i] }
-    END {
-      m = 0; h = head
-      while (h != "") { fp[h]; chain[++m] = h; h = ((h, 1) in par) ? par[h, 1] : "" }
-      for (k = m; k >= 1; k--) {
-        M = chain[k]; if (np[M] < 2) continue
-        top = 0; for (i = np[M]; i >= 2; i--) st[++top] = par[M, i]
-        while (top > 0) {
-          x = st[top--]; if ((x in fp) || (x in own)) continue
-          own[x] = M; print x "\t" M
-          for (i = 1; i <= np[x]; i++) st[++top] = par[x, i]
-        }
-      }
-    }' > "$owners"
   # committer date >= author date, so --since on the committer clock is a safe
-  # superset; the exact author-date cut happens in awk.
+  # superset; the exact cut happens in awk.
   {
     # stream 1 (#K): one line per commit — the commit tally counts EVERY commit,
-    # including ones that touched no counted file.
-    # stream 2 (#C): the patch itself, limited to the counted languages so the
-    # walk stays cheap. --unified=0 emits only changed lines, no context.
-    # --full-history keeps a branch commit whose merge later dropped its work.
-    # stream 3 (#M): what each first-parent merge landed, against its first parent.
+    # including ones that touched no counted file. Effort: engineer-days come
+    # from here, every commit on every branch, dated when it was written.
+    # stream 2 (#C): the lines, from what landed on the default branch: its
+    # first-parent line only (--first-parent -m), so each entry is what one
+    # commit or merge changed there, dated when it landed (committer date).
+    # Walking every branch's commits counted a change that reached main by two
+    # routes (cherry-pick, rebase + merge) twice, and lost what a merge itself
+    # changed (2026-10-03: 8% high on one repository; 2026-10-04: a branch's
+    # 1.4M lines of .jjconflict-* snapshots that its merge dropped). First-parent
+    # history sums to the tree by construction. A merge's lines go to whoever
+    # made the merge. --unified=0 emits only changed lines, no context.
     if [[ -n "$since" ]]; then
-      git log --since="$since 00:00:00" --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%H%x09%s' --date=short
+      git log --since="$since 00:00:00" --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%cd%x09%s' --date=short
       printf '\n'
-      git -c core.attributesFile="$attrs" log --since="$since 00:00:00" --full-history -p --unified=0 --no-renames \
-        --pretty=format:'#C%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
-      printf '\n'
-      git -c core.attributesFile="$attrs" log --since="$since 00:00:00" --first-parent --merges --diff-merges=first-parent \
-        -p --unified=0 --no-renames --pretty=format:'#M%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
+      git -c core.attributesFile="$attrs" log --first-parent -m --since="$since 00:00:00" -p --unified=0 --no-renames \
+        --pretty=format:'#C%x09%cd%x09%aE%x09%aN' --date=short -- "${PATHSPECS[@]}"
     else
-      git log --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%H%x09%s' --date=short
+      git log --pretty=format:'#K%x09%ad%x09%aE%x09%aN%x09%cd%x09%s' --date=short
       printf '\n'
-      git -c core.attributesFile="$attrs" log --full-history -p --unified=0 --no-renames \
-        --pretty=format:'#C%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
-      printf '\n'
-      git -c core.attributesFile="$attrs" log --first-parent --merges --diff-merges=first-parent \
-        -p --unified=0 --no-renames --pretty=format:'#M%x09%ad%x09%aE%x09%aN%x09%H' --date=short -- "${PATHSPECS[@]}"
+      git -c core.attributesFile="$attrs" log --first-parent -m -p --unified=0 --no-renames \
+        --pretty=format:'#C%x09%cd%x09%aE%x09%aN' --date=short -- "${PATHSPECS[@]}"
     fi
-  } 2>/dev/null | LOC_OWNERS="$owners" awk -F'\t' -v since="$since" -v amap="$AUTHOR_MAP" "$AWK_RULES"'
+  } 2>/dev/null | awk -F'\t' -v since="$since" -v amap="$AUTHOR_MAP" -v first="$FIRST_DAY" "$AWK_RULES"'
     # The Conventional Commits type of a subject ("fix(harness)!: ..." -> fix);
     # anything else (a merge, a free-form message) is "other".
     function ctype(subj,   t) { if (match(subj, /^[a-z]+(\([^)]*\))?!?:/)) { t=substr(subj, 1, RLENGTH); sub(/[(!:].*$/, "", t); return t } return "other" }
@@ -409,7 +431,8 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
     function tally(list, t,   n, P, i, kv, out, hit) { n=split(list, P, ","); out=""; hit=0
       for (i=1;i<=n;i++) { if (P[i]=="") continue; split(P[i], kv, ":"); if (kv[1]==t) { kv[2]++; hit=1 }; out=out (out==""?"":",") kv[1] ":" kv[2] }
       return hit ? out : out (out==""?"":",") t ":1" }
-    function author(email, name) { return (email in m) ? m[email] : (index(email "\t" name, "[bot]") ? "bot" : name) }
+    # by email first (LOC_AUTHOR_MAP), then by name (the author map)
+    function author(email, name) { return (email in m) ? m[email] : (name in m) ? m[name] : (index(email "\t" name, "[bot]") ? "bot" : name) }
     # The path in a ---/+++ header. Git ends the header with a tab when the path
     # holds a space (2026-10-04: every Swift file under "App Intents/" was
     # dropped, 19k lines), and quotes a path holding a quote or a backslash.
@@ -420,13 +443,14 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
       return s }
     BEGIN { n=split(amap, L, ";"); for (i=1;i<=n;i++) if (L[i]!="") { k=index(L[i],"="); m[substr(L[i],1,k-1)]=substr(L[i],k+1) } }
     {
-      # KD/KA: the day and author of every commit in the walk, by hash
-      if ($1=="#K") { day=$2; who=author($3, $4)
-                      if (since=="" || day>=since) { KD[$5]=day; KA[$5]=who; commits[day SUBSEP who]++; types[day SUBSEP who] = tally(types[day SUBSEP who], ctype($6)) }
+      # An author date before the project began is a wrong clock (2026-10-04: a
+      # commit authored "2001-01-25", committed 2025, opened the chart in 2001):
+      # such a commit is dated when it was committed.
+      if ($1=="#K") { day=($2 < first) ? $5 : $2; who=author($3, $4)
+                      if (since=="" || day>=since) { commits[day SUBSEP who]++; types[day SUBSEP who] = tally(types[day SUBSEP who], ctype($6)) }
                       next }
-      # a commit (C) or what a merge landed (M); lines accrue to its hash
-      if ($1=="#C" || $1=="#M") { mode=substr($1,2,1); cskip=(since!="" && $2<since); h=$5; path=""
-                      if (mode=="M" && !cskip) landed[h]
+      if ($1=="#C") { cday=$2; cwho=author($3, $4)
+                      cskip=(since!="" && cday<since); ckey=cday SUBSEP cwho; path=""
                       next }
       if (cskip) next
       # The file a hunk edits. A new file is "--- /dev/null", a deleted one is
@@ -448,39 +472,19 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
       if (substr($0,1,1)=="\\") next                    # "\ No newline at end of file"
       if (path=="") next
       c=substr($0,1,1); if (c!="+" && c!="-") next
-      d=(c=="+") ? 1 : -1; body=substr($0,2); code=isCode(body, style)
-      if (mode=="M") {
-        if (isT) { LTR[h]+=d; if (code) LTC[h]+=d } else { LPR[h]+=d; if (code) LPC[h]+=d }
-      } else {
-        W[h]++
-        if (isT) { TR[h]+=d; if (code) TC[h]+=d } else { PR[h]+=d; if (code) PC[h]+=d }
-      }
+      d=(c=="+") ? 1 : -1; body=substr($0,2)
+      if (isT) { traw[ckey]+=d; if (isCode(body, style)) tcode[ckey]+=d }
+      else     { praw[ckey]+=d; if (isCode(body, style)) pcode[ckey]+=d }
     }
-    END {
-      of = ENVIRON["LOC_OWNERS"]
-      while ((getline ol < of) > 0) { split(ol, O, "\t"); if ((O[1] in KD) && (O[2] in KD)) { members[O[2]] = members[O[2]] " " O[1]; merge[O[2]] } }
-      for (M in landed) merge[M]
-      for (M in merge) {
-        if (!(M in KD)) continue
-        n = split(members[M], MB, " "); sp=st=sc=stc=0; w=0; heavy=""
-        for (i=1;i<=n;i++) { c=MB[i]; sp+=PR[c]; st+=TR[c]; sc+=PC[c]; stc+=TC[c]; w+=W[c]; if (heavy=="" || W[c]>W[heavy]) heavy=c }
-        dp=LPR[M]-sp; dt=LTR[M]-st; dc=LPC[M]-sc; dtc=LTC[M]-stc
-        if (dp==0 && dt==0 && dc==0 && dtc==0) continue
-        if (w==0) { PR[M]+=dp; TR[M]+=dt; PC[M]+=dc; TC[M]+=dtc; continue }
-        # whole lines: each commit its share rounded toward zero, the rest on the heaviest
-        rp=dp; rt=dt; rc=dc; rtc=dtc
-        for (i=1;i<=n;i++) { c=MB[i]; if (!W[c]) continue
-          x=int(dp*W[c]/w); PR[c]+=x; rp-=x;  x=int(dt*W[c]/w); TR[c]+=x; rt-=x
-          x=int(dc*W[c]/w); PC[c]+=x; rc-=x;  x=int(dtc*W[c]/w); TC[c]+=x; rtc-=x }
-        PR[heavy]+=rp; TR[heavy]+=rt; PC[heavy]+=rc; TC[heavy]+=rtc
-      }
-      for (c in KD) { k=KD[c] SUBSEP KA[c]; praw[k]+=PR[c]; traw[k]+=TR[c]; pcode[k]+=PC[c]; tcode[k]+=TC[c] }
-      for (k in commits) { split(k, parts, SUBSEP)
-        if (parts[2] == "bot") continue          # release bot, [bot] accounts: never counted, never shown
-        printf "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n", parts[1], parts[2],
-          (praw[k]+0), (traw[k]+0), (pcode[k]+0), (tcode[k]+0), commits[k], types[k] } }
+    # Iterate commits AND patch keys: a change dated by when it landed can sit
+    # on a (day, author) that authored no commit that day; its lines still count.
+    END { for (k in commits) all[k]; for (k in praw) all[k]; for (k in traw) all[k]
+          for (k in all) { split(k, parts, SUBSEP)
+            if (parts[2] == "bot") continue          # release bot, [bot] accounts: never counted, never shown
+            printf "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n", parts[1], parts[2],
+              (praw[k]+0), (traw[k]+0), (pcode[k]+0), (tcode[k]+0), (commits[k]+0), types[k] } }
   ' | sort
-  rm -f "$attrs" "$owners"
+  rm -f "$attrs"
 }
 commits_through() { git log --pretty=%ad --date=short 2>/dev/null | awk -v d="$1" '$1<=d' | wc -l | tr -d ' '; }
 
@@ -488,7 +492,7 @@ commits_through() { git log --pretty=%ad --date=short 2>/dev/null | awk -v d="$1
 # per-line rule, the .gitattributes linguist markers and the author map — never
 # on the whole script, so an edit to the report or the publish step keeps the
 # cache warm.
-CACHE_KEY=$( { declare -f day_rows add_linguist_history; printf '%s\n' "$AWK_RULES" "$LINGUIST_SIG" "$AUTHOR_MAP"; } | shasum | cut -c1-12)
+CACHE_KEY=$( { declare -f day_rows add_linguist_history; printf '%s\n' "$AWK_RULES" "$LINGUIST_SIG" "$AUTHOR_MAP" "$FIRST_DAY"; } | shasum | cut -c1-12)
 
 CACHED_ROWS=""; CACHE_LAST=""; CACHE_STATE="cold"
 if [[ -f "$CACHE" ]]; then
@@ -519,11 +523,11 @@ fi
 # ---- roll-ups -------------------------------------------------------------
 # per day:    "<date>\t<raw>\t<ncloc>\t<commits>\t<humans>"
 DAY_ROWS=$(echo "$ROWS" | awk -F'\t' '
-  { d=$1; f[d]+=$3+$4; nf[d]+=$5+$6; c[d]+=$7; if ($2!="bot") h[d]++; days[d] }
+  { d=$1; f[d]+=$3+$4; nf[d]+=$5+$6; c[d]+=$7; if ($2!="bot" && $2!="staff" && $7>0) h[d]++; days[d] }
   END { for (d in days) printf "%s\t%d\t%d\t%d\t%d\n", d, f[d], nf[d], c[d], (h[d]+0) }' | sort)
 # per author: "<author>\t<raw>\t<ncloc>\t<commits>\t<days>\t<since>"   (bots excluded)
 AUTHOR_ROWS=$(echo "$ROWS" | awk -F'\t' '
-  $2!="bot" { a=$2; f[a]+=$3+$4; nf[a]+=$5+$6; c[a]+=$7; if (!((a SUBSEP $1) in seen)) { seen[a SUBSEP $1]; dd[a]++ }; first[a]=(first[a]==""||$1<first[a])?$1:first[a] }
+  $2!="bot" && $2!="staff" { a=$2; f[a]+=$3+$4; nf[a]+=$5+$6; c[a]+=$7; if ($7>0 && !((a SUBSEP $1) in seen)) { seen[a SUBSEP $1]; dd[a]++ }; first[a]=(first[a]==""||$1<first[a])?$1:first[a] }
   END { for (a in f) printf "%s\t%d\t%d\t%d\t%d\t%s\n", a, f[a], nf[a], c[a], dd[a], first[a] }' | sort -t$'\t' -k2,2nr)
 
 DAYS_ACTUAL=$(echo "$DAY_ROWS" | grep -c . || echo 1)
@@ -547,6 +551,13 @@ printf '  ═══════════════════════�
 # author order for the day table: by first commit date; header uses the first name
 AUTHORS=$(echo "$AUTHOR_ROWS" | sort -t$'\t' -k6,6 | cut -f1 | paste -sd ';' -)
 printf '  BY COMMIT DAY (net functional LOC per author, from git history; cache %s%s)\n' "$CACHE_STATE" "$([[ -n "$CACHE_LAST" ]] && echo ", frozen through $CACHE_LAST")"
+# One column group per author: fine for a small team, but 38 authors over 450+
+# days is a table of hundreds of KB. Past LOC_DAY_TABLE_MAX authors it lives on
+# the page only.
+if [[ "$HUMANS" -gt "${LOC_DAY_TABLE_MAX:-8}" ]]; then
+  printf '  %s authors over %s days — the per-author day table is on the HTML page only\n' "$HUMANS" "$DAYS_ACTUAL"
+  printf '  (set LOC_DAY_TABLE_MAX=%s to print it here).\n\n' "$HUMANS"
+else
 echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_PER_DAY" '
   function mraw(loc, engdays,   m) { m = (engdays>0 ? loc/(base*engdays) : 0); if (m<0) m=0; return m }
   function mult(loc, engdays) { return sprintf("%.1fx", mraw(loc, engdays)) }
@@ -570,9 +581,10 @@ echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_PER_DAY" '
   }
   { d=$1; a=$2; if (!(d in days)) { days[d]; D[++m]=d }   # input is date-sorted
     c[d]+=$7; if (a=="bot") next;
+    if (a=="staff") { hc[d]+=$7; dtot[d]+=$3+$4; next }   # managers: lines for the team, no headcount
     cm[d,a]+=$7; acm[a]+=$7; hc[d]+=$7;
     loc[d,a]+=$3+$4; has[d,a]=1; tot[a]+=$3+$4; dtot[d]+=$3+$4;
-    if (!((d,a) in seen)) { seen[d,a]; ad[a]++; h[d]++ } }
+    if ($7>0 && !((d,a) in seen)) { seen[d,a]; ad[a]++; h[d]++ } }
   END {
     for (k=1;k<=m;k++) { d=D[k]; line=sprintf("  %-12s %7d", d, c[d]);
       for (i=1;i<=n;i++) line=line "  " cell(cm[d,A[i]], loc[d,A[i]], has[d,A[i]], 1);
@@ -585,20 +597,41 @@ echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_PER_DAY" '
     note=note sprintf("  %4s %8d %7s", "", E, ""); print note;
     print "  COMMITS = the day total; CMT = that author. Bots (release, [bot] accounts) are not counted anywhere."; print ""
   }'
+fi
 HIST_TOTAL=$(echo "$DAY_ROWS" | awk -F'\t' '{s+=$2} END{print s+0}')
 HIST_TOTAL_N=$(echo "$DAY_ROWS" | awk -F'\t' '{s+=$3} END{print s+0}')
 HIST_COMMITS=$(echo "$DAY_ROWS" | awk -F'\t' '{s+=$4} END{print s+0}')
-# team multiplier on history = contribution-weighted mean of the author multipliers
+# team multiplier on history = contribution-weighted mean of the author multipliers.
+# Vault default (LOC_TEAM_ONLY=1) is the plain ratio instead, team lines over
+# 150 x engineer-days, so the terminal, the page and the headline agree.
+if [[ "${LOC_TEAM_ONLY:-1}" = 1 ]]; then
+HIST_MULT=$(awk -v a="$HIST_TOTAL" -v b="$((BASELINE_PER_DAY * ENG_DAYS_ACTUAL))" 'BEGIN{ m=(b>0?a/b:0); if (m<0) m=0; printf "%.1f", m }')
+HIST_MULT_N=$(awk -v a="$HIST_TOTAL_N" -v b="$((BASELINE_PER_DAY * ENG_DAYS_ACTUAL))" 'BEGIN{ m=(b>0?a/b:0); if (m<0) m=0; printf "%.1f", m }')
+else
 HIST_MULT=$(echo "$AUTHOR_ROWS" | awk -F'\t' -v base="$BASELINE_PER_DAY" '
   { w=$2; if (w<0) w=0; m=($5>0 ? $2/(base*$5) : 0); if (m<0) m=0; num+=m*w; den+=w }
   END { printf "%.1f", (den>0 ? num/den : 0) }')
 HIST_MULT_N=$(echo "$AUTHOR_ROWS" | awk -F'\t' -v base="$BASELINE_PER_DAY" '
   { w=$3; if (w<0) w=0; m=($5>0 ? $3/(base*$5) : 0); if (m<0) m=0; num+=m*w; den+=w }
   END { printf "%.1f", (den>0 ? num/den : 0) }')
+fi
 
-if [[ "$HIST_TOTAL" -ne "$TOTAL" ]]; then
-  printf '  note: committed history %s vs working tree %s (Δ %+d) — uncommitted work in\n' "$HIST_TOTAL" "$TOTAL" "$((TOTAL - HIST_TOTAL))"
-  printf '        flight (files being moved/rewritten). Headline multiplier below uses the working tree.\n\n'
+# History (the default branch, first-parent) must sum to the tree. Within 0.1%
+# is scope edge cases (a file with no final newline, odd template filenames) and
+# is reported as reconciled; beyond that it is a real discrepancy, stated
+# without guessing.
+GAP=$((TOTAL - HIST_TOTAL))
+RECONCILED=$(awk -v g="$GAP" -v t="$TOTAL" 'BEGIN{ print ((g<0?-g:g) <= 0.001*t) ? 1 : 0 }')
+if [[ "$CLONE_DIRTY" = 1 ]]; then
+  printf '  WARNING: the checkout has local changes. The headline counts them; history\n'
+  printf '           on %s does not. Commit or set them aside for a clean figure.\n\n' "$DEFAULT_BRANCH"
+fi
+if [[ "$RECONCILED" = 1 ]]; then
+  printf '  reconciled: history on %s sums to %s, the tree holds %s (Δ %+d, within 0.1%%).\n\n' "$DEFAULT_BRANCH" "$HIST_TOTAL" "$TOTAL" "$GAP"
+else
+  printf '  NOT RECONCILED: history on %s sums to %s but the tree holds %s (Δ %+d).\n' "$DEFAULT_BRANCH" "$HIST_TOTAL" "$TOTAL" "$GAP"
+  printf '        Charts and headline disagree by that much. Cause not traced; investigate\n'
+  printf '        before quoting figures.\n\n'
 fi
 
 printf '  BY AUTHOR (net functional LOC, from git history; bots excluded; identity keyed by email)\n'
@@ -611,7 +644,7 @@ while IFS=$'\t' read -r a af an ac ad afirst; do
   printf '  %-14s %8s %11s %8s %6s %7sx %7sx  %s\n' "$a" "$ac" "$af" "$an" "$ad" "$amult" "$anmult" "$afirst"
 done <<< "$AUTHOR_ROWS"
 printf '  %-14s %8s %11s %8s %6s %8s %8s  %s\n' '--------------' '-------' '----------' '--------' '----' '----' '-----' '----------'
-printf '  %-14s %8s %11s %8s %6s %7sx %7sx  %s\n\n' "TEAM" "$(echo "$AUTHOR_ROWS" | awk -F'\t' '{s+=$4} END{print s+0}')" "$HIST_TOTAL" "$HIST_TOTAL_N" "$ENG_DAYS_ACTUAL" "$HIST_MULT" "$HIST_MULT_N" "$HUMANS engineer(s); DAYS = engineer-days; MULT = contribution-weighted"
+printf '  %-14s %8s %11s %8s %6s %7sx %7sx  %s\n\n' "TEAM" "$(echo "$AUTHOR_ROWS" | awk -F'\t' '{s+=$4} END{print s+0}')" "$HIST_TOTAL" "$HIST_TOTAL_N" "$ENG_DAYS_ACTUAL" "$HIST_MULT" "$HIST_MULT_N" "$HUMANS engineer(s); DAYS = engineer-days; MULT = $([[ "${LOC_TEAM_ONLY:-1}" = 1 ]] && echo 'team lines ÷ (baseline × engineer-days)' || echo contribution-weighted)"
 
 printf '  BY LANGUAGE (current tree; detected, not configured)\n'
 printf '  %-22s %7s %11s %10s %7s\n' 'LANGUAGE' 'FILES' 'FUNCTIONAL' 'NCLOC' 'SHARE'
@@ -664,15 +697,18 @@ printf '                         serves the tree and the history, so both reconc
 printf '  Languages              detected from the files, not configured: every\n'
 printf '                         programming language the classifier knows (the\n'
 printf '                         BY LANGUAGE table lists the ones found here).\n'
-printf '  Counted (multiplier)   the product surface, aggregated: product + test +\n'
-printf '                         config + pipeline + infrastructure.\n'
+printf '  Counted (multiplier)   what landed on the default branch (its first-parent\n'
+printf '                         history, so a change merged by two routes counts once),\n'
+printf '                         aggregated: product + test + config + pipeline +\n'
+printf '                         infrastructure.\n'
 printf '  Product                executable code. A scripts/ dir inside a package\n'
 printf '                         IS that package.\n'
 printf '  Test                   code at a test path: tests/ test/ spec/ __tests__/\n'
-printf '                         *Tests/ e2e/ fixtures/; .test. .spec. .setup.;\n'
+printf '                         *Tests/ *-tests/ e2e/ fixtures/; .test. .spec. .setup.;\n'
 printf '                         _test. _spec.; test_*.py conftest.py; *Test.java\n'
-printf '                         *Tests.swift. Tests inline in a source file (Zig,\n'
-printf '                         Rust) count as product: a line has no path of its own.\n'
+printf '                         *Tests.swift; Maestro flows (integration-tests/ YAML).\n'
+printf '                         Tests inline in a source file (Zig, Rust) count as\n'
+printf '                         product: a line has no path of its own.\n'
 printf '  Config                 build and tool configuration written as code:\n'
 printf '                         Makefile, CMake, build.zig, Package.swift, *.gradle,\n'
 printf '                         *.config.*, .*rc.js, Nix, Bazel, setup.py, build.rs.\n'
@@ -680,27 +716,29 @@ printf '  Pipeline               CI/CD: .github/ .gitlab-ci.yml .circleci/ Jenki
 printf '                         .buildkite/ azure-pipelines fastlane/ and the like.\n'
 printf '  Infrastructure         Terraform/HCL, Dockerfiles, compose, k8s/helm,\n'
 printf '                         infra/ deploy/ terraform/ cdk/ pulumi/ trees,\n'
-printf '                         render.yaml.\n'
+printf '                         render.yaml, root scripts/ (shell included).\n'
 printf '  Why all five           same reason tests count: without them the product\n'
 printf '                         is fragile and cannot move at speed with confidence.\n'
-printf '  Not the team\x27s code   vendor/ third_party/ node_modules/ Pods/ Carthage/;\n'
-printf '                         *.min.js, *.pb.go, _pb2.py, *.g.dart, generated/;\n'
-printf '                         lockfiles; docs/ examples/ samples/; and whatever\n'
+printf '  Not the team\x27s code   vendor/ third_party/ node_modules/ Pods/ Carthage/\n'
+printf '                         .yarn/; *.min.js, *.pb.go, _pb2.py, *.g.dart,\n'
+printf '                         generated/; lockfiles; docs/ examples/ samples/ poc/;\n'
+printf '                         AI-agent tooling (.agents/ prompts/); and whatever\n'
 printf '                         .gitattributes marks linguist-vendored, -generated\n'
 printf '                         or -documentation.\n'
-printf '  Reported, not counted  .css .scss .html — the UI-assets line above\n'
-printf '  Excluded formats       data and prose (.json .toml .xml .md .txt), shell\n'
-printf '                         scripts, YAML outside pipelines and infrastructure.\n'
+printf '  Reported, not counted  .css .scss .html and code under assets/ (drawings\n'
+printf '                         such as SVG wrapped as TSX) — the UI-assets line\n'
+printf '  Excluded formats       data and prose (.json .toml .xml .md .txt .snap),\n'
+printf '                         shell outside root scripts/, other YAML.\n'
 printf '  Excluded folders       anything .gitignored\n'
-printf '  Authors                keyed by email (LOC_AUTHOR_MAP); the\n'
-printf '                         release bot and every [bot] account are dropped\n'
-printf '                         from the walk entirely\n'
-printf '  Engineer-days          a date two people both committed on is one coding\n'
-printf '                         day and two engineer-days — that is why they differ\n'
-printf '  Team multiplier        contribution-weighted mean of the author\n'
-printf '                         multipliers (weight = share of lines), never\n'
-printf '                         total ÷ headcount; the headline below is the\n'
-printf '                         working tree over engineer-days (unattributable)\n'
+printf '  Authors                the author map (%s): each git\n' "${AUTHOR_FILE:+${AUTHOR_FILE##*/}}${AUTHOR_FILE:-none found}"
+printf '                         identity to a person and a role. Managers and\n'
+printf '                         excluded contributors keep their lines in the team\n'
+printf '                         total but are out of headcount, engineer-days and\n'
+printf '                         cost; bots, and every [bot] account, are dropped.\n'
+printf '  Engineer-days          every commit counts as effort: a date two people\n'
+printf '                         both committed on is one coding day and two\n'
+printf '                         engineer-days — that is why they differ\n'
+printf '  Team multiplier        %s\n' "$([[ "${LOC_TEAM_ONLY:-1}" = 1 ]] && echo 'team lines ÷ (baseline × engineer-days), as the headline' || echo 'contribution-weighted mean of the author multipliers')"
 printf '  Comment rule           // and /* */ in the C family (C, C++, Objective-C,\n'
 printf '                         Swift, Go, Rust, Java, Kotlin, C#, JS/TS, shaders);\n'
 printf '                         // in Zig; # in Python, Ruby, YAML, Dockerfiles,\n'
@@ -729,11 +767,13 @@ DAYS_JSON=$(echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_P
   BEGIN { n=split(authors, A, ";") }
   { d=$1; a=$2; if (!(d in days)) { days[d]; D[++m]=d }
     c[d]+=$7; if (a=="bot") next;
+    # managers ("staff"): their commits and lines count for the team; no headcount
+    if (a=="staff") { hc[d]+=$7; dtot[d]+=$3+$4; ndtot[d]+=$5+$6; next }
     cm[d,a]+=$7; hc[d]+=$7; ty[d,a]=$8;
     pn=split($8, P, ","); for (pi=1;pi<=pn;pi++) if (P[pi]!="") { split(P[pi], kv, ":"); tt[d,kv[1]]+=kv[2]; if (!((d,kv[1]) in tk)) { tk[d,kv[1]]; tl[d]=tl[d] (tl[d]==""?"":",") kv[1] } }
     loc[d,a]+=$3+$4; has[d,a]=1; dtot[d]+=$3+$4;
     nloc[d,a]+=$5+$6; ndtot[d]+=$5+$6;
-    if (!((d,a) in seen)) { seen[d,a]; h[d]++ } }
+    if ($7>0 && !((d,a) in seen)) { seen[d,a]; h[d]++ } }
   END {
     printf "[";
     for (k=1;k<=m;k++) { d=D[k]; if (k>1) printf ",";
@@ -760,6 +800,8 @@ window.LOC_DATA = {
   "head": "$(git rev-parse --short HEAD 2>/dev/null)",
   "baselinePerDay": $BASELINE_PER_DAY,
   "startDate": "${LOC_START_DATE:-}",
+  "teamOnly": $([[ "${LOC_TEAM_ONLY:-1}" = 1 ]] && echo true || echo false),
+  "cost": {"annual": ${LOC_COST_ANNUAL:-150000}, "currency": "${LOC_COST_CURRENCY:-AUD}", "workDays": ${LOC_WORK_DAYS:-220}},
   "cache": {"state": "$CACHE_STATE", "frozenThrough": "${CACHE_LAST:-}"},
   "authorOrder": [$AUTHOR_ORDER_JSON],
   "authors": [$AUTHORS_JSON],
@@ -770,7 +812,8 @@ window.LOC_DATA = {
   "tree": {"total": $TOTAL, "product": $PROD, "test": $TEST, "config": $CONFIG, "pipeline": $PIPELINE, "infra": $INFRA,
            "ui": $UI, "history": $HIST_TOTAL, "historyCommits": $HIST_COMMITS,
            "ncloc": $TOTAL_N, "nclocProduct": $PROD_N, "nclocTest": $TEST_N, "nclocConfig": $CONFIG_N,
-           "nclocPipeline": $PIPELINE_N, "nclocInfra": $INFRA_N, "nclocHistory": $HIST_TOTAL_N},
+           "nclocPipeline": $PIPELINE_N, "nclocInfra": $INFRA_N, "nclocHistory": $HIST_TOTAL_N,
+           "clean": $([[ "$CLONE_DIRTY" = 1 ]] && echo false || echo true)},
   "force": {"engineers": $HUMANS, "codingDays": $DAYS_ACTUAL, "engDays": $BASELINE_ENG_DAYS, "how": "$BASELINE_HOW", "baseline": $BASELINE, "mult": $MULT, "engDaysOut": $ENG_DAYS_OUT, "nmult": $MULT_N, "nclocEngDaysOut": $ENG_DAYS_OUT_N}
 };
 EOF

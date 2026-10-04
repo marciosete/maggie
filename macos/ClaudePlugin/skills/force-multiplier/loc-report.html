@@ -217,6 +217,24 @@
         border-top: 2px dashed var(--ink);
         border-radius: 0;
       }
+      /* running average: an accent hue, not ink, so it reads over the dark bars */
+      .legend i.line.avg {
+        height: 0;
+        border-top: 2px dashed var(--s2);
+        border-radius: 0;
+        background: none !important;
+      }
+      /* the period still running: a lighter bar with a dashed edge */
+      .legend i.todate {
+        background: var(--team);
+        opacity: 0.45;
+        outline: 1px dashed var(--ink-2);
+        outline-offset: -1px;
+      }
+      .legend b.val {
+        color: var(--ink);
+        font-weight: 600;
+      }
       .toolbar {
         display: flex;
         flex-wrap: wrap;
@@ -496,6 +514,33 @@
       tbody tr:hover {
         background: var(--ring);
       }
+      /* the period and team columns stay put while the author columns scroll past;
+         each pinned cell's left offset is measured in JS (pinColumns) */
+      table.pinned .pin {
+        position: sticky;
+        z-index: 1;
+        background: var(--surface);
+      }
+      table.pinned thead .pin {
+        z-index: 2;
+      }
+      /* team columns only: fit the content rather than stretch four columns wide */
+      table.pinned.compact {
+        width: auto;
+        min-width: 420px;
+      }
+      /* the per-period table: every column centred, headers too (2026-10-03) */
+      table.pinned.compact th,
+      table.pinned.compact td {
+        text-align: center;
+      }
+      table.pinned .pin-edge {
+        box-shadow: inset -1px 0 0 var(--axis);
+      }
+      /* a hovered row keeps its tint under the pinned cells */
+      table.pinned tbody tr:hover > .pin {
+        background: linear-gradient(var(--ring), var(--ring)), var(--surface);
+      }
       tfoot td {
         font-weight: 650;
         border-top: 1px solid var(--axis);
@@ -729,6 +774,13 @@
         // sets its date each year. Verified against qld.gov.au for 2026.
         const EKKA = { 2025: '08-13', 2026: '08-12' };
         const START_DATE = (D && D.startDate) || '0000-00-00'; // LOC_START_DATE; none = no cut-off
+        // the day the data was generated, on the viewer's calendar: a period whose
+        // interval ends after it is still running ("to date")
+        const TODAY = (() => {
+          const t = new Date(D.generatedAt);
+          return new Date(Date.UTC(t.getFullYear(), t.getMonth(), t.getDate()));
+        })();
+        const LAST_DAY = D.days.length ? D.days[D.days.length - 1].date : '';
         const WEEKDAY = [
           'Sunday',
           'Monday',
@@ -994,6 +1046,8 @@
         // Same page, less data: everything author-shaped folds away, and the team
         // figures — which already carry the right engineer-days — do the work.
         const TEAM_ONLY = !!D.teamOnly;
+        // the authors whose names the page may show (none when team-only)
+        const shown = () => (TEAM_ONLY ? [] : authors);
 
         const isN = () => metric === 'ncloc';
         const LV = (o) => (!o ? 0 : isN() ? o.ncloc : o.loc); // lines on a record
@@ -1018,7 +1072,10 @@
         // The chart opens on the start date (if set), or later when the period
         // starts later. Earlier days are not drawn, but they stay in the headline, the
         // table and every running figure the chart shows.
-        const CHART_FROM = START_DATE;
+        // No LOC_START_DATE means START_DATE is '0000-00-00'. Opening the axis there
+        // spans two millennia and squeezes every bar into the last pixel (a
+        // fix of 2026-10-03), so fall back to the first commit day.
+        const CHART_FROM = D.startDate || (D.days.length ? D.days[0].date : START_DATE);
         const chartFrom = () => {
           const w = windowStart();
           return w && w > CHART_FROM ? w : CHART_FROM;
@@ -1124,7 +1181,9 @@
               num += MU(o) * w;
               den += w;
             }
-            b.teamMult = TEAM_ONLY ? MU(b.team) : den > 0 ? num / den : 0;
+            b.teamMult = MU(b.team); // plain ratio in both modes (2026-10-03)
+            // the period still running: its calendar interval ends after today
+            b.partial = binSpan(b, utc(1970, 1, 1))[1].getTime() > TODAY.getTime();
           }
           return out;
         }
@@ -1177,7 +1236,8 @@
             codingDays,
             lines: isN() ? ncloc : loc,
             engineers: Object.keys(by).length,
-            teamMult: den > 0 ? num / den : 0,
+            // plain ratio, as the headline (2026-10-03)
+            teamMult: engDays ? Math.max(0, (isN() ? ncloc : loc) / (BASE * engDays)) : 0,
           };
         }
 
@@ -1191,10 +1251,10 @@
           return '';
         };
         const tipHead = (b) =>
-          `<b>${esc(b.title)}</b>${spanText(b) ? `<div class="when">${esc(spanText(b))}</div>` : ''}`;
+          `<b>${esc(b.title)}</b>${b.partial ? ' <span style="color:var(--muted)">· to date</span>' : ''}${spanText(b) ?`<div class="when">${esc(spanText(b))}</div>` : ''}`;
         const tipRows = (b) =>
           `<div class="row" style="color:var(--muted)"><span></span><span>commits · ${UNIT()} · mult</span></div>` +
-          authors
+          shown()
             .filter((a) => b.by[a])
             .map(
               (a) =>
@@ -1224,7 +1284,7 @@
         };
         // ---------- chart geometry ----------
         const W = 1120,
-          M = { t: 14, r: 16, b: 34, l: 58 };
+          M = { t: 14, r: 16, b: 44, l: 58 }; // b: two axis tiers
         // The calendar interval a bucket covers, clipped to the chart's opening date: a
         // day, the ISO week from its Monday, or the month / quarter / year.
         function binSpan(b, from) {
@@ -1280,35 +1340,194 @@
           axis.append(
             h('line', { x1: M.l, x2: W - M.r, y1: y(Math.max(0, y0)), y2: y(Math.max(0, y0)) })
           );
-          const days = (t1 - t0) / 86400000;
-          const every = [1, 2, 3, 7, 14, 28].find((s) => days / s <= 10) || Math.ceil(days / 10);
-          for (let dt = from; dt.getTime() < t1; dt = addDays(dt, every))
-            axis.append(
-              h('text', { x: xt(dt), y: H - 12, 'text-anchor': 'middle' }, auDay(isoOf(dt)))
-            );
+          // Two-tier calendar axis under the plot (2026-10-03). Tier 1
+          // names the finest calendar unit that fits, never finer than the grouping;
+          // tier 2 gives the context tier 1 lacks: month + year for days, the year
+          // for weeks, months and quarters. Every bar is an interval, so labels sit
+          // centred in the interval they name, not on an instant.
+          const plotB = M.t + ph;
+          // when the plot dips below zero the zero line sits mid-plot, so give the
+          // ticks a floor of their own
+          if (y0 < 0) axis.append(h('line', { x1: M.l, x2: W - M.r, y1: plotB, y2: plotB }));
+          const pxPerDay = pw / ((t1 - t0) / 86400000);
+          const order = ['days', 'weeks', 'months', 'quarters', 'years'];
+          const unit = {
+            days: { len: 1, px: 18, ctx: 'monthYear' },
+            weeks: { len: 7, px: 44, ctx: 'years' },
+            months: { len: 30.44, px: 12, ctx: 'years' },
+            quarters: { len: 91.3, px: 24, ctx: 'years' },
+            years: { len: 365.25, px: 32, ctx: null },
+          };
+          const startOf = (u, dt) => {
+            const yy = dt.getUTCFullYear(),
+              mm = dt.getUTCMonth();
+            if (u === 'days') return dt;
+            if (u === 'weeks') return addDays(dt, -((dt.getUTCDay() + 6) % 7)); // Monday
+            if (u === 'months' || u === 'monthYear') return utc(yy, mm + 1, 1);
+            if (u === 'quarters') return utc(yy, 3 * Math.floor(mm / 3) + 1, 1);
+            return utc(yy, 1, 1);
+          };
+          const nextOf = (u, dt) => {
+            const yy = dt.getUTCFullYear(),
+              mm = dt.getUTCMonth();
+            if (u === 'days') return addDays(dt, 1);
+            if (u === 'weeks') return addDays(dt, 7);
+            if (u === 'months' || u === 'monthYear') return utc(yy, mm + 2, 1);
+            if (u === 'quarters') return utc(yy, mm + 4, 1);
+            return utc(yy + 1, 1, 1);
+          };
+          // label for an interval of unit u, given the pixels it has; '' = too narrow
+          const labelOf = (u, dt, w) => {
+            const yy = dt.getUTCFullYear(),
+              mm = dt.getUTCMonth(),
+              dd = dt.getUTCDate();
+            if (u === 'days')
+              return w >= 42 ? `${WEEKDAY[dt.getUTCDay()].slice(0, 3)} ${dd}` : w >= 14 ? String(dd) : '';
+            if (u === 'weeks') return w >= 40 ? `${dd} ${MONTH[mm]}` : '';
+            if (u === 'months') return w >= 26 ? MONTH[mm] : w >= 10 ? MONTH[mm][0] : '';
+            if (u === 'quarters') return w >= 20 ? `Q${Math.floor(mm / 3) + 1}` : '';
+            if (u === 'monthYear')
+              return w >= 60 ? `${MONTH[mm]} ${yy}` : w >= 26 ? MONTH[mm] : '';
+            return w >= 32 ? String(yy) : w >= 22 ? `’${String(yy).slice(2)}` : '';
+          };
+          const t1u = order
+            .slice(order.indexOf(group))
+            .find((u) => unit[u].len * pxPerDay >= unit[u].px) || 'years';
+          // Weeks labelling day bars take month + year context: month boundaries fall
+          // between days. On a weeks grouping they would cut through bars, so the
+          // year stays the context there.
+          const t2u = t1u === 'weeks' && group === 'days' ? 'monthYear' : unit[t1u].ctx;
+          // the visible intervals of unit u: [start, end] clipped to the axis
+          const intervals = (u) => {
+            const out = [];
+            for (let s = startOf(u, from), k = 0; s.getTime() < t1 && k < 4000; k++) {
+              const e = nextOf(u, s);
+              out.push({ d: s, a: Math.max(s.getTime(), t0), b: Math.min(e.getTime(), t1) });
+              s = e;
+            }
+            return out;
+          };
+          const px = (t) => xt(new Date(t));
+          for (const iv of intervals(t1u)) {
+            const w = px(iv.b) - px(iv.a),
+              lab = labelOf(t1u, iv.d, w);
+            if (lab)
+              axis.append(
+                h('text', { x: (px(iv.a) + px(iv.b)) / 2, y: plotB + 15, 'text-anchor': 'middle' }, lab)
+              );
+            if (iv.a > t0) axis.append(h('line', { x1: px(iv.a), x2: px(iv.a), y1: plotB, y2: plotB + 4 }));
+          }
+          const tier2At = [];
+          if (t2u)
+            for (const iv of intervals(t2u)) {
+              const w = px(iv.b) - px(iv.a),
+                lab = labelOf(t2u, iv.d, w);
+              if (lab) tier2At.push({ x: (px(iv.a) + px(iv.b)) / 2, half: lab.length * 3.5 });
+              if (lab)
+                axis.append(
+                  h(
+                    'text',
+                    {
+                      x: (px(iv.a) + px(iv.b)) / 2,
+                      y: plotB + 32,
+                      'text-anchor': 'middle',
+                      style: 'fill: var(--ink-2); font-weight: 600',
+                    },
+                    lab
+                  )
+                );
+              if (iv.a > t0)
+                axis.append(h('line', { x1: px(iv.a), x2: px(iv.a), y1: plotB, y2: plotB + 36 }));
+            }
+          // "to date" under a period still running, in the context row, when the bar
+          // is wide enough and no context label sits there (else the legend and the
+          // tooltip carry it)
+          if (n && bs[n - 1].partial) {
+            const lx = x(n - 1);
+            if (bw(n - 1) >= 34 && !tier2At.some((t) => Math.abs(t.x - lx) < t.half + 24))
+              axis.append(
+                h(
+                  'text',
+                  { x: lx, y: plotB + 32, 'text-anchor': 'middle', style: 'font-style: italic' },
+                  'to date'
+                )
+              );
+          }
           svg.append(axis);
-          // A faint rule on the 1st of each month, for reading month-on-month progress.
-          // Returned for the caller to lay over its marks, so the rule stays visible.
+          // Vertical rules, returned for the caller to lay over its marks so they stay
+          // visible: a firmer rule at each tier-2 boundary (the year, or the month for
+          // a days axis), and a faint one at tier-1 boundaries only where the bars do
+          // not already mark them (tier 1 coarser than the grouping).
           const monthRules = h('g', {
             stroke: 'var(--muted)',
-            'stroke-opacity': 0.3,
             'stroke-width': 1,
             'shape-rendering': 'crispEdges',
           });
-          const nextMonth = (dt) => utc(dt.getUTCFullYear(), dt.getUTCMonth() + 2, 1);
-          for (let m = nextMonth(from); m.getTime() < t1; m = nextMonth(m)) {
-            const mx = xt(m);
-            monthRules.append(h('line', { x1: mx, x2: mx, y1: M.t, y2: y(Math.max(0, y0)) }));
-            monthRules.append(
-              h(
-                'text',
-                // In the top margin, clear of any label printed at a series' end.
-                { x: mx + 4, y: M.t - 3, fill: 'var(--muted)', stroke: 'none', 'font-size': 10 },
-                MONTH[m.getUTCMonth()]
-              )
-            );
-          }
+          if (t1u !== group && t1u !== t2u)
+            for (const iv of intervals(t1u))
+              if (iv.a > t0)
+                monthRules.append(
+                  h('line', { x1: px(iv.a), x2: px(iv.a), y1: M.t, y2: plotB, 'stroke-opacity': 0.18 })
+                );
+          if (t2u)
+            for (const iv of intervals(t2u))
+              if (iv.a > t0)
+                monthRules.append(
+                  h('line', { x1: px(iv.a), x2: px(iv.a), y1: M.t, y2: plotB, 'stroke-opacity': 0.5 })
+                );
           return { svg, x, xt, bw, y, pw, ph, n, monthRules };
+        }
+        // The running average over the bars: an accent hue (not ink, which vanished
+        // into the dark team bars) on a 5px surface halo so it stays legible where it
+        // crosses a bar. Its value is labelled at the line's end, in ink on a surface
+        // halo so it reads over a bar too.
+        function drawRun(svg, run, x, y, n, label) {
+          const d = run.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+          const line = { d, fill: 'none', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' };
+          svg.append(h('path', { ...line, stroke: 'var(--surface)', 'stroke-width': 5 }));
+          svg.append(h('path', { ...line, stroke: 'var(--s2)', 'stroke-width': 2, 'stroke-dasharray': '5 4' }));
+          svg.append(
+            h('circle', {
+              cx: x(n - 1),
+              cy: y(run[n - 1]),
+              r: 4,
+              fill: 'var(--s2)',
+              stroke: 'var(--surface)',
+              'stroke-width': 2,
+            })
+          );
+          // the label on a surface pill, sized to the rendered text; an array is one
+          // line per entry, the first in bold ink, the rest in secondary ink
+          const lines = Array.isArray(label) ? label : [label];
+          const tx = x(n - 1) - 10,
+            ty = y(run[n - 1]) - 14 - 14 * (lines.length - 1);
+          const pill = h('rect', { rx: 4, fill: 'var(--surface)', 'fill-opacity': 0.94, stroke: 'var(--grid)' });
+          // lines left-aligned with each other; the block as a whole ends at tx
+          const text = h('text', { x: tx, y: ty, 'text-anchor': 'start', 'font-size': 11 });
+          lines.forEach((l, i) =>
+            text.append(
+              h(
+                'tspan',
+                {
+                  x: tx,
+                  dy: i ? 14 : 0,
+                  fill: i ? 'var(--ink-2)' : 'var(--ink)',
+                  'font-weight': i ? 500 : 600,
+                },
+                l
+              )
+            )
+          );
+          svg.append(pill, text);
+          requestAnimationFrame(() => {
+            const left = tx - text.getBBox().width;
+            text.querySelectorAll('tspan').forEach((t) => t.setAttribute('x', left));
+            const bb = text.getBBox();
+            pill.setAttribute('x', bb.x - 6);
+            pill.setAttribute('y', bb.y - 3);
+            pill.setAttribute('width', bb.width + 12);
+            pill.setAttribute('height', bb.height + 6);
+          });
         }
         function niceTicks(lo, hi, count) {
           const span = hi - lo,
@@ -1407,9 +1626,17 @@
             // start date keep the author's hue in a lighter shade of it.
             const tone = (a) => (TEAM_ONLY ? 'var(--team)' : colorOf[a]);
             const shade = (a) =>
-              b.off
-                ? { fill: tone(a), 'fill-opacity': 0.42, stroke: tone(a), 'stroke-width': 1 }
-                : { fill: tone(a) };
+              b.partial
+                ? {
+                    fill: tone(a),
+                    'fill-opacity': 0.45,
+                    stroke: 'var(--ink-2)',
+                    'stroke-width': 1,
+                    'stroke-dasharray': '3 2',
+                  }
+                : b.off
+                  ? { fill: tone(a), 'fill-opacity': 0.42, stroke: tone(a), 'stroke-width': 1 }
+                  : { fill: tone(a) };
             (TEAM_ONLY ? ['Team'] : authors).forEach((a) => {
               const v = TEAM_ONLY ? LV(b.team) : LV(b.by[a]);
               if (!v) return;
@@ -1445,35 +1672,18 @@
               }
             });
           });
-          svg.append(
-            h('path', {
-              d: run
-                .map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`)
-                .join(''),
-              fill: 'none',
-              stroke: 'var(--ink)',
-              'stroke-width': 2,
-              'stroke-dasharray': '5 4',
-              'stroke-linejoin': 'round',
-              'stroke-linecap': 'round',
-            })
-          );
           const last = run[run.length - 1];
-          svg.append(h('circle', { cx: x(n - 1), cy: y(last), r: 3.5, fill: 'var(--ink)' }));
-          svg.append(
-            h(
-              'text',
-              {
-                x: x(n - 1) - 10,
-                y: y(last) - 16,
-                'text-anchor': 'end',
-                fill: 'var(--ink)',
-                'font-size': 11,
-                'font-weight': 600,
-              },
-              `${last > 0 ? '+' : ''}${fmt(Math.round(last))} ${UNIT()} / coding ${groupLabel()} running average`
-            )
-          );
+          // The same running total per engineer, proportionally: cumulative lines ÷
+          // cumulative engineer-days (each person's commit days, summed). A part-timer
+          // or late joiner counts for the days they worked, not a whole period, and
+          // the unit is the baseline's own, so it reads straight against it.
+          const engDays = (seed.days || 0) + bs.reduce((s, b) => s + b.team.days, 0);
+          const engLines = seed.lines + bs.reduce((s, b) => s + LV(b.team), 0);
+          const perEng = engDays ? engLines / engDays : 0;
+          drawRun(svg, run, x, y, n, [
+            `${last > 0 ? '+' : ''}${fmt(Math.round(last))} ${UNIT()} / coding ${groupLabel()} running average · team`,
+            `${fmt(Math.round(perEng))} ${UNIT()} / coding day per engineer`,
+          ]);
           svg.append(monthRules);
           tooltip(
             el,
@@ -1533,7 +1743,7 @@
               if (v > 0) p += v;
               else q += v;
             }
-            hi = Math.max(hi, p, c.pace, TEAM_ONLY ? c.team : 0);
+            hi = Math.max(hi, p, TEAM_ONLY ? c.team : 0); // pace no longer drawn, so not in the scale
             lo = Math.min(lo, q);
           }
           const { svg, x, xt, y, n, monthRules } = frame(
@@ -1579,7 +1789,7 @@
               })
             );
           }
-          authors.forEach((a) => {
+          shown().forEach((a) => {
             if (!pts.some((p) => p.c.by[a])) return;
             svg.append(
               h('path', {
@@ -1603,16 +1813,8 @@
               'stroke-linejoin': 'round',
             })
           );
-          svg.append(
-            h('path', {
-              d: line((c) => c.pace),
-              fill: 'none',
-              stroke: 'var(--muted)',
-              'stroke-width': 1.5,
-              'stroke-dasharray': '5 4',
-              'stroke-linejoin': 'round',
-            })
-          );
+          // The baseline-pace line (150 x cumulative engineer-days) is not drawn: it was
+          // removed 2026-10-03. The pace stays in the end label and the tooltip.
           const last = at(bs[n - 1]);
           svg.append(
             h(
@@ -1621,17 +1823,23 @@
                 x: x(n - 1),
                 y: y(last.team) - 8,
                 'text-anchor': 'end',
-                fill: 'var(--ink-2)',
+                fill: 'var(--ink)',
                 'font-size': 11,
+                'font-weight': 600,
+                // a surface halo, so the label stays legible where the pace line crosses it
+                stroke: 'var(--surface)',
+                'stroke-width': 4,
+                'paint-order': 'stroke',
+                'stroke-linejoin': 'round',
               },
-              `${fmt(last.team)} ${UNIT()} · ${fx(last.pace ? last.team / last.pace : 0)} of baseline pace`
+              `${fmt(last.team)} ${UNIT()} · ${fx(last.pace ? last.team / last.pace : 0)} of baseline pace${bs[n - 1].partial && LAST_DAY ? ` · as at ${Number(LAST_DAY.slice(8, 10))} ${MONTH[Number(LAST_DAY.slice(5, 7)) - 1]}` : ''}`
             )
           );
           tooltip(el, svg, x, n, bs, (b) => {
             const c = at(b);
             return (
               `${tipHead(b)}<div class="row" style="color:var(--muted)"><span></span><span>to date · this period</span></div>` +
-              authors
+              shown()
                 .filter((a) => c.by[a])
                 .map(
                   (a) =>
@@ -1679,14 +1887,11 @@
             w[a] = v;
             den += v;
           }
+          // The bar is the plain team multiplier (team lines ÷ 150 × engineer-days),
+          // split by each author's share of the lines.
           const parts = {};
-          let total = 0;
-          for (const a in w) {
-            const p = den > 0 ? MU(b.by[a]) * (w[a] / den) : 0;
-            parts[a] = p;
-            total += p;
-          }
-          return { parts, total, share: (a) => (den > 0 ? w[a] / den : 0) };
+          for (const a in w) parts[a] = den > 0 ? b.teamMult * (w[a] / den) : 0;
+          return { parts, total: b.teamMult, share: (a) => (den > 0 ? w[a] / den : 0) };
         }
         const tipMult = (b, c) =>
           `${tipHead(b)}` +
@@ -1729,9 +1934,17 @@
             if (!c.total) return; // a net-deletion period floors at 0
             const tone = (a) => (TEAM_ONLY ? 'var(--team)' : colorOf[a]);
             const shade = (a) =>
-              b.off
-                ? { fill: tone(a), 'fill-opacity': 0.42, stroke: tone(a), 'stroke-width': 1 }
-                : { fill: tone(a) };
+              b.partial
+                ? {
+                    fill: tone(a),
+                    'fill-opacity': 0.45,
+                    stroke: 'var(--ink-2)',
+                    'stroke-width': 1,
+                    'stroke-dasharray': '3 2',
+                  }
+                : b.off
+                  ? { fill: tone(a), 'fill-opacity': 0.42, stroke: tone(a), 'stroke-width': 1 }
+                  : { fill: tone(a) };
             let acc = 0;
             (TEAM_ONLY ? ['Team'] : authors).forEach((a) => {
               const v = c.parts[a];
@@ -1751,112 +1964,94 @@
               acc += v;
             });
           });
-          svg.append(
-            h('path', {
-              d: run
-                .map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`)
-                .join(''),
-              fill: 'none',
-              stroke: 'var(--ink)',
-              'stroke-width': 2,
-              'stroke-dasharray': '5 4',
-              'stroke-linejoin': 'round',
-              'stroke-linecap': 'round',
-            })
-          );
           const last = run[run.length - 1];
-          svg.append(h('circle', { cx: x(n - 1), cy: y(last), r: 3.5, fill: 'var(--ink)' }));
-          svg.append(
-            h(
-              'text',
-              {
-                x: x(n - 1) - 10,
-                y: y(last) - 16,
-                'text-anchor': 'end',
-                fill: 'var(--ink)',
-                'font-size': 11,
-                'font-weight': 600,
-              },
-              `${fx(last)} running average`
-            )
-          );
-          const peak = bs.reduce((p, b) => (b.teamMult > p.teamMult ? b : p), bs[0]);
-          const pi = bs.indexOf(peak);
-          svg.append(
-            h(
-              'text',
-              {
-                x: x(pi),
-                y: y(peak.teamMult) - 8,
-                'text-anchor': x(pi) > M.l + pw * 0.8 ? 'end' : 'middle',
-                fill: 'var(--ink-2)',
-                'font-size': 11,
-              },
-              `${peak.short} · ${fx(peak.teamMult)}`
-            )
-          );
+          drawRun(svg, run, x, y, n, `${fx(last)} running average`);
           svg.append(monthRules);
           tooltip(el, svg, x, n, bs, (b, i) => tipMult(b, cs[bs.indexOf(b)]));
           el.append(svg);
         }
 
-        function drawTable(el, bs) {
-          const cell = (o) =>
-            !o
-              ? `<td class="dim">·</td><td class="dim">·</td><td class="dim">·</td>`
-              : `<td>${fmt(o.c)}</td><td class="${o.n < 0 ? 'neg' : ''}">${fmt(o.n)}</td><td>${fx(o.m)}</td>`;
-          const agg = {};
-          authors.forEach((a) => {
-            agg[a] = { c: 0, n: 0, days: 0 };
+        // Pin every .pin cell at the running width of the pinned cells before it in
+        // its row. Measured, because column widths follow the data; re-run when the
+        // section opens (a closed <details> has no layout).
+        function pinColumns(table) {
+          if (!table || !table.offsetWidth) return;
+          table.querySelectorAll('tr').forEach((tr) => {
+            let left = 0;
+            tr.querySelectorAll('.pin').forEach((c) => {
+              c.style.left = left + 'px';
+              left += c.getBoundingClientRect().width;
+            });
           });
+        }
+
+        function drawTable(el, bs) {
+          // The team's cells, frozen beside the period (pin), with two per-period
+          // columns (2026-10-03): Engineers, the distinct people who committed, and
+          // lines per engineer per coding day (lines ÷ engineer-days, the baseline's
+          // own unit). The table is the team only, with no per-author column groups
+          // (2026-10-04).
+          const everyone = new Set();
+          const teamCells = (o) => {
+            // order (2026-10-03): Mult, Commits, Engineers, Commits / engineer,
+            // lines, lines / engineer / coding day
+            const td = (v, cls) => `<td class="pin${cls ? ' ' + cls : ''}">${v}</td>`;
+            if (!o) return ['', '', '', '', '', 'pin-edge'].map((c) => td('·', ('dim ' + c).trim())).join('');
+            return (
+              td(fx(o.m)) +
+              td(fmt(o.c)) +
+              td(fmt(o.e)) +
+              td(o.e ? (o.c / o.e).toFixed(1) : '·') +
+              td(fmt(o.n), o.n < 0 ? 'neg' : '') +
+              td(o.d ? fmt(Math.round(o.n / o.d)) : '·', 'pin-edge' + (o.n < 0 ? ' neg' : ''))
+            );
+          };
           let tn = 0,
             tc = 0,
-            eng = 0,
-            num = 0,
-            den = 0;
+            eng = 0;
           const rows = [...bs]
             .reverse()
             .map((b) => {
-              authors.forEach((a) => {
-                if (b.by[a]) {
-                  agg[a].c += b.by[a].commits;
-                  agg[a].n += LV(b.by[a]);
-                  agg[a].days += b.by[a].days;
-                }
-              });
               tn += LV(b.team);
               tc += b.commits;
               eng += b.team.days;
+              // who committed in this period: a person with a commit, not merely a merge
+              // landing their lines (first-parent history credits the merger)
+              const who = authors.filter((a) => b.by[a] && b.by[a].commits > 0);
+              who.forEach((a) => everyone.add(a));
               return (
-                `<tr><td>${esc(b.row)}</td>` +
-                authors
-                  .map((a) =>
-                    cell(b.by[a] ? { c: b.by[a].commits, n: LV(b.by[a]), m: MU(b.by[a]) } : null)
-                  )
-                  .join('') +
-                (b.team.days ? cell({ c: b.commits, n: LV(b.team), m: b.teamMult }) : cell(null)) +
+                `<tr><td class="pin">${esc(b.row)}</td>` +
+                (b.team.days
+                  ? teamCells({ c: b.commits, e: who.length, n: LV(b.team), d: b.team.days, m: b.teamMult })
+                  : teamCells(null)) +
                 '</tr>'
               );
             })
             .join('');
-          const amult = (a) => (agg[a].days ? Math.max(0, agg[a].n / (BASE * agg[a].days)) : 0);
-          authors.forEach((a) => {
-            const w = Math.max(0, agg[a].n);
-            num += amult(a) * w;
-            den += w;
-          });
-          el.innerHTML = `<table>
+          // team aggregate: the plain ratio, as the headline and chart
+          const teamAgg = eng ? Math.max(0, tn / (BASE * eng)) : 0;
+          el.innerHTML = `<table class="pinned compact">
       <thead>
-        <tr><th></th>${authors.map((a) => `<th class="grp" colspan="3"><i style="background:${colorOf[a]}"></i>${esc(a)}</th>`).join('')}<th class="grp" colspan="3">Team</th></tr>
-        <tr><th>${group === 'days' ? 'Date' : 'Period'}</th>${authors.map(() => `<th>Commits</th><th>${UNIT()}</th><th>Mult</th>`).join('')}<th>Commits</th><th>${UNIT()}</th><th>Mult</th></tr>
+        <tr><th class="pin"></th><th class="grp pin pin-edge" colspan="6">Team</th></tr>
+        <tr><th class="pin">${group === 'days' ? 'Date' : 'Period'}</th><th class="pin">Mult</th><th class="pin">Commits</th><th class="pin">Engineers</th><th class="pin">Commits / engineer</th><th class="pin">${UNIT()}</th><th class="pin pin-edge">${UNIT()} / engineer / coding day</th></tr>
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><td>Aggregate</td>${authors.map((a) => cell({ c: agg[a].c, n: agg[a].n, m: amult(a) })).join('')}${cell({ c: tc, n: tn, m: den ? num / den : 0 })}</tr>
-        <tr class="days"><td>days</td>${authors.map((a) => `<td colspan="3">${agg[a].days}</td>`).join('')}<td colspan="3">${eng} engineer-days</td></tr>
+        <tr><td class="pin">Aggregate</td>${teamCells({ c: tc, e: everyone.size, n: tn, d: eng, m: teamAgg })}</tr>
+        <tr class="days"><td class="pin">days</td><td class="pin pin-edge" colspan="6">${eng} engineer-days · Engineers = distinct people who committed in the period</td></tr>
       </tfoot></table>
       <p class="note" style="margin-top:8px">Multipliers divide by engineer-days inside the period, never by the number of periods.</p>`;
+          const tbl = el.querySelector('table.pinned');
+          requestAnimationFrame(() => pinColumns(tbl));
+          const det = el.closest('details');
+          if (det && !det.dataset.pinHook) {
+            det.dataset.pinHook = '1';
+            det.addEventListener('toggle', () => pinColumns(det.querySelector('table.pinned')));
+          }
         }
+        window.addEventListener('resize', () =>
+          document.querySelectorAll('table.pinned').forEach(pinColumns)
+        );
 
         // The kind of work each author did over the period, and the team. One card
         // each, wrapping, so a team of six reads as well as a team of two.
@@ -1879,6 +2074,165 @@
           };
           return `<div class="mixhead"><h3>Commit mix</h3><div class="sub">What kind of work, from each commit's Conventional Commits type, over ${esc(periodLabel())} · Refactor includes perf and style · Docs &amp; chore is everything else (docs, chore, ci, build…)</div></div>
       <div class="mixgrid">${cards.map(card).join('')}</div>`;
+        }
+
+        // ---------- time and cost (2026-10-03) ----------
+        // Cost is paid time, not commit days: an engineer costs every working day they
+        // are on the team, committing or not. Git has no employment dates and there
+        // are no FTE figures, so "on the team" is estimated as first commit → last
+        // commit, in weekdays, clipped to the period the dials select. Managers
+        // (author-map role) and bots are not in `authors`, so carry no cost here.
+        //   paid engineer-years = Σ weekdays on the team ÷ 260
+        //   cost to date        = paid engineer-years × annual package
+        //   pace                = ncloc ÷ (paid engineer-years × working days a year)
+        //   per target: effort (engineer working days) = target ÷ pace;
+        //               cost = effort × annual ÷ working days;
+        //               time · 1 engineer = effort, as calendar time at workDays a year;
+        //               time · current team = target ÷ the latest complete period's
+        //               ncloc, in that period's unit (the grouping on the dial).
+        // Always in ncloc (the targets are code lines), whichever metric is shown.
+        const COST = Object.assign({ annual: 150000, currency: 'AUD', workDays: 220 }, D.cost || {});
+        const COST_TARGETS = [10e3, 50e3, 100e3, 150e3, 200e3, 250e3]; // 30k and 75k dropped (2026-10-03)
+        const money = (v) =>
+          new Intl.NumberFormat('en-AU', { style: 'currency', currency: COST.currency, maximumFractionDigits: 0 }).format(v);
+        // weekdays from a to b inclusive (ISO dates)
+        const weekdays = (a, b) => {
+          let s = parse(a),
+            e = parse(b),
+            n = 0;
+          if (e < s) return 0;
+          const full = Math.floor((e - s) / (7 * 86400000));
+          n = full * 5;
+          for (let d = addDays(s, full * 7); d <= e; d = addDays(d, 1)) n += d.getUTCDay() % 6 ? 1 : 0;
+          return n;
+        };
+        // engineer working days as calendar time, at COST.workDays a year
+        const span = (wd) => {
+          const yrs = wd / COST.workDays;
+          return yrs < 0.25
+            ? `${(yrs * 52).toFixed(1)} weeks`
+            : yrs < 2
+              ? `${(yrs * 12).toFixed(1)} months`
+              : `${yrs.toFixed(1)} years`;
+        };
+        // each engineer's first and last commit over all history
+        const tenure = (() => {
+          const t = {};
+          for (const d of D.days)
+            for (const a of authors) {
+              const o = d.by[a];
+              if (!o || !o.commits) continue;
+              (t[a] = t[a] || { first: d.date, last: d.date }).last = d.date;
+            }
+          return t;
+        })();
+        function costSection(s, days, bs) {
+          const ws = days.length ? days[0].date : '',
+            we = days.length ? days[days.length - 1].date : '';
+          let paidDays = 0,
+            people = 0;
+          for (const a in tenure) {
+            const f = tenure[a].first > ws ? tenure[a].first : ws,
+              l = tenure[a].last < we ? tenure[a].last : we;
+            const w = ws && f <= l ? weekdays(f, l) : 0;
+            if (w) {
+              paidDays += w;
+              people++;
+            }
+          }
+          const paidYears = paidDays / 260;
+          const workDays = paidYears * COST.workDays;
+          const pace = workDays ? s.ncloc / workDays : 0; // ncloc per paid engineer working day
+          const daily = COST.annual / COST.workDays;
+          const yearsSpan = ws ? weekdays(ws, we) / 260 : 0;
+          // the team as it stands: the latest complete period at this grouping
+          const done = bs.filter((b) => !b.partial && b.team.ncloc > 0);
+          const cur = done[done.length - 1];
+          const curEng = cur ? authors.filter((a) => cur.by[a] && cur.by[a].commits > 0).length : 0;
+          const G = groupLabel();
+          // ---- milestones: what actually happened (2026-10-03) ----
+          // Walk the period day by day; a milestone is reached the first day the
+          // running ncloc total crosses it. Each stretch runs from the day after the
+          // previous milestone (or the period start) to that day, and carries who
+          // was there: distinct committers, the average paid headcount (tenure
+          // overlap ÷ weekdays), and the paid cost of the stretch.
+          const nextIso = (iso) => isoOf(addDays(parse(iso), 1));
+          const stretch = (a0, b0) => {
+            let paid = 0;
+            for (const a in tenure) {
+              const f = tenure[a].first > a0 ? tenure[a].first : a0,
+                l = tenure[a].last < b0 ? tenure[a].last : b0;
+              if (f <= l) paid += weekdays(f, l);
+            }
+            const wk = weekdays(a0, b0);
+            const who = new Set();
+            for (const d of days)
+              if (d.date >= a0 && d.date <= b0)
+                for (const a of authors) if (d.by[a] && d.by[a].commits > 0) who.add(a);
+            return { paid, avg: wk ? paid / wk : 0, committers: who.size, cost: (paid / 260) * COST.annual };
+          };
+          // calendar time, always in months: one unit per column so rows compare
+          // straight down (2026-10-03)
+          const took = (a0, b0) => {
+            const n = (parse(b0) - parse(a0)) / 86400000 + 1;
+            return `${(n / 30.44).toFixed(1)} months`;
+          };
+          // the stretch's paid engineer-time as one person's calendar: its paid
+          // engineer weekdays, at 260 weekdays a year; always in years
+          const alone = (paid) => `${(paid / 260).toFixed(1)} years`;
+          // paid engineer weekdays from the start of the period: "1 engineer alone"
+          // is cumulative, like From start and the cost (2026-10-03)
+          let cumPaid = 0;
+          let cum = 0,
+            ti = 0,
+            from = ws,
+            cumCost = 0,
+            prevAvg = null;
+          const rows = [];
+          for (const d of days) {
+            cum += d.team.ncloc;
+            while (ti < COST_TARGETS.length && cum >= COST_TARGETS[ti]) {
+              const st = stretch(from, d.date);
+              cumCost += st.cost;
+              const trend =
+                prevAvg === null
+                  ? '—'
+                  : st.avg > prevAvg * 1.1
+                    ? '↑ growing'
+                    : st.avg < prevAvg * 0.9
+                      ? '↓ shrinking'
+                      : '→ steady';
+              rows.push(
+                `<tr><td>${fmt(COST_TARGETS[ti])}</td><td>${Number(d.date.slice(8, 10))} ${MONTH[Number(d.date.slice(5, 7)) - 1]} ${d.date.slice(0, 4)}</td><td>${took(from, d.date)}</td><td>${took(ws, d.date)}</td><td>${alone((cumPaid += st.paid))}</td><td>${st.committers}</td><td>${st.avg.toFixed(1)}</td><td>${trend}</td><td>${money(cumCost)}</td></tr>`
+              );
+              prevAvg = st.avg;
+              from = nextIso(d.date);
+              ti++;
+            }
+          }
+          // milestones not reached yet: an estimate at the latest complete period's pace
+          for (; ti < COST_TARGETS.length; ti++) {
+            const left = COST_TARGETS[ti] - cum;
+            const est = cur ? left / cur.team.ncloc : 0;
+            rows.push(
+              `<tr class="dim"><td>${fmt(COST_TARGETS[ti])}</td><td>not yet</td><td colspan="7">${fmt(Math.round(left))} ncloc to go${cur ? ` · about ${est.toFixed(1)} ${G}${est === 1 ? '' : 's'} at ${esc(cur.title)} pace (${fmt(cur.team.ncloc)} ncloc from ${curEng} engineers)` : ''}</td></tr>`
+            );
+          }
+          const body =
+            pace <= 0
+              ? '<p class="note">No net ncloc in this period, so no milestones to show.</p>'
+              : `<p class="note" style="margin:0 0 10px">Over ${esc(periodLabel())}: <b>${fmt(s.ncloc)} ncloc</b> for an estimated <b>${money(paidYears * COST.annual)}</b> (${paidYears.toFixed(1)} paid engineer-years across ${people} engineers, about ${yearsSpan ? (paidYears / yearsSpan).toFixed(1) : '—'} on the team at a time) → <b>${fmt(Math.round(pace))} ncloc per paid engineer working day</b>, <b>${money((10000 / pace) * daily)} per 10,000 ncloc</b>.</p>
+      <div class="scroll"><table class="pinned compact">
+        <thead><tr><th>Milestone<br><span style="font-weight:400;color:var(--muted)">running ncloc</span></th><th>Reached</th><th>Took<br><span style="font-weight:400;color:var(--muted)">since previous</span></th><th>From start<br><span style="font-weight:400;color:var(--muted)">the team</span></th><th>From start<br><span style="font-weight:400;color:var(--muted)">1 engineer alone</span></th><th>People who<br>committed</th><th>Average<br>team size</th><th>Team</th><th>Cumulative cost<br><span style="font-weight:400;color:var(--muted)">${esc(COST.currency)}</span></th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+      </table></div>
+      <p class="note" style="margin-top:8px"><b>What actually happened.</b> A milestone is reached the first day the running ncloc total since ${esc(periodLabel())} began crosses it. <b>Took</b> is calendar time since the previous milestone. <b>From start · 1 engineer alone</b> is how long one person would have needed to reach the milestone from the start: all the paid engineer-time up to then, as one person's calendar. <b>People who committed</b> counts everyone who made at least one commit in the stretch, however briefly. <b>Average team size</b> is how many engineers were on the team on a typical working day of the stretch (each counted from first to last commit); it drives the cost. When the two are close the team was stable; when more people committed than the average, people joined or passed through. <b>Team</b> compares the average team size with the previous stretch: ↑/↓ beyond ±10%. <b>Cost is paid time, not commit days:</b> ${money(COST.annual)} a year all-inclusive per engineer, ${COST.workDays} of those days worked, so a worked day costs ${money(daily)}. Managers and excluded occasional contributors are not costed (author map). Milestones not reached yet are estimated at the latest complete ${G}'s pace; switch <i>Group by</i> to change the yardstick. <b>Estimate:</b> git has no employment dates, so first-to-last commit misses onboarding and notice. Lines measure volume, not value.</p>`;
+          return acc(
+            'cost',
+            'Time and cost',
+            `When each ncloc milestone was reached, how long it took, who was on the team and what it cost · ${esc(periodLabel())} · ${money(COST.annual)} per engineer a year, ${COST.workDays} working days`,
+            body
+          );
         }
 
         // ---------- paint ----------
@@ -1944,10 +2298,11 @@
       <div class="tile"><div class="k">Force multiplier</div><div class="v hero">${fx(mult)}</div><div class="n">${fmt(lines)} ${UNIT()} ÷ (${BASE} × ${engDays} engineer-days)</div></div>
       <div class="tile"><div class="k">${isN() ? 'Code lines (ncloc)' : 'Functional LOC'}</div><div class="v">${fmt(lines)}</div><div class="n">${whole ? `${fmt(isN() ? t.nclocProduct : t.product)} product + ${fmt(isN() ? t.nclocTest : t.test)} test + ${fmt(isN() ? t.nclocConfig : t.config)} config + ${fmt(isN() ? t.nclocPipeline : t.pipeline)} pipeline + ${fmt(isN() ? t.nclocInfra : t.infra)} infra` : `net, committed in ${esc(periodLabel())}`}</div></div>
       <div class="tile"><div class="k">Output in engineer-days</div><div class="v">${fmt(Math.round(lines / BASE))}</div><div class="n">at ${BASE} ${UNIT()} / engineer / day</div></div>
-      <div class="tile"><div class="k">Engineers</div><div class="v">${whole ? f.engineers : s.engineers}</div><div class="n">${TEAM_ONLY ? 'counted, not named' : (whole ? authors : authors.filter((a) => s.by[a])).map(esc).join(', ') || '—'}</div></div>
+      <div class="tile"><div class="k">Engineers</div><div class="v">${whole ? f.engineers : s.engineers}</div><div class="n">human commit authors${whole ? '' : ' in this period'} · bots excluded</div></div>
       <div class="tile"><div class="k">Coding days</div><div class="v">${whole ? f.codingDays : s.codingDays}</div><div class="n">${engDays} engineer-days${engDays > (whole ? f.codingDays : s.codingDays) ? ' · two people on one date count twice' : ''}</div></div>
     </section>
-    ${delta !== 0 ? `<p class="note warn">Committed history nets ${fmt(isN() ? t.nclocHistory : t.history)} ${UNIT()} against ${fmt(isN() ? t.ncloc : t.total)} in the working tree (Δ ${delta > 0 ? '+' : ''}${fmt(delta)}): uncommitted work, or files moved and rewritten. The headline uses the working tree; the per-${TEAM_ONLY ? 'period' : 'author'} figures come from history.</p>` : ''}
+    ${t.clean === false ? `<p class="note warn">The checkout has local changes. The headline counts them; history on the default branch does not. Commit or set them aside before quoting these figures.</p>` : ''}
+    ${Math.abs(delta) > 0.001 * Math.abs(isN() ? t.ncloc : t.total) ? `<p class="note warn">Not reconciled: history on main sums to ${fmt(isN() ? t.nclocHistory : t.history)} ${UNIT()}, but the code today holds ${fmt(isN() ? t.ncloc : t.total)} (Δ ${delta > 0 ? '+' : ''}${fmt(delta)}). The chart and the headline disagree by that much. Cause not traced; do not quote these figures until it is.</p>` : ''}
     <section class="card">
       <div class="card-head"><div><h2 id="c1title"></h2><div class="sub" id="c1sub"></div></div>
         <div class="seg" id="c1view" role="group" aria-label="What to plot">
@@ -1955,7 +2310,7 @@
           <button type="button" data-view="mult">Multiplier</button>
           <button type="button" data-view="cumulative">Cumulative</button>
         </div>
-        <div class="legend">${authors.map((a) => `<span><i style="background:${colorOf[a]}"></i>${esc(a)}</span>`).join('')}<span id="c1pace"><i class="line" style="background:var(--muted)"></i>Baseline pace</span><span id="c1run"><i class="line" style="background:var(--ink)"></i>Running average</span><span id="c1off"><i style="background:${colorOf[authors[0]]};opacity:0.42;box-shadow:inset 0 0 0 1px ${colorOf[authors[0]]}"></i>Non-business day</span></div></div>
+        <div class="legend">${TEAM_ONLY ? '<span><i style="background:var(--team)"></i>Team</span>' : authors.map((a) => `<span><i style="background:${colorOf[a]}"></i>${esc(a)}</span>`).join('')}<span id="c1pace"><i class="line" style="background:var(--muted)"></i>Baseline pace</span><span id="c1run"><i class="line avg"></i>Running average</span><span id="c1todate" hidden><i class="todate"></i>To date (period still running)</span><span id="c1off"><i style="background:${TEAM_ONLY ? 'var(--team)' : colorOf[authors[0]]};opacity:0.42;box-shadow:inset 0 0 0 1px ${TEAM_ONLY ? 'var(--team)' : colorOf[authors[0]]}"></i>Non-business day</span></div></div>
       <div class="chart" id="c1"><div class="tip"></div></div>
     </section>
     ${
@@ -1978,7 +2333,7 @@
             })
             .join('') || '<tr><td colspan="7" class="dim">no commits in this period</td></tr>'
         }</tbody>
-        <tfoot><tr><td>Team</td><td>${fmt(s.commits)}</td><td>${fmt(s.lines)}</td><td>${s.engDays}</td><td>${fx(s.teamMult)}</td><td colspan="2" style="text-align:left;font-weight:400;color:var(--muted)">days = engineer-days · multiplier = contribution-weighted</td></tr></tfoot>
+        <tfoot><tr><td>Team</td><td>${fmt(s.commits)}</td><td>${fmt(s.lines)}</td><td>${s.engDays}</td><td>${fx(s.teamMult)}</td><td colspan="2" style="text-align:left;font-weight:400;color:var(--muted)">days = engineer-days · multiplier = team lines ÷ (${BASE} × engineer-days)</td></tr></tfoot>
       </table></div>
       ${mixSection(s)}`
           )
@@ -1986,12 +2341,11 @@
     ${acc(
       'period',
       `By ${esc(groupLabel())}`,
-      TEAM_ONLY
-        ? `Newest first · the team's commits, ${UNIT()} and multiplier · “·” = no commit`
-        : `Newest first · commits, ${UNIT()} and multiplier per author, plus the team · “·” = no commit`,
+      `Newest first · the team's multiplier, commits, engineers and ${UNIT()}, with per-engineer rates · “·” = no commit`,
       `
       <div class="scroll" id="daytable"></div>`
     )}
+    ${costSection(s, days, bs)}
     <div class="two">
       ${acc(
         'language',
@@ -2015,7 +2369,7 @@
             <tr><td class="dim">(everything not under a listed package)</td><td class="dim">${fmt((isN() ? t.ncloc : t.total) - D.workspaces.reduce((x, w) => x + LV(w), 0))}</td><td class="dim">${((100 * ((isN() ? t.ncloc : t.total) - D.workspaces.reduce((x, w) => x + LV(w), 0))) / Math.max(isN() ? t.ncloc : t.total, 1)).toFixed(1)}%</td></tr></tbody>
           <tfoot><tr><td>Total</td><td>${fmt(isN() ? t.ncloc : t.total)}</td><td>100%</td></tr></tfoot>
         </table></div>
-        <p class="note" style="margin-top:8px">UI assets (css/html): ${fmt(t.ui)} lines, reported but not counted.</p>`
+        <p class="note" style="margin-top:8px">UI assets (css/html and drawings under assets/): ${fmt(t.ui)} lines, reported but not counted.</p>`
       )}
     </div>
     ${acc(
@@ -2026,23 +2380,23 @@
         <dl class="scope">
           <dt>Metric</dt><dd>${
             isN()
-              ? '<b>ncloc</b> — a physical line counts only if it holds a character that is neither whitespace nor part of a comment. A trailing comment or a lone <code>}</code> still counts; blank and comment-only lines do not. Sonar&rsquo;s rule. <code>//</code> and <code>/* */</code> open a comment in the C family (C, C++, Objective-C, Swift, Go, Rust, Java, Kotlin, C#, JS/TS, shaders); <code>//</code> in Zig; <code>#</code> in Python, Ruby, YAML, Dockerfiles, Make and CMake; both in Terraform, Nix and PHP; <code>--</code> in Lua and Haskell. Python docstrings count as code.'
+              ? '<b>ncloc</b> — a physical line counts only if it holds a character that is neither whitespace nor part of a comment. A trailing comment or a lone <code>}</code> still counts; blank and comment-only lines do not. Sonar&rsquo;s rule. <code>//</code> and <code>/* */</code> open a comment in the C family (C, C++, Objective-C, Swift, Go, Rust, Java, Kotlin, C#, JS/TS, shaders); <code>//</code> in Zig; <code>#</code> in Python, Ruby, YAML, shell, Dockerfiles, Make and CMake; both in Terraform, Nix and PHP; <code>--</code> in Lua and Haskell. Python docstrings count as code.'
               : '<b>Raw lines</b> — every physical line in a counted file, blanks and comments included.'
           }</dd>
           <dt>Languages</dt><dd>Detected from the files, not configured: every programming language the counter knows that this repository holds (the By language table).</dd>
-          <dt>Counted</dt><dd>The product surface, aggregated as product + test + config + pipeline + infrastructure. Config, pipeline and infrastructure count for the same reason tests do: without them the product is fragile and cannot move at speed with confidence.</dd>
+          <dt>Counted</dt><dd>What lands on the default branch (first-parent history, so a change merged by two routes counts once), aggregated as product + test + config + pipeline + infrastructure. Config, pipeline and infrastructure count for the same reason tests do: without them the product is fragile and cannot move at speed with confidence.</dd>
           <dt>Product</dt><dd>Executable code. A <code>scripts/</code> directory inside a package is that package&rsquo;s code and counts.</dd>
-          <dt>Test</dt><dd>Code at a test path: <code>tests/</code> <code>test/</code> <code>spec/</code> <code>__tests__/</code> <code>*Tests/</code> <code>e2e/</code> <code>fixtures/</code>; <code>.test.</code> <code>.spec.</code> <code>.setup.</code>; <code>_test.</code> <code>_spec.</code>; <code>test_*.py</code> <code>conftest.py</code>; <code>*Test.java</code> <code>*Tests.swift</code>. Tests inline in a source file (Zig, Rust) count as product.</dd>
+          <dt>Test</dt><dd>Code at a test path: <code>tests/</code> <code>test/</code> <code>spec/</code> <code>__tests__/</code> <code>*Tests/</code> <code>*-tests/</code> <code>e2e/</code> <code>fixtures/</code>; <code>.test.</code> <code>.spec.</code> <code>.setup.</code>; <code>_test.</code> <code>_spec.</code>; <code>test_*.py</code> <code>conftest.py</code>; <code>*Test.java</code> <code>*Tests.swift</code>; Maestro flows (YAML under <code>integration-tests/</code>). Tests inline in a source file (Zig, Rust) count as product.</dd>
           <dt>Config</dt><dd>Build and tool configuration written as code: Makefile, CMake, <code>build.zig</code>, <code>Package.swift</code>, <code>*.gradle</code>, <code>*.config.*</code>, <code>.*rc.js</code>, Nix, Bazel, <code>setup.py</code>, <code>build.rs</code>.</dd>
           <dt>Pipeline</dt><dd>CI/CD: <code>.github/</code>, <code>.gitlab-ci.yml</code>, <code>.circleci/</code>, <code>Jenkinsfile</code>, <code>.buildkite/</code>, Azure Pipelines, <code>fastlane/</code> and the like.</dd>
-          <dt>Infrastructure</dt><dd>Terraform and HCL, Dockerfiles, compose files, k8s and Helm, <code>infra/</code> <code>deploy/</code> <code>terraform/</code> <code>cdk/</code> <code>pulumi/</code> trees, <code>render.yaml</code>.</dd>
-          <dt>Not the team&rsquo;s code</dt><dd>Vendored and generated code (<code>vendor/</code> <code>third_party/</code> <code>node_modules/</code> <code>Pods/</code>, <code>*.min.js</code> <code>*.pb.go</code> <code>generated/</code>, and whatever <code>.gitattributes</code> marks <code>linguist-vendored</code>, <code>-generated</code> or <code>-documentation</code>); lockfiles; <code>docs/</code> <code>examples/</code> <code>samples/</code>.</dd>
+          <dt>Infrastructure</dt><dd>Terraform and HCL, Dockerfiles, compose files, k8s and Helm, <code>infra/</code> <code>deploy/</code> <code>terraform/</code> <code>cdk/</code> <code>pulumi/</code> trees, <code>render.yaml</code>, and root <code>scripts/</code> (release, CI and E2E tooling, shell included).</dd>
+          <dt>Not the team&rsquo;s code</dt><dd>Vendored and generated code (<code>vendor/</code> <code>third_party/</code> <code>node_modules/</code> <code>Pods/</code> <code>.yarn/</code>, <code>*.min.js</code> <code>*.pb.go</code> <code>generated/</code>, and whatever <code>.gitattributes</code> marks <code>linguist-vendored</code>, <code>-generated</code> or <code>-documentation</code>); lockfiles; <code>docs/</code> <code>examples/</code> <code>samples/</code> <code>poc/</code>; AI-agent tooling (<code>.agents/</code>, <code>prompts/</code>).</dd>
           <dt>Checked against</dt><dd>the ncloc rule mirrors SonarQube&rsquo;s; on a large TypeScript repo the two agreed within 0.15%.</dd>
-          <dt>Reported, not counted</dt><dd><code>.css</code> <code>.scss</code> <code>.html</code></dd>
-          <dt>Excluded</dt><dd>Data and prose formats (<code>.json</code> <code>.toml</code> <code>.xml</code> <code>.md</code> <code>.txt</code>), shell scripts, YAML outside pipelines and infrastructure, and anything gitignored</dd>
-          <dt>Authors</dt><dd>keyed by email (<code>LOC_AUTHOR_MAP</code>); the release bot and every GitHub <code>[bot]</code> account are dropped from the walk entirely, so no figure here counts or shows them</dd>
+          <dt>Reported, not counted</dt><dd><code>.css</code> <code>.scss</code> <code>.html</code> and code under <code>assets/</code> (drawings such as SVG wrapped as TSX)</dd>
+          <dt>Excluded</dt><dd>Data and prose formats (<code>.json</code> <code>.toml</code> <code>.xml</code> <code>.md</code> <code>.txt</code> <code>.snap</code>), shell outside root <code>scripts/</code>, other YAML, and anything gitignored</dd>
+          <dt>Authors</dt><dd>resolved by the author map (<code>.claude/force-multiplier/author-map.tsv</code> in the repository, or <code>.git/loc/author-map.tsv</code>): each git identity mapped to a person and a role. Managers and excluded occasional contributors keep their lines in the team total but are out of headcount, engineer-days and cost; bots are dropped entirely</dd>
           <dt>Engineer-days</dt><dd>${esc(f.how)}${whole ? '' : ', counted inside the selected period'}</dd>
-          <dt>Team multiplier</dt><dd>mean of the author multipliers weighted by share of lines, never total ÷ headcount; a negative share weighs 0</dd>
+          <dt>Team multiplier</dt><dd>team lines ÷ (${BASE} × engineer-days), the same formula as the headline, in every view</dd>
           <dt>Floors</dt><dd>a net-deletion period shows its negative lines but a 0.0x multiplier</dd>
         </dl>`
       )}`;
@@ -2113,16 +2467,16 @@
             ? view === 'mult'
               ? `The team multiplier for each ${G} · dashed = the running average, which ends on the headline figure`
               : view === 'cumulative'
-                ? `Running total from the first commit · dashed = what ${BASE} ${U} / engineer / day would have reached`
+                ? `Running total from the first commit`
                 : `The team's net total per ${G} · a bar below the baseline is a net-deletion ${G} · dashed = the running average per coding ${G}`
             : view === 'mult'
-              ? `Each segment is one author's multiplier weighted by their share of the lines, so the bar equals the team multiplier`
+              ? `The team multiplier for each ${G}, split by each author's share of the lines merged to main · dashed = the running average`
               : view === 'cumulative'
-                ? `Running total from the first commit, stacked by author · dashed = what ${BASE} ${U} / engineer / day would have reached`
+                ? `Running total from the first commit, stacked by author`
                 : `Stacked by author · a bar below the baseline is a net-deletion ${G} · dashed = the running average per coding ${G}`;
           document.getElementById('c1sub').textContent +=
-            ` · drawn from ${auDay(chartFrom())}/${chartFrom().slice(2, 4)}`;
-          document.getElementById('c1pace').hidden = view !== 'cumulative';
+            ` · drawn from ${Number(chartFrom().slice(8, 10))} ${MONTH[Number(chartFrom().slice(5, 7)) - 1]} ${chartFrom().slice(0, 4)}`;
+          document.getElementById('c1pace').hidden = true; // the pace line is not drawn
           document.getElementById('c1run').hidden = view === 'cumulative';
           document.getElementById('c1off').hidden = view === 'cumulative' || group !== 'days';
           if (!bs.length) {
@@ -2131,6 +2485,8 @@
             document.getElementById('daytable').innerHTML = '';
             return;
           }
+          document.getElementById('c1todate').hidden =
+            view === 'cumulative' || !bs[bs.length - 1].partial;
           drawTable(document.getElementById('daytable'), bs);
           const c1 = document.getElementById('c1');
           const fromIso = chartFrom(),
@@ -2148,7 +2504,12 @@
           if (view === 'cumulative') drawCumulative(c1, drawn, from);
           else if (view === 'mult') drawMult(c1, drawn, from, seed);
           // Every drawn bucket is also a period bucket, so the rest are the undrawn ones.
-          else drawBars(c1, drawn, from, { lines: seed.lines, buckets: bs.length - drawn.length });
+          else
+            drawBars(c1, drawn, from, {
+              lines: seed.lines,
+              buckets: bs.length - drawn.length,
+              days: seed.days,
+            });
         }
 
         paint();
