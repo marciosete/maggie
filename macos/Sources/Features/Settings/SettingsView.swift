@@ -40,10 +40,12 @@ struct SettingsView: View {
 
                 Toggle("Start the primary agent in new sessions", isOn: $agentStart.isEnabled)
                     .disabled(agentSettings.primary == nil)
+                Toggle("In its own worktree of the repository", isOn: $agentStart.startsInWorktree)
+                    .disabled(agentSettings.primary == nil || !agentStart.isEnabled)
             } header: {
                 Text("Coding Agents")
             } footer: {
-                Text("A new session starts the primary agent, typing the command into its shell, in the session's own worktree inside a git repository. An enabled agent can also be pivoted to from a session's menu in the sidebar, fresh or continuing the conversation. A restored session resumes the session it was running, whichever agent that was.")
+                Text("A new session starts the primary agent, typing the command into its shell. Inside a git repository it gets its own worktree, so the sidebar can show and land what it changes; with worktrees off, every session starts on the main checkout. An enabled agent can also be pivoted to from a session's menu in the sidebar, fresh or continuing the conversation. A restored session resumes the session it was running, whichever agent that was.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

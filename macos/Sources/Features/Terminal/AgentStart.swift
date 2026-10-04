@@ -13,7 +13,9 @@ import Foundation
 /// --worktree`), so what it changes is its own and the sidebar can show and land it. A
 /// session opened from a worktree starts from the main checkout, so two sessions never
 /// share one. `claude -w` refuses a folder whose trust dialog hasn't been accepted, and a
-/// plain start, which asks, follows it then.
+/// plain start, which asks, follows it then. Settings can turn the worktrees off, for
+/// work that wants every session on the main checkout: a session then starts there,
+/// from a worktree too.
 ///
 /// The terminal's environment says it is one of these, and which agent, so a shell
 /// startup file that starts an agent itself can stand down.
@@ -29,6 +31,7 @@ final class AgentStart: ObservableObject {
     nonisolated static let agentEnvironmentVariable = "MAGGIE_AGENT"
 
     private static let enabledKey = "ClaudeCodeStartsInNewSessions"
+    private static let worktreeKey = "AgentStartsInWorktree"
 
     private weak var menuItem: NSMenuItem?
 
@@ -37,6 +40,12 @@ final class AgentStart: ObservableObject {
             UserDefaults.ghostty.set(isEnabled, forKey: Self.enabledKey)
             updateMenuItem()
         }
+    }
+
+    /// Whether a session in a git repository gets its own worktree. Off, every session
+    /// starts on the main checkout.
+    @Published var startsInWorktree: Bool {
+        didSet { UserDefaults.ghostty.set(startsInWorktree, forKey: Self.worktreeKey) }
     }
 
     /// The agent started, from Settings: the primary of the enabled ones, if any.
@@ -48,6 +57,7 @@ final class AgentStart: ObservableObject {
         // On for Maggie, whose sessions are agent sessions; off for a build that isn't,
         // which keeps Ghostty's terminals plain.
         isEnabled = UserDefaults.ghostty.object(forKey: Self.enabledKey) as? Bool ?? Maggie.isMaggie
+        startsInWorktree = UserDefaults.ghostty.object(forKey: Self.worktreeKey) as? Bool ?? true
     }
 
     // MARK: Surfaces
@@ -56,39 +66,43 @@ final class AgentStart: ObservableObject {
     /// (a restored session resuming) or this is off.
     func apply(to config: inout Ghostty.SurfaceConfiguration) {
         guard isEnabled, let agent, config.initialInput == nil else { return }
-        config.initialInput = Self.command(for: agent, in: config.workingDirectory) + "\n"
+        config.initialInput = Self.command(for: agent, in: config.workingDirectory, inWorktree: startsInWorktree) + "\n"
         config.environmentVariables[Self.environmentVariable] = "1"
         config.environmentVariables[Self.agentEnvironmentVariable] = agent.rawValue
     }
 
     /// The command for a terminal starting `agent` in `directory` (the shell's default
-    /// when nil).
-    nonisolated static func command(for agent: CodingAgent, in directory: String?) -> String {
+    /// when nil): in its own worktree of the repository there, or, with `inWorktree`
+    /// off, on the repository's main checkout.
+    nonisolated static func command(for agent: CodingAgent, in directory: String?, inWorktree: Bool = true) -> String {
         guard let directory else {
             // Claude's registry identifies the foreground process directly. Keep its
             // plain launch when the directory is unknown instead of adding a wrapper.
-            return agent == .codex ? commandInShellDirectory(for: agent) : agent.launchCommand
+            return agent == .codex ? commandInShellDirectory(for: agent, inWorktree: inWorktree) : agent.launchCommand
         }
         guard let main = mainCheckout(of: directory) else { return agent.launchCommand }
         let here = URL(fileURLWithPath: directory).standardizedFileURL.path
+        let start = inWorktree ? agent.worktreeCommand : agent.launchCommand
         if URL(fileURLWithPath: main).standardizedFileURL.path == here {
-            return "\(agent.worktreeCommand) || \(agent.launchCommand)"
+            return inWorktree ? "\(start) || \(agent.launchCommand)" : start
         }
-        return "(cd \(AgentHandoff.shellQuoted(main)) && \(agent.worktreeCommand)) || \(agent.launchCommand)"
+        let onMain = "(cd \(AgentHandoff.shellQuoted(main)) && \(start))"
+        return inWorktree ? "\(onMain) || \(agent.launchCommand)" : onMain
     }
 
     /// The first terminal can inherit its directory from Ghostty's configuration or
     /// the shell profile after this command is prepared. Resolve Git in that shell's
     /// actual directory instead of treating an unspecified directory as non-repository.
     /// A POSIX shell keeps this independent of the user's interactive shell syntax.
-    nonisolated private static func commandInShellDirectory(for agent: CodingAgent) -> String {
+    nonisolated private static func commandInShellDirectory(for agent: CodingAgent, inWorktree: Bool) -> String {
+        let start = inWorktree ? agent.worktreeCommand : agent.launchCommand
         let script = [
             "maggie_common=$(/usr/bin/git rev-parse --path-format=absolute --git-common-dir 2>/dev/null);",
             "if [ -n \"$maggie_common\" ]; then",
             "case \"$maggie_common\" in */.git) maggie_main=${maggie_common%/.git} ;; " +
                 "*) maggie_main=$(/usr/bin/git rev-parse --show-toplevel 2>/dev/null) ;; esac;",
             "if [ -n \"$maggie_main\" ]; then",
-            "(cd \"$maggie_main\" && \(agent.worktreeCommand)) && exit 0;",
+            "(cd \"$maggie_main\" && \(start)) && exit 0;",
             "fi;",
             "fi;",
             "exec \(agent.launchCommand)",

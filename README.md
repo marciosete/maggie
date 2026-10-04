@@ -35,7 +35,8 @@ Ghostty, Anthropic or OpenAI.
 primary agent starts in it: Claude Code or Codex. **Settings…** (⌘,) says
 which agents are enabled, either or both, and which is primary. In a git repository it gets its own worktree (`claude -w`, `codex --worktree`),
 so what it changes is its own, and a session opened from a worktree starts from
-the main checkout, so two never share one. `/exit` drops to the shell and the
+the main checkout, so two never share one. Settings can turn the worktrees off,
+and every session then starts on the main checkout. `/exit` drops to the shell and the
 tab stays. Turn it off in Settings or under **View › Start … in New Sessions**;
 a shell startup file that starts an agent itself can check
 `MAGGIE_CLAUDE_CODE_START`, set in these terminals (with `MAGGIE_AGENT` naming

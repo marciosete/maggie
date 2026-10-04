@@ -66,6 +66,33 @@ struct AgentStartTests {
         }
     }
 
+    @Test func withWorktreesOffItStartsOnTheMainCheckout() throws {
+        try withRepository { main, worktree in
+            let codex = CodingAgent.codex.launchCommand
+            #expect(AgentStart.command(for: .claude, in: main, inWorktree: false) == "claude")
+            #expect(AgentStart.command(for: .codex, in: main, inWorktree: false) == codex)
+
+            let fromWorktree = AgentStart.command(for: .claude, in: worktree, inWorktree: false)
+            #expect(fromWorktree.hasPrefix("(cd '"))
+            #expect(fromWorktree.hasSuffix("' && claude)"))
+            #expect(!fromWorktree.contains("-w"))
+            #expect(AgentStart.command(for: .codex, in: worktree, inWorktree: false).hasSuffix("' && \(codex))"))
+
+            for agent in CodingAgent.allCases {
+                let output = try run(AgentStart.command(for: agent, in: worktree, inWorktree: false), in: worktree, agent: agent)
+                #expect(output.first.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath() } ==
+                    URL(fileURLWithPath: main).resolvingSymlinksInPath())
+                #expect(!output.contains("--worktree"))
+                #expect(!output.contains("-w"))
+            }
+            let output = try run(AgentStart.command(for: .codex, in: nil, inWorktree: false), in: worktree, agent: .codex)
+            #expect(output.first.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath() } ==
+                URL(fileURLWithPath: main).resolvingSymlinksInPath())
+            #expect(!output.contains("--worktree"))
+        }
+        #expect(AgentStart.command(for: .claude, in: nil, inWorktree: false) == "claude")
+    }
+
     /// Run the generated command with a harmless agent that reports its directory and
     /// arguments. This exercises quoting and deferred directory discovery in a shell.
     private func run(_ command: String, in directory: String, agent: CodingAgent) throws -> [String] {
