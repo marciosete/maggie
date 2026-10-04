@@ -71,7 +71,10 @@ final class TabSidebarSessionInfoReader {
     private func info(for request: Request) -> TabSidebarSessionInfo {
         var info = TabSidebarSessionInfo()
         info.sessions = request.pids.compactMap(AgentSession.running(pid:))
+        // A session has no transcript until its first turn, and isn't one of `sessions`
+        // until then, but it is already in its worktree if it was started in one.
         info.directory = info.sessions.first?.cwd
+            ?? request.pids.lazy.compactMap { ClaudeCodeSession.directory(ofRunning: $0) }.first
             ?? request.pids.lazy.compactMap { CodexSession.liveDirectory(pid: $0) }.first
             ?? request.directory
         info.lastActive = info.sessions

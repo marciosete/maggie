@@ -193,6 +193,26 @@ struct AgentStartTests {
         }
     }
 
+    /// The switch is read when a terminal is made, so it applies to the next one.
+    @Test @MainActor func theWorktreeSwitchAppliesToTheNextTerminal() throws {
+        let start = AgentStart.shared
+        let agent = try #require(start.agent)
+        let (enabled, inWorktree) = (start.isEnabled, start.startsInWorktree)
+        defer { (start.isEnabled, start.startsInWorktree) = (enabled, inWorktree) }
+        start.isEnabled = true
+
+        try withRepository { main, _ in
+            for inWorktree in [false, true, false] {
+                start.startsInWorktree = inWorktree
+                var config = Ghostty.SurfaceConfiguration()
+                config.workingDirectory = main
+                start.apply(to: &config)
+                #expect(config.initialInput == AgentStart.command(for: agent, in: main, inWorktree: inWorktree) + "\n")
+                #expect(config.initialInput?.contains(agent.worktreeCommand) == inWorktree)
+            }
+        }
+    }
+
     @Test @MainActor func aRestoredSessionKeepsItsResumeInput() {
         for agent in CodingAgent.allCases {
             var config = Ghostty.SurfaceConfiguration()
