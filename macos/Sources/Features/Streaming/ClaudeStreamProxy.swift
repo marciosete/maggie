@@ -348,7 +348,7 @@ private final class ProxyConnection {
 
     private func forward(_ head: HTTPRequestHead, body: Data) {
         guard let url = proxy.upstreamURL(for: head.target) else {
-            respondWithError(status: 400, message: "Ghostty couldn't forward the request target \(head.target)")
+            respondWithError(status: 400, message: Maggie.branded("Ghostty couldn't forward the request target \(head.target)"))
             return
         }
 
@@ -446,7 +446,7 @@ private final class ProxyConnection {
                 close()
             } else {
                 let host = proxy.upstream.host ?? proxy.upstream.absoluteString
-                respondWithError(status: 502, message: "Ghostty couldn't reach \(host): \(error.localizedDescription)")
+                respondWithError(status: 502, message: Maggie.branded("Ghostty couldn't reach \(host): \(error.localizedDescription)"))
             }
             return
         }

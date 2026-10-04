@@ -53,6 +53,19 @@ echo "==> Renaming to $APP_NAME ($BUNDLE_ID)"
     -c "Set :CFBundleDisplayName $APP_NAME" \
     "$PLIST"
 
+# Xcode wrote Ghostty's name into the strings macOS shows for the app: every
+# privacy prompt ("A program running within Ghostty would like to use the
+# camera") and the Finder Services ("New Ghostty Tab Here").
+for key in $("$PLISTBUDDY" -c Print "$PLIST" | awk '$1 ~ /UsageDescription$/ && $2 == "=" { print $1 }'); do
+    value="$("$PLISTBUDDY" -c "Print :$key" "$PLIST")"
+    "$PLISTBUDDY" -c "Set :$key ${value//Ghostty/$APP_NAME}" "$PLIST"
+done
+i=0
+while value="$("$PLISTBUDDY" -c "Print :NSServices:$i:NSMenuItem:default" "$PLIST" 2>/dev/null)"; do
+    "$PLISTBUDDY" -c "Set :NSServices:$i:NSMenuItem:default ${value//Ghostty/$APP_NAME}" "$PLIST"
+    i=$((i + 1))
+done
+
 # Shown in About.
 "$PLISTBUDDY" -c "Delete :NSHumanReadableCopyright" "$PLIST" 2>/dev/null || true
 "$PLISTBUDDY" -c "Add :NSHumanReadableCopyright string © 2026 Marcio Sete. Built on Ghostty, © Mitchell Hashimoto and the Ghostty contributors. MIT License." "$PLIST"

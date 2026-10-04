@@ -17,6 +17,24 @@ enum Maggie {
     /// Ghostty's own documentation, which covers everything Maggie inherits.
     static let ghosttyDocsURL = "https://ghostty.org/docs"
 
+    /// The release notes of version `version` (x.y.z): Maggie's GitHub release, or
+    /// Ghostty's page for it in a build that isn't Maggie.
+    static func releaseNotesURL(version: String, maggie: Bool = isMaggie) -> URL? {
+        if maggie { return URL(string: "\(releasesURL)/tag/v\(version)") }
+        let slug = version.replacingOccurrences(of: ".", with: "-")
+        return URL(string: "https://ghostty.org/docs/install/release-notes/\(slug)")
+    }
+
+    /// Commit `hash` in this app's repository.
+    static func commitURL(_ hash: String, maggie: Bool = isMaggie) -> URL? {
+        URL(string: "\(maggie ? repositoryURL : "https://github.com/ghostty-org/ghostty")/commit/\(hash)")
+    }
+
+    /// The changes from commit `from` to commit `to` in this app's repository.
+    static func compareURL(from: String, to: String, maggie: Bool = isMaggie) -> URL? {
+        URL(string: "\(maggie ? repositoryURL : "https://github.com/ghostty-org/ghostty")/compare/\(from)...\(to)")
+    }
+
     static var isMaggie: Bool {
         Bundle.main.bundleIdentifier == bundleID
     }
