@@ -67,21 +67,37 @@ default; see `LOC_TEAM_ONLY`.
   began (a wrong clock) is dated when it was committed.
 - **TEAM multiplier is plain:** team lines ÷ (150 × engineer-days), the same as
   the headline. Contribution-weighting returns only with `LOC_TEAM_ONLY=0`.
-- **Authors: the author map.** A tab-separated file mapping each git identity
-  (author name) to a person and a role — `identity  person  role  evidence` —
-  read from the first of `LOC_AUTHOR_FILE`, the repository's
-  `.claude/force-multiplier/author-map.tsv` (committed, for the team) or
-  `.git/loc/author-map.tsv` (this machine only). Keyed by name, so no email need
-  be written down; `LOC_AUTHOR_MAP` (email-keyed) still works and wins.
+- **Identities are resolved automatically.** Every git identity in history
+  (email + name) is clustered into a person before anything is counted, so a
+  work and a home email, a GitHub noreply address and "jrieken" next to
+  "Johannes Rieken" are one engineer. Rules, strongest first (`LOC_AUTO_MERGE`):
+  same email; the GitHub/GitLab noreply login; the same multi-word name written
+  differently (case, accents, punctuation, word order); an email whose local
+  part spells a multi-word name seen in history (`first.last`, `firstlast`,
+  `flast`). A one-word name ("Tim", "unknown", "Ubuntu") never joins two
+  emails. A cluster holding one bot identity (`[bot]`, dependabot, renovate,
+  Copilot, github-actions, anything ending in "bot") is a bot: its lines (a
+  coding agent's) stay in the team total, it is in no headcount and earns no
+  engineer-day.
+  A person is shown under their most-committed multi-word name. The report
+  prints `N identities → P people and B bot identities; M merged`, and
+  `LOC_LIST_AUTHORS=1 bash ${CLAUDE_SKILL_DIR}/loc.sh` lists every identity
+  with its person, grouped by person, so a wrong merge is visible.
+- **Authors: the author map** overrides the automatic merge. A tab-separated
+  file mapping a git identity (author name) to a person and a role —
+  `identity  person  role  evidence` — read from the first of
+  `LOC_AUTHOR_FILE`, the repository's `.claude/force-multiplier/author-map.tsv`
+  (committed, for the team) or `.git/loc/author-map.tsv` (this machine only).
+  Keyed by name, so no email need be written down; `LOC_AUTHOR_MAP`
+  (email-keyed) still works and wins. One line names, excludes or drops the
+  whole cluster that identity belongs to.
   - **engineer / tester:** counted as engineers.
   - **manager / excluded:** their lines count for the team, but they are out of
     headcount, engineer-days and cost.
-  - **bot:** dropped. GitHub `[bot]` accounts are dropped automatically.
-  - **Without a map,** each git name is its own engineer, so one person who
-    committed under two names counts twice: duplicates inflate engineer-days,
-    and so lower every per-engineer figure and double that person's cost.
-    List identities with `LOC_LIST_AUTHORS=1 bash ${CLAUDE_SKILL_DIR}/loc.sh`
-    and offer to write the map. Ask the user for roles; never guess one.
+  - **bot:** lines for the team, no headcount, no engineer-days.
+  - Roles come only from the map; the resolver never guesses one. Ask the user
+    for roles; never guess one. Offer to write the map when the identity list
+    shows a merge that is wrong, or a person left split.
 - **Time and cost** is paid time, not commit days. Each engineer is costed for
   every weekday from first to last commit in the period (an estimate: git has
   no employment dates), at `LOC_COST_ANNUAL`, of which `LOC_WORK_DAYS` are
@@ -106,8 +122,9 @@ default; see `LOC_TEAM_ONLY`.
 | `LOC_WORK_DAYS` | `220` | Working days a year (260 weekdays less about 10 public holidays, 20 days' annual leave and 10 days' personal leave) |
 | `LOC_DAY_TABLE_MAX` | `8` | Above this many authors the terminal day table is page-only |
 | `LOC_AUTHOR_FILE` | see above | The author map |
-| `LOC_AUTHOR_MAP` | none | Email-keyed merges, `email=Name;…`; `=bot` drops an account |
-| `LOC_LIST_AUTHORS` | unset | `1` = list every identity (email, name, commits, first, last) and stop |
+| `LOC_AUTHOR_MAP` | none | Email-keyed merges, `email=Name;…`; `=bot` marks an account a bot |
+| `LOC_AUTO_MERGE` | `1` | How identities become people: `1` every rule; `email` same email, noreply login and exact multi-word name only; `0` off (identity = author name) |
+| `LOC_LIST_AUTHORS` | unset | `1` = list every identity (email, name, person, commits, first, last), grouped by person, and stop |
 | `LOC_NO_OPEN` | unset | `1` = don't open the browser |
 
 ### Run
@@ -121,6 +138,7 @@ opens it in the default browser. Nothing it writes is in the work tree.
 Do not read the figures off a truncated terminal tail. The last lines print the
 page's `file://` link and the `data:` path; read that data file:
 - `force`: `mult`, `nmult`, `engDaysOut`, `engDays`, `codingDays`, `how`;
+- `identities`: `total`, `people`, `merged`, `bots`, `mode`;
 - `tree`: `product`, `test`, `pipeline`, `infra` and their `ncloc*`
   twins, `history` against `total`, and `clean`;
 - `languages`: the detected languages, largest first;
@@ -142,7 +160,9 @@ plain words:
     author's distinct commit dates.
   - Flag only if:
     - the checkout has local changes (`tree.clean` is false);
-    - no author map is set and duplicate identities are visible;
+    - `identities.merged` is large next to `identities.people`, or a name in
+      the author table looks like a second spelling of another — say the
+      resolver's rules, and that `LOC_LIST_AUTHORS=1` shows every merge;
     - the run is `NOT RECONCILED`. Say the figures cannot be quoted yet. Do
       not guess a cause.
 

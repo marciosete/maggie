@@ -2298,7 +2298,7 @@
       <div class="tile"><div class="k">Force multiplier</div><div class="v hero">${fx(mult)}</div><div class="n">${fmt(lines)} ${UNIT()} ÷ (${BASE} × ${engDays} engineer-days)</div></div>
       <div class="tile"><div class="k">${isN() ? 'Code lines (ncloc)' : 'Functional LOC'}</div><div class="v">${fmt(lines)}</div><div class="n">${whole ? `${fmt(isN() ? t.nclocProduct : t.product)} product + ${fmt(isN() ? t.nclocTest : t.test)} test + ${fmt(isN() ? t.nclocPipeline : t.pipeline)} pipeline + ${fmt(isN() ? t.nclocInfra : t.infra)} infra` : `net, committed in ${esc(periodLabel())}`}</div></div>
       <div class="tile"><div class="k">Output in engineer-days</div><div class="v">${fmt(Math.round(lines / BASE))}</div><div class="n">at ${BASE} ${UNIT()} / engineer / day</div></div>
-      <div class="tile"><div class="k">Engineers</div><div class="v">${whole ? f.engineers : s.engineers}</div><div class="n">human commit authors${whole ? '' : ' in this period'} · bots excluded</div></div>
+      <div class="tile"><div class="k">Engineers</div><div class="v">${whole ? f.engineers : s.engineers}</div><div class="n">human commit authors${whole ? '' : ' in this period'} · bots excluded${D.identities && D.identities.merged ? ` · ${D.identities.merged} duplicate identities merged` : ''}</div></div>
       <div class="tile"><div class="k">Coding days</div><div class="v">${whole ? f.codingDays : s.codingDays}</div><div class="n">${engDays} engineer-days${engDays > (whole ? f.codingDays : s.codingDays) ? ' · two people on one date count twice' : ''}</div></div>
     </section>
     ${t.clean === false ? `<p class="note warn">The checkout has local changes. The headline counts them; history on the default branch does not. Commit or set them aside before quoting these figures.</p>` : ''}
@@ -2319,7 +2319,7 @@
         : acc(
             'author',
             'By author',
-            `Net ${isN() ? 'ncloc' : 'functional LOC'} over ${esc(periodLabel())} · identity keyed by email`,
+            `Net ${isN() ? 'ncloc' : 'functional LOC'} over ${esc(periodLabel())} · identities resolved to people`,
             `
       <div class="scroll"><table>
         <thead><tr><th>Author</th><th>Commits</th><th>${isN() ? 'ncloc' : 'Functional LOC'}</th><th>Days</th><th>Multiplier</th><th>Since</th><th>Share</th></tr></thead>
@@ -2394,7 +2394,8 @@
           <dt>Checked against</dt><dd>the ncloc rule mirrors SonarQube&rsquo;s; on a large TypeScript repo the two agreed within 0.15%.</dd>
           <dt>Reported, not counted</dt><dd><code>.css</code> <code>.scss</code> <code>.html</code> and code under <code>assets/</code> (drawings such as SVG wrapped as TSX)</dd>
           <dt>Excluded</dt><dd>Data and prose formats (<code>.json</code> <code>.toml</code> <code>.xml</code> <code>.md</code> <code>.txt</code> <code>.snap</code>), shell outside root <code>scripts/</code>, other YAML, and anything gitignored</dd>
-          <dt>Authors</dt><dd>resolved by the author map (<code>.claude/force-multiplier/author-map.tsv</code> in the repository, or <code>.git/loc/author-map.tsv</code>): each git identity mapped to a person and a role. Managers and excluded occasional contributors keep their lines in the team total but are out of headcount, engineer-days and cost; bots are dropped entirely</dd>
+          <dt>Identities</dt><dd>every git identity (email + name) is resolved to a person before counting${D.identities ? `: ${D.identities.total} identities → ${D.identities.people} people and ${D.identities.bots} bot identities, ${D.identities.merged} merged into a person they share an email, GitHub login or name with (<code>LOC_AUTO_MERGE=${esc(D.identities.mode)}</code>)` : ''}. A cluster holding a bot identity is a bot: its lines (a coding agent&rsquo;s) stay in the team total, it is in no headcount and earns no engineer-day. <code>LOC_LIST_AUTHORS=1</code> lists every identity and its person</dd>
+          <dt>Authors</dt><dd>the author map (<code>.claude/force-multiplier/author-map.tsv</code> in the repository, or <code>.git/loc/author-map.tsv</code>) maps a git identity to a person and a role, overriding the automatic merge for that identity and naming its whole cluster. Managers and excluded occasional contributors keep their lines in the team total but are out of headcount, engineer-days and cost; a bot likewise</dd>
           <dt>Engineer-days</dt><dd>${esc(f.how)}${whole ? '' : ', counted inside the selected period'}</dd>
           <dt>Team multiplier</dt><dd>team lines ÷ (${BASE} × engineer-days), the same formula as the headline, in every view</dd>
           <dt>Floors</dt><dd>a net-deletion period shows its negative lines but a 0.0x multiplier</dd>

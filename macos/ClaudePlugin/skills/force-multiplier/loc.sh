@@ -36,11 +36,14 @@
 #   per author  author_LOC / (150 x that author's distinct commit dates)
 #   team        total_LOC  / (150 x engineer-days)
 #   where engineer-days = the sum over human authors of their distinct commit
-#   dates — an engineer who joins on day 40 adds 1 engineer-day, not 40. Bot
-#   commits (semantic-release) carry no functional LOC and earn no engineer-days.
+#   dates — an engineer who joins on day 40 adds 1 engineer-day, not 40. A
+#   bot's lines (a coding agent's) are the team's output; a bot is in no
+#   headcount and earns no engineer-day, like a manager.
 #   A multiplier is floored at 0 — a net-deletion day is not negative output.
 #
-# Author identity is keyed by email (one person may commit under several names).
+# Every git identity in history (email + name) is resolved to a person before
+# anything is counted — see "identities" below — so one person's several emails
+# and spellings are one engineer, and a bot is a bot however it signs.
 #
 # Everything the script writes (cache, data, page) goes in the repository's git
 # directory, under .git/loc/, so it never shows up as a change in the work tree.
@@ -57,7 +60,9 @@
 #   LOC_COST_CURRENCY=AUD  its currency
 #   LOC_WORK_DAYS=220      working days a year (260 weekdays less holidays and leave)
 #   LOC_AUTHOR_FILE=path   the author map (see "authors" below)
-#   LOC_LIST_AUTHORS=1     list every commit identity and stop, to build the author map
+#   LOC_LIST_AUTHORS=1     list every commit identity and the person it resolved to, then stop
+#   LOC_AUTO_MERGE=1       how identities are merged into people (see "identities" below):
+#                          1 = every rule, email = same email / noreply login / exact name, 0 = off
 #   LOC_BASELINE=150       LOC / engineer / coding day
 #   LOC_START_DATE=YYYY-MM-DD  optional: the chart starts here, and earlier days are
 #                          shaded as "own time" (e.g. before the project officially began)
@@ -103,16 +108,6 @@ mkdir -p "$OUT_DIR" || exit 1
 # Local changes in the counted checkout: the headline counts them, history does
 # not, so the page says so.
 CLONE_DIRTY=$([[ -n "$(git status --porcelain 2>/dev/null)" ]] && echo 1 || echo 0)
-
-# LOC_LIST_AUTHORS=1: list every commit identity (email, name, commits, first and
-# last commit date) and stop. The input for the author map.
-if [[ -n "${LOC_LIST_AUTHORS:-}" ]]; then
-  printf 'email\tname\tcommits\tfirst\tlast\n'
-  git log --format='%aE%x09%aN%x09%ad' --date=short | awk -F'\t' '
-    { k=$1 "\t" $2; c[k]++; if (!(k in l) || $3>l[k]) l[k]=$3; if (!(k in f) || $3<f[k]) f[k]=$3 }
-    END { for (k in c) printf "%s\t%d\t%s\t%s\n", k, c[k], f[k], l[k] }' | sort -t$'\t' -k3,3nr
-  exit 0
-fi
 
 BASELINE_PER_DAY="${LOC_BASELINE:-150}"
 
@@ -266,9 +261,9 @@ linguist_excluded() {
 export LOC_VENDORED="$OUT_DIR/vendored.txt"
 
 # email -> display name; anything unlisted shows as its git author name.
-# "bot" is the reserved name: dropped from the walk, so it is in no figure, no
-# table and no engineer-day. Any GitHub App account (Dependabot and the like —
-# an author name or email carrying "[bot]") folds into it without a map entry.
+# "bot" is the reserved name: its lines count for the team, it is in no author
+# table, headcount or engineer-day. Bot accounts are recognised without a map
+# entry (see "identities").
 # Set LOC_AUTHOR_MAP to merge one person's several emails into one name, e.g.
 #   LOC_AUTHOR_MAP='ann@work.com=Ann Lee;ann@home.com=Ann Lee;release-bot@acme.com=bot'
 AUTHOR_MAP="${LOC_AUTHOR_MAP:-}"
@@ -276,7 +271,7 @@ AUTHOR_MAP="${LOC_AUTHOR_MAP:-}"
 #   identity  person  role  evidence
 # role: engineer | tester (both counted as engineers) | manager or excluded (their
 # lines count for the team; they are out of engineer counts, engineer-days and
-# cost) | bot (dropped entirely). Keyed by name, so no email need be written down;
+# cost) | bot (lines for the team, no headcount). Keyed by name, so no email need be written down;
 # LOC_AUTHOR_MAP (email-keyed) still works and wins on a clash. The first found
 # of: LOC_AUTHOR_FILE, the repository's .claude/force-multiplier/author-map.tsv
 # (committed, for the team), or .git/loc/author-map.tsv (this machine only).
@@ -290,6 +285,110 @@ if [[ -n "$AUTHOR_FILE" && -f "$AUTHOR_FILE" ]]; then
   AUTHOR_MAP="${AUTHOR_MAP:+$AUTHOR_MAP;}$(awk -F'\t' '!/^#/ && NF>=2 && $1!="" {
     p = ($3=="manager" || $3=="excluded") ? "staff" : ($3=="bot") ? "bot" : $2
     printf "%s%s=%s", (n++ ? ";" : ""), $1, p }' "$AUTHOR_FILE")"
+fi
+
+# ---- identities: who is who ---------------------------------------------
+# One person commits under several git identities — a work and a home email, a
+# GitHub noreply address, "jrieken" one day and "Johannes Rieken" the next —
+# and keyed by name alone each spelling was its own engineer (2026-10-04: VS
+# Code, 3,450 identities; "Johannes Rieken", "Johannes" and "jrieken" were three
+# engineers with 2,308 engineer-days between them, and "Copilot" was a human
+# with 259). So every identity in history is resolved to a person before
+# anything is counted: union-find over the rules below, strongest first. The
+# explicit map above wins over all of them. LOC_AUTO_MERGE picks the rules:
+#   1 (default)  same email; the GitHub/GitLab noreply login; the same name
+#                written differently (case, accents, punctuation, word order —
+#                two words or more, so every "alex" is not one person); an
+#                email whose local part spells a name seen in history
+#                (first.last, firstlast, flast — six characters or more, and
+#                only when exactly one name spells that way)
+#   email        same email, the noreply login, and the exact name only
+#   0            off: identity is the author name, as it was
+# In every mode but 0 a one-word name never joins two emails — "Tim", "unknown"
+# and "Ubuntu" are not one person — unless it is a GitHub login seen in history.
+# A cluster holding one bot identity ([bot] accounts, dependabot, renovate,
+# copilot, github-actions, anything ending in "bot") is a bot. A person is
+# shown under the name with most commits, or under whatever the explicit map
+# says for any member (so the map also names, excludes or drops a whole
+# cluster with one line). The result is .git/loc/identities.tsv — email, name,
+# person, commits, first, last — which LOC_LIST_AUTHORS=1 prints grouped by
+# person, so a wrong merge is visible and one map line overrides it.
+AUTO_MERGE="${LOC_AUTO_MERGE:-1}"
+IDENTITIES="$OUT_DIR/identities.tsv"
+git log --format='%aE%x09%aN%x09%ad' --date=short 2>/dev/null | LC_ALL=C awk -F'\t' -v mode="$AUTO_MERGE" -v amap="$AUTHOR_MAP" '
+  function find(x) { while (par[x]!=x) { par[x]=par[par[x]]; x=par[x] } return x }
+  function node(x) { if (!(x in par)) par[x]=x; return x }
+  function join(a, b,   ra, rb) { ra=find(node(a)); rb=find(node(b)); if (ra!=rb) par[ra]=rb }
+  # ASCII-fold enough of Latin-1 that "João" and "Joao" meet
+  function fold(s,   i) { for (i=1;i<=nF;i++) if (index(s, FR[i])) gsub(FR[i], FT[i], s); return s }
+  function norm(s) { s=tolower(fold(s)); gsub(/[^a-z0-9]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
+  function sorted(s,   n, T, i, j, t, out) { n=split(s, T, " ")
+    for (i=2;i<=n;i++) { t=T[i]; for (j=i-1; j>=1 && T[j]>t; j--) T[j+1]=T[j]; T[j+1]=t }
+    out=""; for (i=1;i<=n;i++) out=out (i>1?" ":"") T[i]; return out }
+  function login(e,   l) { if (e !~ /@users\.noreply\.(github|gitlab)\.com$/) return ""; l=e; sub(/@.*/, "", l); sub(/^[0-9]+[+-]/, "", l); return l }
+  function localpart(e,   l) { l=e; sub(/@.*/, "", l); sub(/\+.*/, "", l); gsub(/[._-]/, "", l); return l }
+  function isbot(e, n,   l) { l=e; sub(/@.*/, "", l)
+    if (index(e, "[bot]") || index(n, "[bot]")) return 1
+    if (l ~ /^(dependabot|renovate|greenkeeper|github-actions|semantic-release|copilot|snyk-bot|imgbot|allcontributors|mergify|codecov|pre-commit-ci|sonarcloud|whitesource|mend-)/) return 1
+    if (n ~ /^(dependabot|renovate|greenkeeper|github-actions|semantic-release|copilot|snyk-bot|imgbot|allcontributors|mergify|codecov|pre-commit-ci|sonarcloud|whitesource|mend-)/) return 1
+    if (l ~ /(^|[-_.])bot$/ || n ~ /(^|[ _-])bot$/) return 1
+    return 0 }
+  # a local-part form -> the one normalised name that spells it; two names, and it is ambiguous
+  function form(f, key) { if (f=="" || length(f)<6) return; if ((f in idx) && idx[f]!=key) amb[f]=1; else idx[f]=key }
+  BEGIN {
+    nF=split("à a á a â a ã a ä a å a À a Á a Â a Ã a Ä a Å a è e é e ê e ë e È e É e Ê e Ë e ì i í i î i ï i Ì i Í i Î i Ï i ò o ó o ô o õ o ö o ø o Ò o Ó o Ô o Õ o Ö o Ø o ù u ú u û u ü u Ù u Ú u Û u Ü u ç c Ç c ñ n Ñ n ý y ÿ y Ý y ß ss", T, " ")
+    for (i=1;i<=nF;i+=2) { FR[(i+1)/2]=T[i]; FT[(i+1)/2]=T[i+1] }; nF=nF/2
+    n=split(amap, L, ";"); for (i=1;i<=n;i++) if (L[i]!="") { k=index(L[i],"="); key=substr(L[i],1,k-1); ex[(index(key,"@") ? "E:" tolower(key) : "N:" key)]=substr(L[i],k+1) } }
+  { e=tolower($1); n=$2; k=e "\t" n
+    if (!(k in c)) { K[++nk]=k; E[nk]=e; N[nk]=n; first[k]=$3; last[k]=$3 }
+    c[k]++; if ($3<first[k]) first[k]=$3; if ($3>last[k]) last[k]=$3 }
+  END {
+    for (i=1;i<=nk;i++) { l=login(E[i]); if (l!="") logins[tolower(l)] }
+    for (i=1;i<=nk;i++) { e=E[i]; n=N[i]; node("E:" e); node("N:" n)
+      if (mode=="0") continue
+      l=login(e); if (l!="") join("E:" e, "L:" tolower(l))
+      nn=norm(n); t=split(nn, T, " ")
+      # A one-word name ("Tim", "unknown", "Ubuntu") never joins two emails: it
+      # bridges only when it is a GitHub login seen in history (2026-10-04: one
+      # "unknown" pulled six strangers into one engineer; "Tim" was two people).
+      if (t<2) { if (nn in logins) join("E:" e, "L:" nn); continue }
+      join("E:" e, "N:" n)
+      if (mode=="email") continue
+      key="n:" sorted(nn); join("N:" n, key)
+      f=nn; gsub(/ /, "", f); form(f, key); form(T[1] T[t], key); form(substr(T[1],1,1) T[t], key) }
+    if (mode!="0" && mode!="email")
+      for (i=1;i<=nk;i++) { e=E[i]; if (login(e)!="") continue; l=localpart(e); if ((l in idx) && !(l in amb)) join("E:" e, idx[l]) }
+    # cluster facts: bot; display name (most commits, a multi-word name before a
+    # handle: "Isidor Nikolic" over "isidor"); explicit person (most commits)
+    for (i=1;i<=nk;i++) { k=K[i]; r=(mode=="0") ? find("N:" N[i]) : find("E:" E[i])
+      if (isbot(E[i], tolower(fold(N[i])))) bot[r]=1
+      w=(split(norm(N[i]), T, " ")>=2) ? 2 : 1
+      nm[r SUBSEP N[i]]+=c[k]
+      if (w > rank[r]+0 || (w == rank[r]+0 && nm[r SUBSEP N[i]] > best[r]+0)) { rank[r]=w; best[r]=nm[r SUBSEP N[i]]; disp[r]=N[i] }
+      em[r SUBSEP E[i]]+=c[k]; if (em[r SUBSEP E[i]] > beste[r]+0) { beste[r]=em[r SUBSEP E[i]]; demail[r]=E[i] }
+      x = (("E:" E[i]) in ex) ? ex["E:" E[i]] : (("N:" N[i]) in ex) ? ex["N:" N[i]] : ""
+      if (x!="" && (!(r in xp) || c[k] > expc[r])) { xp[r]=x; expc[r]=c[k] } }
+    # Two people under one name ("unknown" four times over) must stay two
+    # people downstream, where a person is its display string: the second and
+    # later carry their email.
+    for (i=1;i<=nk;i++) { r=(mode=="0") ? find("N:" N[i]) : find("E:" E[i]); if (!(r in rs)) { rs[r]; shared[disp[r]]++ } }
+    for (r in rs) if (shared[disp[r]] > 1 && mode!="0") disp[r]=disp[r] " <" demail[r] ">"
+    for (i=1;i<=nk;i++) { k=K[i]; r=(mode=="0") ? find("N:" N[i]) : find("E:" E[i])
+      p = (("E:" E[i]) in ex) ? ex["E:" E[i]] : (("N:" N[i]) in ex) ? ex["N:" N[i]] : (r in xp) ? xp[r] : (r in bot) ? "bot" : disp[r]
+      printf "%s\t%s\t%s\t%d\t%s\t%s\n", E[i], N[i], p, c[k], first[k], last[k] } }
+' > "$IDENTITIES"
+# total identities, people, identities folded into another, bot identities
+IFS=$'\t' read -r ID_TOTAL ID_PEOPLE ID_MERGED ID_BOTS < <(awk -F'\t' '
+  { n++; if ($3=="bot") b++; else if ($3=="staff") s++; else if (!($3 in p)) { p[$3]; np++ } }
+  END { printf "%d\t%d\t%d\t%d\n", n, np, n-b-s-np, b }' "$IDENTITIES")
+
+# LOC_LIST_AUTHORS=1: every identity and the person it resolved to, grouped by
+# person, most commits first. The input for the author map.
+if [[ -n "${LOC_LIST_AUTHORS:-}" ]]; then
+  printf 'email\tname\tperson\tcommits\tfirst\tlast\n'
+  sort -t$'\t' -k3,3 -k4,4nr "$IDENTITIES"
+  printf '\n%s identities -> %s people, %s bot identities; %s identities merged into a person (LOC_AUTO_MERGE=%s)\n' "$ID_TOTAL" "$ID_PEOPLE" "$ID_BOTS" "$ID_MERGED" "$AUTO_MERGE" >&2
+  exit 0
 fi
 
 # ---- current-tree snapshot (authoritative for "what exists now") --------
@@ -318,12 +417,22 @@ WORKSPACES=$(git ls-files --cached --others --exclude-standard -- '*/package.jso
 # Lines of every classified file: "path<TAB>raw<TAB>code", awk over the files
 # themselves so each is read once; xargs may split a long list into batches.
 # Paths go in as ./path so awk never reads one as a variable assignment.
+# LC_ALL=C: in a UTF-8 locale BSD awk aborts on the first byte it cannot decode
+# ("towc: multibyte conversion failure") and the rest of that batch is never
+# counted (2026-10-04: one UTF-16 test fixture in VS Code lost 3,211 files and
+# 770k lines from the tree, so history and tree were 27% apart). Bytes are
+# enough here: the comment rule is ASCII.
 PER_FILE=$(printf '%s\n' "$CLASSIFIED" | cut -f1 | grep . | sed 's|^|./|' | tr '\n' '\0' \
-  | xargs -0 awk "$AWK_RULES"'
+  | LC_ALL=C xargs -0 awk "$AWK_RULES"'
     function out() { if (f != "") printf "%s\t%d\t%d\n", substr(f, 3), raw, code }
     FNR == 1 { out(); f = FILENAME; split(langOf(f), LS, "|"); style = LS[2]; raw = 0; code = 0 }
     { raw++; if (isCode($0, style)) code++ }
-    END { out() }' 2>/dev/null)
+    END { out() }' 2> "$OUT_DIR/count.err")
+# Never silent: a batch that dies takes its remaining files with it.
+if [[ -s "$OUT_DIR/count.err" ]]; then
+  printf '  ! line counting: awk stopped on a file; a batch of files may be uncounted and the run will not reconcile:\n' >&2
+  sed 's/^/      /' "$OUT_DIR/count.err" | head -5 >&2
+fi
 
 # Roll the files up into "CAT|LANG|WS<TAB>key<TAB>raw<TAB>code<TAB>files". UI
 # assets have a category of their own and are in no language or package total.
@@ -428,7 +537,7 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
       git -c core.attributesFile="$attrs" log --first-parent -m -p --unified=0 --no-renames \
         --pretty=format:'#C%x09%cd%x09%aE%x09%aN' --date=short -- "${PATHSPECS[@]}"
     fi
-  } 2>/dev/null | awk -F'\t' -v since="$since" -v amap="$AUTHOR_MAP" -v first="$FIRST_DAY" "$AWK_RULES"'
+  } 2>/dev/null | LC_ALL=C awk -F'\t' -v since="$since" -v first="$FIRST_DAY" "$AWK_RULES"'
     # The Conventional Commits type of a subject ("fix(harness)!: ..." -> fix);
     # anything else (a merge, a free-form message) is "other".
     function ctype(subj,   t) { if (match(subj, /^[a-z]+(\([^)]*\))?!?:/)) { t=substr(subj, 1, RLENGTH); sub(/[(!:].*$/, "", t); return t } return "other" }
@@ -436,8 +545,9 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
     function tally(list, t,   n, P, i, kv, out, hit) { n=split(list, P, ","); out=""; hit=0
       for (i=1;i<=n;i++) { if (P[i]=="") continue; split(P[i], kv, ":"); if (kv[1]==t) { kv[2]++; hit=1 }; out=out (out==""?"":",") kv[1] ":" kv[2] }
       return hit ? out : out (out==""?"":",") t ":1" }
-    # by email first (LOC_AUTHOR_MAP), then by name (the author map)
-    function author(email, name) { return (email in m) ? m[email] : (name in m) ? m[name] : (index(email "\t" name, "[bot]") ? "bot" : name) }
+    # The raw identity, "email<US>name": rows are resolved to people after the
+    # walk (see "identities"), so a cached row never depends on any map.
+    function author(email, name) { return tolower(email) "\037" name }
     # The path in a ---/+++ header. Git ends the header with a tab when the path
     # holds a space (2026-10-04: every Swift file under "App Intents/" was
     # dropped, 19k lines), and quotes a path holding a quote or a backslash.
@@ -446,7 +556,6 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
       if (substr(s,1,1)=="\"" && substr(s,length(s),1)=="\"") { s=substr(s,2,length(s)-2); gsub(/\\"/, "\"", s); gsub(/\\\\/, "\\", s) }
       if (substr(s,1,2)==side) s=substr(s,3)
       return s }
-    BEGIN { n=split(amap, L, ";"); for (i=1;i<=n;i++) if (L[i]!="") { k=index(L[i],"="); m[substr(L[i],1,k-1)]=substr(L[i],k+1) } }
     {
       # An author date before the project began is a wrong clock (2026-10-04: a
       # commit authored "2001-01-25", committed 2025, opened the chart in 2001):
@@ -485,7 +594,6 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
     # on a (day, author) that authored no commit that day; its lines still count.
     END { for (k in commits) all[k]; for (k in praw) all[k]; for (k in traw) all[k]
           for (k in all) { split(k, parts, SUBSEP)
-            if (parts[2] == "bot") continue          # release bot, [bot] accounts: never counted, never shown
             printf "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%s\n", parts[1], parts[2],
               (praw[k]+0), (traw[k]+0), (pcode[k]+0), (tcode[k]+0), (commits[k]+0), types[k] } }
   ' | sort
@@ -494,10 +602,11 @@ day_rows() {  # $1 = only commits authored on/after this date ("" = whole histor
 commits_through() { git log --pretty=%ad --date=short 2>/dev/null | awk -v d="$1" '$1<=d' | wc -l | tr -d ' '; }
 
 # Keyed on what a cached row depends on — the walk itself, the classifier and
-# per-line rule, the .gitattributes linguist markers and the author map — never
-# on the whole script, so an edit to the report or the publish step keeps the
-# cache warm.
-CACHE_KEY=$( { declare -f day_rows add_linguist_history; printf '%s\n' "$AWK_RULES" "$LINGUIST_SIG" "$AUTHOR_MAP" "$FIRST_DAY"; } | shasum | cut -c1-12)
+# per-line rule, the .gitattributes linguist markers — never on the whole
+# script, so an edit to the report or the publish step keeps the cache warm.
+# Rows hold raw identities, so neither the author map nor a new contributor
+# (who may merge an old identity into a new person) touches the cache.
+CACHE_KEY=$( { declare -f day_rows add_linguist_history; printf '%s\n' "$AWK_RULES" "$LINGUIST_SIG" "$FIRST_DAY"; } | shasum | cut -c1-12)
 
 CACHED_ROWS=""; CACHE_LAST=""; CACHE_STATE="cold"
 if [[ -f "$CACHE" ]]; then
@@ -524,6 +633,24 @@ if [[ -n "$FROZEN" ]]; then
   FLAST=$(echo "$FROZEN" | tail -1 | cut -f1)
   { printf '#loc-cache\t%s\t%s\t%s\n' "$CACHE_KEY" "$FLAST" "$(commits_through "$FLAST")"; echo "$FROZEN"; } > "$CACHE"
 fi
+
+# Resolve each (day, identity) row to its (day, person) row — sums, and the
+# commit-type tallies merged. Bots stay, as "bot": a coding agent's lines are
+# in the tree, so they are the team's output (2026-10-04: VS Code, 21k lines
+# by Copilot; dropping them left history 0.5% short of the tree); like "staff"
+# a bot is in no headcount and earns no engineer-day. An identity the walk saw
+# but the resolver did not (it cannot happen: both read the same log) keeps
+# its name.
+ROWS=$(echo "$ROWS" | awk -F'\t' -v idfile="$IDENTITIES" '
+  function tally_add(list, t, by,   n, P, i, kv, out, hit) { n=split(list, P, ","); out=""; hit=0
+    for (i=1;i<=n;i++) { if (P[i]=="") continue; split(P[i], kv, ":"); if (kv[1]==t) { kv[2]+=by; hit=1 }; out=out (out==""?"":",") kv[1] ":" kv[2] }
+    return hit ? out : out (out==""?"":",") t ":" by }
+  function tally_merge(a, b,   n, P, i, kv) { n=split(b, P, ","); for (i=1;i<=n;i++) { if (P[i]=="") continue; split(P[i], kv, ":"); a=tally_add(a, kv[1], kv[2]) }; return a }
+  BEGIN { while ((getline l < idfile) > 0) { split(l, F, "\t"); m[F[1] "\037" F[2]]=F[3] } }
+  { split($2, I, "\037"); p=($2 in m) ? m[$2] : I[2]
+    k=$1 "\t" p; if (!(k in seen)) { seen[k]; KEYS[++n]=k }
+    a[k]+=$3; b[k]+=$4; c[k]+=$5; d[k]+=$6; cm[k]+=$7; ty[k]=tally_merge(ty[k], $8) }
+  END { for (i=1;i<=n;i++) { k=KEYS[i]; printf "%s\t%d\t%d\t%d\t%d\t%d\t%s\n", k, a[k], b[k], c[k], d[k], cm[k], ty[k] } }' | sort)
 
 # ---- roll-ups -------------------------------------------------------------
 # per day:    "<date>\t<raw>\t<ncloc>\t<commits>\t<humans>"
@@ -585,7 +712,7 @@ echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_PER_DAY" '
     print hdr; print sep
   }
   { d=$1; a=$2; if (!(d in days)) { days[d]; D[++m]=d }   # input is date-sorted
-    c[d]+=$7; if (a=="bot") next;
+    c[d]+=$7; if (a=="bot") { dtot[d]+=$3+$4; next }        # a coding agent: lines for the team, no human commit, no headcount
     if (a=="staff") { hc[d]+=$7; dtot[d]+=$3+$4; next }   # managers: lines for the team, no headcount
     cm[d,a]+=$7; acm[a]+=$7; hc[d]+=$7;
     loc[d,a]+=$3+$4; has[d,a]=1; tot[a]+=$3+$4; dtot[d]+=$3+$4;
@@ -600,7 +727,7 @@ echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_PER_DAY" '
     note=sprintf("  %-12s %7s", "(days)", "");
     for (i=1;i<=n;i++) note=note sprintf("  %4s %8d %7s", "", ad[A[i]], "");
     note=note sprintf("  %4s %8d %7s", "", E, ""); print note;
-    print "  COMMITS = the day total; CMT = that author. Bots (release, [bot] accounts) are not counted anywhere."; print ""
+    print "  COMMITS = the day total; CMT = that author. Bots: lines in TEAM, no CMT, no headcount."; print ""
   }'
 fi
 HIST_TOTAL=$(echo "$DAY_ROWS" | awk -F'\t' '{s+=$2} END{print s+0}')
@@ -639,7 +766,9 @@ else
   printf '        before quoting figures.\n\n'
 fi
 
-printf '  BY AUTHOR (net functional LOC, from git history; bots excluded; identity keyed by email)\n'
+printf '  BY AUTHOR (net functional LOC, from git history; bots excluded; identities resolved to people)\n'
+printf '  %s git identities → %s people and %s bot identities; %s identities merged into a person they share\n' "$ID_TOTAL" "$ID_PEOPLE" "$ID_BOTS" "$ID_MERGED"
+printf '  an email, login or name with (LOC_AUTO_MERGE=%s; LOC_LIST_AUTHORS=1 lists every identity and its person)\n' "$AUTO_MERGE"
 printf '  %-14s %8s %11s %8s %6s %8s %8s  %s\n' 'AUTHOR' 'COMMITS' 'FUNCTIONAL' 'NCLOC' 'DAYS' 'MULT' 'NMULT' 'SINCE'
 printf '  %-14s %8s %11s %8s %6s %8s %8s  %s\n' '--------------' '-------' '----------' '--------' '----' '----' '-----' '----------'
 while IFS=$'\t' read -r a af an ac ad afirst; do
@@ -735,11 +864,18 @@ printf '                         such as SVG wrapped as TSX) — the UI-assets l
 printf '  Excluded formats       data and prose (.json .toml .xml .md .txt .snap),\n'
 printf '                         shell outside root scripts/, other YAML.\n'
 printf '  Excluded folders       anything .gitignored\n'
+printf '  Identities             every git identity (email + name) resolved to a\n'
+printf '                         person before counting: same email, GitHub noreply\n'
+printf '                         login, the same name written differently, an email\n'
+printf '                         that spells a name (LOC_AUTO_MERGE=%s). A cluster with\n' "$AUTO_MERGE"
+printf '                         a bot identity is a bot. LOC_LIST_AUTHORS=1 shows it.\n'
 printf '  Authors                the author map (%s): each git\n' "${AUTHOR_FILE:-none found}"
-printf '                         identity to a person and a role. Managers and\n'
-printf '                         excluded contributors keep their lines in the team\n'
-printf '                         total but are out of headcount, engineer-days and\n'
-printf '                         cost; bots, and every [bot] account, are dropped.\n'
+printf '                         identity to a person and a role, overriding the\n'
+printf '                         automatic merge for that identity and naming its\n'
+printf '                         whole cluster. Managers and excluded contributors\n'
+printf '                         keep their lines in the team total but are out of\n'
+printf '                         headcount, engineer-days and cost; a bot likewise,\n'
+printf '                         its lines (a coding agent\x27s) in the team total.\n'
 printf '  Engineer-days          every commit counts as effort: a date two people\n'
 printf '                         both committed on is one coding day and two\n'
 printf '                         engineer-days — that is why they differ\n'
@@ -764,14 +900,18 @@ REPORT_HTML="$OUT_DIR/loc-report.html"
 REPORT_PAGE="$SCRIPT_DIR/loc-report.html"
 # Commit types ride in column 8 as "feat:3,fix:1"; the JSON carries them raw and
 # the page folds them into its five categories.
+# Names go into JSON strings: a quote or a backslash in one (2026-10-04: VS
+# Code, 'Ken "2-Foot" Brownfield') broke the data file and the page opened on
+# "No data".
 DAYS_JSON=$(echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_PER_DAY" '
+  function jstr(s,   out, i, c) { out=""; for (i=1;i<=length(s);i++) { c=substr(s,i,1); out=out ((c=="\\" || c=="\"") ? "\\" c : c) } return out }
   function mraw(loc, engdays,   m) { m = (engdays>0 ? loc/(base*engdays) : 0); if (m<0) m=0; return m }
   function tjson(list,   n, P, i, kv, out) { n=split(list, P, ","); out=""
     for (i=1;i<=n;i++) { if (P[i]=="") continue; split(P[i], kv, ":"); out=out (out==""?"":",") "\"" kv[1] "\":" kv[2] }
     return "{" out "}" }
   BEGIN { n=split(authors, A, ";") }
   { d=$1; a=$2; if (!(d in days)) { days[d]; D[++m]=d }
-    c[d]+=$7; if (a=="bot") next;
+    c[d]+=$7; if (a=="bot") { dtot[d]+=$3+$4; ndtot[d]+=$5+$6; next }   # a coding agent: lines for the team, no human commit, no headcount
     # managers ("staff"): their commits and lines count for the team; no headcount
     if (a=="staff") { hc[d]+=$7; dtot[d]+=$3+$4; ndtot[d]+=$5+$6; next }
     cm[d,a]+=$7; hc[d]+=$7; ty[d,a]=$8;
@@ -786,7 +926,7 @@ DAYS_JSON=$(echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_P
       first=1; num=0; den=0; nnum=0; nden=0;
       for (i=1;i<=n;i++) { a=A[i]; if (!((d,a) in has)) continue;
         if (!first) printf ","; first=0;
-        printf "\"%s\":{\"commits\":%d,\"loc\":%d,\"mult\":%.2f,\"ncloc\":%d,\"nmult\":%.2f,\"types\":%s}", a, cm[d,a], loc[d,a], mraw(loc[d,a],1), nloc[d,a], mraw(nloc[d,a],1), tjson(ty[d,a]);
+        printf "\"%s\":{\"commits\":%d,\"loc\":%d,\"mult\":%.2f,\"ncloc\":%d,\"nmult\":%.2f,\"types\":%s}", jstr(a), cm[d,a], loc[d,a], mraw(loc[d,a],1), nloc[d,a], mraw(nloc[d,a],1), tjson(ty[d,a]);
         w=loc[d,a]; if (w<0) w=0; num+=mraw(w,1)*w; den+=w
         nw=nloc[d,a]; if (nw<0) nw=0; nnum+=mraw(nw,1)*nw; nden+=nw }
       tl2=""; tn=split(tl[d], TK, ","); for (ti=1;ti<=tn;ti++) if (TK[ti]!="") tl2=tl2 (tl2==""?"":",") TK[ti] ":" tt[d,TK[ti]];
@@ -794,10 +934,13 @@ DAYS_JSON=$(echo "$ROWS" | awk -F'\t' -v authors="$AUTHORS" -v base="$BASELINE_P
       printf "}" }
     printf "]" }')
 AUTHORS_JSON=$(echo "$AUTHOR_ROWS" | awk -F'\t' -v base="$BASELINE_PER_DAY" '
+  function jstr(s,   out, i, c) { out=""; for (i=1;i<=length(s);i++) { c=substr(s,i,1); out=out ((c=="\\" || c=="\"") ? "\\" c : c) } return out }
   { m=($5>0 ? $2/(base*$5) : 0); if (m<0) m=0; nm=($5>0 ? $3/(base*$5) : 0); if (nm<0) nm=0;
     if (NR>1) printf ",";
-    printf "{\"name\":\"%s\",\"loc\":%d,\"ncloc\":%d,\"commits\":%d,\"days\":%d,\"mult\":%.2f,\"nmult\":%.2f,\"since\":\"%s\"}", $1, $2, $3, $4, $5, m, nm, $6 }')
-AUTHOR_ORDER_JSON=$(echo "$AUTHORS" | awk -F';' '{ for (i=1;i<=NF;i++) { if (i>1) printf ","; printf "\"%s\"", $i } }')
+    printf "{\"name\":\"%s\",\"loc\":%d,\"ncloc\":%d,\"commits\":%d,\"days\":%d,\"mult\":%.2f,\"nmult\":%.2f,\"since\":\"%s\"}", jstr($1), $2, $3, $4, $5, m, nm, $6 }')
+AUTHOR_ORDER_JSON=$(echo "$AUTHORS" | awk -F';' '
+  function jstr(s,   out, i, c) { out=""; for (i=1;i<=length(s);i++) { c=substr(s,i,1); out=out ((c=="\\" || c=="\"") ? "\\" c : c) } return out }
+  { for (i=1;i<=NF;i++) { if (i>1) printf ","; printf "\"%s\"", jstr($i) } }')
 cat > "$DATA_JS" <<EOF
 window.LOC_DATA = {
   "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -808,6 +951,7 @@ window.LOC_DATA = {
   "teamOnly": $([[ "${LOC_TEAM_ONLY:-1}" = 1 ]] && echo true || echo false),
   "cost": {"annual": ${LOC_COST_ANNUAL:-150000}, "currency": "${LOC_COST_CURRENCY:-AUD}", "workDays": ${LOC_WORK_DAYS:-220}},
   "cache": {"state": "$CACHE_STATE", "frozenThrough": "${CACHE_LAST:-}"},
+  "identities": {"total": $ID_TOTAL, "people": $ID_PEOPLE, "merged": $ID_MERGED, "bots": $ID_BOTS, "mode": "$AUTO_MERGE"},
   "authorOrder": [$AUTHOR_ORDER_JSON],
   "authors": [$AUTHORS_JSON],
   "team": {"commits": $(echo "$AUTHOR_ROWS" | awk -F'\t' '{s+=$4} END{print s+0}'), "loc": $HIST_TOTAL, "ncloc": $HIST_TOTAL_N, "engDays": $ENG_DAYS_ACTUAL, "mult": $HIST_MULT, "nmult": $HIST_MULT_N},
