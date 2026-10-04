@@ -1353,6 +1353,12 @@ extension Ghostty {
 
             // If this is a binding then we want to perform it.
             if let bindingFlags {
+                // A paste with only an image to give goes to an agent as its own
+                // image paste key.
+                if AgentImagePaste.perform(for: event, in: self) {
+                    return true
+                }
+
                 // Attempt to trigger a menu item for this key binding. We only do this if:
                 //   - We're not in a key sequence or table (those are separate bindings)
                 //   - The binding is NOT `all` (menu uses FirstResponder chain)
@@ -1668,6 +1674,7 @@ extension Ghostty {
 
         @IBAction func paste(_ sender: Any?) {
             guard let surface = self.surface else { return }
+            if AgentImagePaste.perform(in: self) { return }
             let action = "paste_from_clipboard"
             if !ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8))) {
                 AppDelegate.logger.warning("action failed action=\(action, privacy: .public)")
