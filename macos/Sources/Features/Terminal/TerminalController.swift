@@ -419,7 +419,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
     static func newTab(
         _ ghostty: Ghostty.App,
         from parent: NSWindow? = nil,
-        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil
+        withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil,
+        inheritsPlace inheritsParentPlace: Bool = true
     ) -> TerminalController? {
         // Making sure that we're dealing with a TerminalController. If not,
         // then we just create a new window.
@@ -444,7 +445,9 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         // A tab opened right after a grouped tab joins that group, which also keeps the
         // group's tabs next to each other, and the same goes for a folder. A tab opened
         // in a folder starts in the folder's directory, wherever the parent's shell is.
-        let inheritsPlace = ghostty.config.windowNewTabPosition != "end"
+        // A caller that chose the tab's place itself, such as the sidebar opening a
+        // session in a folder, passes `inheritsPlace: false`.
+        let inheritsPlace = inheritsParentPlace && ghostty.config.windowNewTabPosition != "end"
         let parentWindow = parent as? TerminalWindow
         let groupID = inheritsPlace ? parentWindow?.userTabGroupID : nil
         let folderID = inheritsPlace ? parentWindow?.userTabFolderID : nil

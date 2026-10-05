@@ -707,7 +707,10 @@ final class TabSidebarModel: ObservableObject {
         guard let controller = TerminalController.newTab(
             hostController.ghostty,
             from: anchor,
-            withBaseConfig: baseConfig),
+            withBaseConfig: baseConfig,
+            // The anchor of a folder with no sessions is another folder's tab, whose
+            // directory must not replace this folder's.
+            inheritsPlace: false),
               let window = controller.window as? TerminalWindow else { return nil }
 
         window.userTabGroupID = groupID
