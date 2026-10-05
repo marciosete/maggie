@@ -210,6 +210,13 @@ class TerminalWindowRestoration: NSObject, NSWindowRestoration {
             return
         }
 
+        // The saved workspace opens these windows at launch, with their tabs together.
+        if TerminalWorkspace.hasSavedWorkspace {
+            AppDelegate.logger.info("skip restoration: the saved workspace restores windows")
+            completionHandler(nil, nil)
+            return
+        }
+
         // Decode the state. If we can't decode the state, then we can't restore.
         guard let state = TerminalRestorableState(coder: state) else {
             completionHandler(nil, TerminalRestoreError.stateDecodeFailed)

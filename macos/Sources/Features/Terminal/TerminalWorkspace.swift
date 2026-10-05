@@ -11,8 +11,9 @@ import OSLog
 ///
 /// macOS state restoration only brings windows back when "Close windows when quitting
 /// an application" is off in System Settings (it is on by default), and it forgets
-/// windows that were closed before quitting. The saved workspace fills those gaps. It is
-/// opened when Ghostty starts and macOS didn't restore any windows, and when the Dock
+/// windows that were closed before quitting. The saved workspace fills those gaps, and
+/// once there is one, macOS state restoration stands aside for it. It is opened when
+/// Ghostty starts and macOS didn't restore any windows, and when the Dock
 /// icon is clicked while no windows are open. Closing the last window doesn't clear it,
 /// so it always holds the last windows that were open. Nothing is saved or restored with
 /// `window-save-state = never`.
@@ -520,6 +521,13 @@ final class TerminalWorkspace: ObservableObject {
     }
 
     // MARK: Restoring
+
+    /// True when a workspace is saved. macOS state restoration then stands aside, since it
+    /// brings each tab of a native fullscreen window back as a window of its own and
+    /// knows nothing of the sidebar's groups and folders.
+    static var hasSavedWorkspace: Bool {
+        UserDefaults.ghostty.data(forKey: defaultsKey) != nil
+    }
 
     /// Opens the saved workspace when the app starts, unless macOS restored its windows.
     /// Windows that were opened for another reason, such as a folder dropped on the Dock
