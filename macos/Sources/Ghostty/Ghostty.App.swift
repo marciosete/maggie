@@ -133,10 +133,12 @@ extension Ghostty {
             let fileURL = URL(fileURLWithPath: str).absoluteString
             var action = ghostty_action_open_url_s()
             action.kind = GHOSTTY_ACTION_OPEN_URL_KIND_TEXT
+            var target = ghostty_target_s()
+            target.tag = GHOSTTY_TARGET_APP
             fileURL.withCString { cStr in
                 action.url = cStr
                 action.len = UInt(fileURL.count)
-                _ = App.openURL(action)
+                _ = App.openURL(action, target: target)
             }
         }
 
@@ -744,7 +746,7 @@ extension Ghostty {
                 checkForUpdates(app)
 
             case GHOSTTY_ACTION_OPEN_URL:
-                return openURL(action.action.open_url)
+                return openURL(action.action.open_url, target: target)
 
             case GHOSTTY_ACTION_UNDO:
                 return undo(app, target: target)
@@ -806,7 +808,8 @@ extension Ghostty {
         }
 
         private static func openURL(
-            _ v: ghostty_action_open_url_s
+            _ v: ghostty_action_open_url_s,
+            target: ghostty_target_s
         ) -> Bool {
             let action = Ghostty.Action.OpenURL(c: v)
 
@@ -815,6 +818,33 @@ extension Ghostty {
             // deceptive targets cannot reach Launch Services directly.
             if action.kind == .osc8 {
                 return openUntrustedURL(action.url)
+            }
+
+            // A Markdown file named in terminal output, as an agent names the
+            // report it wrote, opens in Maggie's own viewer. The core resolves
+            // a relative path against the terminal's directory when the file is
+            // there; this does the same for the paths it passes on as written.
+            if action.kind == .text || action.kind == .unknown {
+                var surfaceView: SurfaceView?
+                if target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface {
+                    surfaceView = self.surfaceView(from: surface)
+                }
+                if let file = DocumentLink.markdownFile(in: action.url, relativeTo: surfaceView?.pwd) {
+                    // This runs with the renderer mutex held; let AppKit have the
+                    // next turn of the main loop before the view changes.
+                    var pane: DocumentPaneModel?
+                    if let window = surfaceView?.window as? TerminalWindow, window.supportsTabSidebar {
+                        pane = window.documentPaneModel
+                    }
+                    DispatchQueue.main.async {
+                        if let pane {
+                            pane.show(file)
+                        } else {
+                            DocumentViewerController.show(file)
+                        }
+                    }
+                    return true
+                }
             }
 
             // If the URL doesn't have a valid scheme we assume its a file path. The URL

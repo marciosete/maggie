@@ -14,15 +14,19 @@ struct TabSidebarContainerView<Content: View>: View {
     let sourceControl: SourceControlPanelModel
     @ObservedObject var sourceControlSettings = SourceControlSettings.shared
     @ObservedObject var usageSettings = UsageSettings.shared
+    @ObservedObject var documentPane: DocumentPaneModel
+    @ObservedObject var documentPaneSettings = DocumentPaneSettings.shared
     let content: Content
 
     init(
         model: TabSidebarModel,
         sourceControl: SourceControlPanelModel,
+        documentPane: DocumentPaneModel,
         @ViewBuilder content: () -> Content
     ) {
         self.model = model
         self.sourceControl = sourceControl
+        self.documentPane = documentPane
         self.content = content()
     }
 
@@ -57,6 +61,12 @@ struct TabSidebarContainerView<Content: View>: View {
 
     @ViewBuilder
     private func rightPanels(topInset: CGFloat) -> some View {
+        if documentPane.isVisible {
+            separator
+            DocumentPaneView(model: documentPane, topInset: topInset)
+                .frame(width: documentPaneSettings.width)
+        }
+
         if sourceControlSettings.isVisible {
             separator
             SourceControlPanelView(model: sourceControl, topInset: topInset)

@@ -1161,7 +1161,8 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             container = TerminalViewContainer {
                 TabSidebarContainerView(
                     model: terminalWindow.tabSidebarModel,
-                    sourceControl: terminalWindow.sourceControlModel
+                    sourceControl: terminalWindow.sourceControlModel,
+                    documentPane: terminalWindow.documentPaneModel
                 ) {
                     TerminalView(ghostty: ghostty, viewModel: self, delegate: self)
                 }

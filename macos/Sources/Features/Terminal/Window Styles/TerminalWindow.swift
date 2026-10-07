@@ -226,6 +226,9 @@ class TerminalWindow: NSWindow {
     /// The state behind this window's source control panel.
     let sourceControlModel = SourceControlPanelModel()
 
+    /// The document shown beside this window's terminal, if any.
+    let documentPaneModel = DocumentPaneModel()
+
     /// Whether this window style can show the vertical tab sidebar. Styles that draw
     /// their own tab bar or don't support tabs override this.
     var supportsTabSidebar: Bool { true }
