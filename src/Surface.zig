@@ -2827,8 +2827,12 @@ pub fn keyCallback(
         // 1. mouse reporting is off
         // OR
         // 2. mouse reporting is on and we are not reporting shift to the terminal
+        // OR
+        // 3. the mods held are a link's own, so ⌘-hover works in a program
+        //    that captures the mouse, as Claude Code does
         if (self.io.terminal.flags.mouse_event == .none or
-            (self.mouse.mods.shift and !self.mouseShiftCapture(false)))
+            (self.mouse.mods.shift and !self.mouseShiftCapture(false)) or
+            self.mouseModsMatchLink())
         {
             // Refresh our link state
             const pos = self.rt_surface.getCursorPos() catch break :mouse_mods;
@@ -4024,6 +4028,11 @@ pub fn mouseButtonCallback(
             // then we do not do a mouse report.
             if (mods.shift and !shift_capture) break :report;
 
+            // A click on a link with the link's mods held is the link's,
+            // not the program's: the release opens it (above), and the
+            // press that led there isn't reported either.
+            if (self.mouse.over_link and self.mouseModsMatchLink()) break :report;
+
             // In any other mouse button scenario without shift pressed we
             // clear the selection since the underlying application can handle
             // that in any way (i.e. "scrolling").
@@ -4484,6 +4493,21 @@ fn linkAtPin(
     return null;
 }
 
+/// Whether the mods held are those a configured link highlights with
+/// (⌘ on macOS, ctrl elsewhere, for the default URL and path link). While
+/// a program captures the mouse, these mods let a link be hovered and
+/// clicked anyway, since the program would otherwise swallow every click.
+/// Maggie's sessions run Claude Code, which captures the mouse, and
+/// ⌘-click is how a path it prints is opened. Links that highlight
+/// without mods stay out of this so plain clicks still reach the program.
+fn mouseModsMatchLink(self: *const Surface) bool {
+    for (self.config.links) |link| switch (link.highlight) {
+        .always, .hover => {},
+        .always_mods, .hover_mods => |v| if (v.equal(self.mouse.mods)) return true,
+    };
+    return false;
+}
+
 /// This returns the mouse mods to consider for link highlighting or
 /// other purposes taking into account when shift is pressed for releasing
 /// the mouse from capture.
@@ -4721,11 +4745,14 @@ pub fn cursorPosCallback(
     // 1. mouse reporting is off
     // OR
     // 2. mouse reporting is on and we are not reporting shift to the terminal
+    // OR
+    // 3. the mods held are a link's own (see mouseModsMatchLink)
     if ((over_link or
         self.mouse.link_point == null or
         (self.mouse.link_point != null and !self.mouse.link_point.?.eql(pos_vp))) and
         (self.io.terminal.flags.mouse_event == .none or
-            (self.mouse.mods.shift and !self.mouseShiftCapture(false))))
+            (self.mouse.mods.shift and !self.mouseShiftCapture(false)) or
+            self.mouseModsMatchLink()))
     {
         // If we were previously over a link, we always update. We do this so that if the text
         // changed underneath us, even if the mouse didn't move, we update the URL hints and state
