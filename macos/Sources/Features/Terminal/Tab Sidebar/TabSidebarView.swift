@@ -864,16 +864,35 @@ private struct TabSidebarTabRow: View {
         tab.claudeCodeState?.light == .working && !tab.isSelected && !isHovering
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            titleLine
+    /// Whether the row shows the magpie in place of a title the terminal hasn't set.
+    private var wearsGlyph: Bool {
+        Maggie.isMaggie && tab.title == Maggie.placeholderTitle && !isEditing
+    }
 
-            if isExtended && !isEditing {
-                HStack(spacing: 6) {
-                    locationLine
-                    Spacer(minLength: 0)
-                    modelLabel
-                    speakerButton
+    var body: some View {
+        HStack(spacing: 6) {
+            if wearsGlyph {
+                // A session the terminal hasn't named yet wears the magpie, as tall
+                // as the row allows: its spread wings need the room to read. It sits
+                // beside both lines of an extended row, so it is centered in the row
+                // instead of riding the title line above the location.
+                Image("MaggieGlyph")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: isExtended ? 30 : 22)
+                    .accessibilityLabel(Maggie.appName)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                titleLine
+
+                if isExtended && !isEditing {
+                    HStack(spacing: 6) {
+                        locationLine
+                        Spacer(minLength: 0)
+                        modelLabel
+                        speakerButton
+                    }
                 }
             }
         }
@@ -962,15 +981,8 @@ private struct TabSidebarTabRow: View {
                     TabSidebarUnseenDot()
                 }
 
-                if Maggie.isMaggie && tab.title == Maggie.placeholderTitle {
-                    // A session the terminal hasn't named yet wears the magpie, as tall
-                    // as the row allows: its spread wings need the room to read.
-                    Image("MaggieGlyph")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: isExtended ? 30 : 22)
-                        .accessibilityLabel(Maggie.appName)
-                } else {
+                // The magpie standing in for a missing title is drawn by the row itself.
+                if !wearsGlyph {
                     Text(tab.title)
                         .fontWeight(finishedUnseen ? .semibold : nil)
                         .lineLimit(1)
