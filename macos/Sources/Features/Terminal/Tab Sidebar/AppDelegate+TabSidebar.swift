@@ -40,11 +40,12 @@ extension AppDelegate {
         searchSessions.keyEquivalentModifierMask = [.command, .shift]
         searchSessions.setImageIfDesired(systemSymbolName: "magnifyingglass")
 
-        // No shortcut, as on Orca, so it takes no chord a terminal program might want.
+        // ⌘K, which Ghostty gives Clear Screen; Maggie's default bindings leave it free.
         let toggleBoard = NSMenuItem(
             title: "Show Session Board",
             action: #selector(TerminalController.toggleSessionBoard(_:)),
-            keyEquivalent: "")
+            keyEquivalent: "k")
+        toggleBoard.keyEquivalentModifierMask = [.command]
         toggleBoard.setImageIfDesired(systemSymbolName: "rectangle.split.3x1")
 
         viewMenu.insertItem(toggleSidebar, at: 0)

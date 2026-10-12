@@ -23,11 +23,14 @@ final class TabSidebarHoverCard {
 
     private init() {}
 
-    /// Shows the card of the row `id` of the sidebar in `window`, after a moment.
+    /// Shows the card of the row `id` of the sidebar in `window`, after a moment. It
+    /// shows beside the sidebar, or with its left edge at `leadingX` in the window, as
+    /// beside a card of the session board.
     func show<Content: View>(
         _ id: ObjectIdentifier,
         from window: NSWindow?,
         sidebarWidth: CGFloat,
+        leadingX: CGFloat? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         guard let window else { return }
@@ -37,7 +40,9 @@ final class TabSidebarHoverCard {
         let mouse = NSEvent.mouseLocation
         let item = DispatchWorkItem { [weak self, weak window] in
             guard let self, let window, window.isKeyWindow || window.isMainWindow else { return }
-            self.present(id, in: window, sidebarWidth: sidebarWidth, at: mouse.y, content: AnyView(content()))
+            self.present(
+                id, in: window, leadingX: leadingX ?? sidebarWidth + Self.gap, at: mouse.y,
+                content: AnyView(content()))
         }
         pending = item
         pendingID = id
@@ -67,7 +72,7 @@ final class TabSidebarHoverCard {
         panel.orderOut(nil)
     }
 
-    private func present(_ id: ObjectIdentifier, in window: NSWindow, sidebarWidth: CGFloat, at mouseY: CGFloat, content: AnyView) {
+    private func present(_ id: ObjectIdentifier, in window: NSWindow, leadingX: CGFloat, at mouseY: CGFloat, content: AnyView) {
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
@@ -75,12 +80,13 @@ final class TabSidebarHoverCard {
         panel.contentView = hosting
         let size = hosting.fittingSize
 
-        // Beside the sidebar, its top a little above the pointer, kept on the screen.
+        // Its top a little above the pointer, kept on the screen.
         var origin = NSPoint(
-            x: window.frame.minX + sidebarWidth + Self.gap,
+            x: window.frame.minX + leadingX,
             y: mouseY + 14 - size.height)
         if let screen = window.screen?.visibleFrame {
             origin.y = min(max(origin.y, screen.minY), screen.maxY - size.height)
+            origin.x = min(origin.x, screen.maxX - size.width)
         }
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
 

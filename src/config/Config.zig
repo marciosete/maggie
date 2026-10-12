@@ -7086,12 +7086,9 @@ pub const Keybinds = struct {
                 .{ .key = .{ .unicode = 'q' }, .mods = .{ .super = true } },
                 .{ .quit = {} },
             );
-            try self.set.putFlags(
-                alloc,
-                .{ .key = .{ .unicode = 'k' }, .mods = .{ .super = true } },
-                .{ .clear_screen = {} },
-                .{ .performable = true },
-            );
+            // Maggie: cmd+k opens the session board (View menu) instead of
+            // clearing the screen. Clear Screen stays in the command palette,
+            // and `keybind = cmd+k=clear_screen` brings the binding back.
             try self.set.put(
                 alloc,
                 .{ .key = .{ .unicode = 'a' }, .mods = .{ .super = true } },

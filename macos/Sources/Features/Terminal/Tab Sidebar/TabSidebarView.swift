@@ -1257,7 +1257,7 @@ private struct TabSidebarTabRow: View {
     private var isSearchHighlight: Bool { model.highlightedTab?.id == tab.id }
 
     private var isEditing: Bool { model.editingTabID == tab.id }
-    private var tabColor: NSColor? { tab.color.displayColor }
+    private var colors: TabSidebarRowColors { TabSidebarRowColors(tab: tab) }
     private var finishedUnseen: Bool { tab.claudeCodeActivity.finishedUnseen && !tab.isSelected }
 
     /// Shortcut labels only show while their modifiers are held, like the menu bar's.
@@ -1303,16 +1303,16 @@ private struct TabSidebarTabRow: View {
             }
         }
         .font(tab.isSelected ? titleFont.weight(.semibold) : titleFont)
-        .foregroundStyle(foreground)
+        .foregroundStyle(colors.foreground)
         .padding(.horizontal, 8)
         .frame(height: height)
-        .background(RoundedRectangle(cornerRadius: cornerRadius).fill(background))
+        .background(RoundedRectangle(cornerRadius: cornerRadius).fill(colors.background(isHovering: isHovering)))
         // A session that is working needs nothing yet, so it steps back and the ones
         // waiting for an answer or finished stand out.
         .opacity(recedes ? 0.7 : 1)
         .animation(.easeOut(duration: 0.15), value: recedes)
         .overlay {
-            if tab.isSelected, let outline {
+            if tab.isSelected, let outline = colors.outline {
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .strokeBorder(outline, lineWidth: 1)
             }
@@ -1361,7 +1361,7 @@ private struct TabSidebarTabRow: View {
             height: height,
             placement: $placement))
         .onReceive(TabSidebarDragState.shared.$endedDrags.dropFirst()) { _ in placement = nil }
-        .contextMenu { contextMenu }
+        .contextMenu { TabSidebarSessionMenu(model: model, tab: tab) }
     }
 
     private var titleLine: some View {
@@ -1413,7 +1413,7 @@ private struct TabSidebarTabRow: View {
                         state: state,
                         activity: tab.claudeCodeActivity,
                         lastActive: info?.lastActive,
-                        tint: symbolTint)
+                        tint: colors.symbolTint)
                         .opacity(showsClose || showsKey ? 0 : 1)
                 }
                 if let keyEquivalent = tab.keyEquivalent {
@@ -1421,7 +1421,7 @@ private struct TabSidebarTabRow: View {
                         .font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 5)
                         .frame(minHeight: 16)
-                        .background(Capsule().fill(foreground.opacity(0.18)))
+                        .background(Capsule().fill(colors.foreground.opacity(0.18)))
                         .opacity(showsKey ? 1 : 0)
                 }
                 Button {
@@ -1513,7 +1513,7 @@ private struct TabSidebarTabRow: View {
     private func showHoverCard() {
         let tab = tab
         let info = info
-        let tint = symbolTint
+        let tint = colors.symbolTint
         TabSidebarHoverCard.shared.show(tab.id, from: model.window, sidebarWidth: settings.width) {
             TabSidebarHoverCardView(tab: tab, info: info, tint: tint)
         }
@@ -1529,80 +1529,18 @@ private struct TabSidebarTabRow: View {
                 .offset(x: -8)
         }
     }
+}
 
-    /// How the row shows its color.
-    private enum Fill {
-        /// A color picked by hand, filling the row.
-        case solid(NSColor)
+/// A session's menu, the same on its sidebar row and its card on the session board.
+struct TabSidebarSessionMenu: View {
+    @ObservedObject var model: TabSidebarModel
+    let tab: TabSidebarModel.Tab
 
-        /// What the session is doing, as a pastel tint, so a column of them stays calm.
-        case pastel(NSColor)
+    @ObservedObject private var settings = TabSidebarSettings.shared
 
-        /// No color.
-        case none
-    }
+    private var info: TabSidebarSessionInfo? { model.infos[tab.id] }
 
-    private var fill: Fill {
-        guard let tabColor else { return .none }
-        switch tab.assignedColor {
-        case .auto:
-            return .pastel(tabColor)
-        case .attention:
-            // Only a session that needs something is filled.
-            switch tab.claudeCodeState?.light {
-            case .waiting, .pending, .unlanded: return .pastel(tabColor)
-            case .working, .clean, nil: return .none
-            }
-        default:
-            return .solid(tabColor)
-        }
-    }
-
-    private var background: Color {
-        switch fill {
-        case .solid(let color):
-            // Fully when selected, and lighter otherwise so the selected tab stands out.
-            let opacity = tab.isSelected ? 1.0 : (isHovering ? 0.55 : 0.4)
-            return Color(nsColor: color).opacity(opacity)
-
-        case .pastel(let color):
-            let pastel = color.blended(withFraction: 0.35, of: .white) ?? color
-            let opacity = tab.isSelected ? 0.3 : (isHovering ? 0.22 : 0.14)
-            return Color(nsColor: pastel).opacity(opacity)
-
-        case .none:
-            if tab.isSelected { return Color.primary.opacity(0.14) }
-            if isHovering { return Color.primary.opacity(0.06) }
-            return .clear
-        }
-    }
-
-    /// The border of the selected row. A solid row stands out by its fill alone.
-    private var outline: Color? {
-        switch fill {
-        case .solid: return nil
-        case .pastel(let color): return Color(nsColor: color).opacity(0.6)
-        case .none: return Color.primary.opacity(0.08)
-        }
-    }
-
-    private var foreground: Color {
-        if case .solid(let color) = fill, tab.isSelected {
-            return Color(nsColor: color.isLightColor ? .black : .white)
-        }
-
-        return tab.isSelected ? .primary : .primary.opacity(0.8)
-    }
-
-    /// A row following its session colors the status symbol at full strength, since its
-    /// fill is faint or missing.
-    private var symbolTint: Color? {
-        guard tab.assignedColor.followsClaudeCode else { return nil }
-        return tabColor.map { Color(nsColor: $0) }
-    }
-
-    @ViewBuilder
-    private var contextMenu: some View {
+    var body: some View {
         if let window = tab.window {
             Button("Rename Session…") { model.beginRename(window) }
             TabSidebarColorMenu(title: "Session Color", choices: TerminalTabColor.tabChoices, selected: tab.assignedColor) { color in
@@ -1739,6 +1677,85 @@ private struct TabSidebarTabRow: View {
     private static func copy(_ string: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
+    }
+}
+
+/// How a session's row shows its color: picked by hand, it fills the row; following
+/// the session, it tints it. The board's cards show it the same way.
+struct TabSidebarRowColors {
+    let tab: TabSidebarModel.Tab
+
+    private var tabColor: NSColor? { tab.color.displayColor }
+
+    /// How the row shows its color.
+    enum Fill {
+        /// A color picked by hand, filling the row.
+        case solid(NSColor)
+
+        /// What the session is doing, as a pastel tint, so a column of them stays calm.
+        case pastel(NSColor)
+
+        /// No color.
+        case none
+    }
+
+    var fill: Fill {
+        guard let tabColor else { return .none }
+        switch tab.assignedColor {
+        case .auto:
+            return .pastel(tabColor)
+        case .attention:
+            // Only a session that needs something is filled.
+            switch tab.claudeCodeState?.light {
+            case .waiting, .pending, .unlanded: return .pastel(tabColor)
+            case .working, .clean, nil: return .none
+            }
+        default:
+            return .solid(tabColor)
+        }
+    }
+
+    func background(isHovering: Bool) -> Color {
+        switch fill {
+        case .solid(let color):
+            // Fully when selected, and lighter otherwise so the selected tab stands out.
+            let opacity = tab.isSelected ? 1.0 : (isHovering ? 0.55 : 0.4)
+            return Color(nsColor: color).opacity(opacity)
+
+        case .pastel(let color):
+            let pastel = color.blended(withFraction: 0.35, of: .white) ?? color
+            let opacity = tab.isSelected ? 0.3 : (isHovering ? 0.22 : 0.14)
+            return Color(nsColor: pastel).opacity(opacity)
+
+        case .none:
+            if tab.isSelected { return Color.primary.opacity(0.14) }
+            if isHovering { return Color.primary.opacity(0.06) }
+            return .clear
+        }
+    }
+
+    /// The border of the selected row. A solid row stands out by its fill alone.
+    var outline: Color? {
+        switch fill {
+        case .solid: return nil
+        case .pastel(let color): return Color(nsColor: color).opacity(0.6)
+        case .none: return Color.primary.opacity(0.08)
+        }
+    }
+
+    var foreground: Color {
+        if case .solid(let color) = fill, tab.isSelected {
+            return Color(nsColor: color.isLightColor ? .black : .white)
+        }
+
+        return tab.isSelected ? .primary : .primary.opacity(0.8)
+    }
+
+    /// A row following its session colors the status symbol at full strength, since its
+    /// fill is faint or missing.
+    var symbolTint: Color? {
+        guard tab.assignedColor.followsClaudeCode else { return nil }
+        return tabColor.map { Color(nsColor: $0) }
     }
 }
 

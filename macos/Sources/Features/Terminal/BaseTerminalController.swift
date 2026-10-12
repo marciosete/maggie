@@ -983,11 +983,13 @@ class BaseTerminalController: NSWindowController,
     func pwdDidChange(to: URL?) {
         guard let window else { return }
 
-        if derivedConfig.macosTitlebarProxyIcon == .visible {
-            // Use the 'to' URL directly
-            window.representedURL = to
+        // Use the 'to' URL directly
+        let url = derivedConfig.macosTitlebarProxyIcon == .visible ? to : nil
+        if let terminalWindow = window as? TerminalWindow {
+            // Kept back while the session board covers the session.
+            terminalWindow.showRepresentedURL(url)
         } else {
-            window.representedURL = nil
+            window.representedURL = url
         }
     }
 

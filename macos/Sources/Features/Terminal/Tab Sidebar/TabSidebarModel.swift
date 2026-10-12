@@ -183,8 +183,17 @@ final class TabSidebarModel: ObservableObject {
     /// The height of the titlebar that the sidebar and terminal content extend under.
     @Published var titlebarHeight: CGFloat = 0
 
-    /// Whether the session board covers the terminal.
-    @Published var isBoardOpen = false
+    /// Whether the session board covers the terminal. While it does, the window doesn't
+    /// show the title of the session underneath.
+    @Published var isBoardOpen = false {
+        didSet {
+            guard isBoardOpen != oldValue else { return }
+            hostWindow?.hidesTitleForBoard(isBoardOpen)
+        }
+    }
+
+    /// What the board shows. Kept while it is closed, so it opens as it was left.
+    @Published var boardFilter = SessionBoardFilter()
 
     /// Goes up each time the selected session is to be scrolled into view.
     @Published private(set) var revealRequest = 0

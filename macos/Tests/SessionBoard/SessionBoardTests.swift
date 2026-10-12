@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 @testable import Ghostty
 
@@ -71,6 +71,48 @@ struct SessionBoardTests {
         for column in settings.columns.dropFirst() { _ = settings.removeColumn(column.id) }
         #expect(settings.removeColumn("todo") == nil)
         #expect(settings.columns.count == 1)
+    }
+
+    @Test func everyColumnIconIsASymbol() {
+        let icons = SessionBoardSettings.icons
+        #expect(Set(icons).count == icons.count)
+        for icon in icons + SessionBoardSettings.defaultColumns.map(\.icon) {
+            #expect(NSImage(systemSymbolName: icon, accessibilityDescription: nil) != nil, "\(icon)")
+        }
+    }
+
+    @Test func anEmptyFilterShowsEverything() {
+        let filter = SessionBoardFilter()
+        #expect(!filter.isActive)
+        #expect(filter.shows(column: "todo"))
+        #expect(filter.shows(folder: nil, group: nil, color: .none))
+    }
+
+    @Test func filtersNarrowByEachChoice() {
+        let ghostty = UUID()
+        let work = UUID()
+        var filter = SessionBoardFilter()
+        SessionBoardFilter.toggle(ghostty, in: &filter.folders)
+        SessionBoardFilter.toggle(nil, in: &filter.folders)
+        #expect(filter.shows(folder: ghostty, group: nil, color: .none))
+        #expect(filter.shows(folder: nil, group: work, color: .blue))
+        #expect(!filter.shows(folder: UUID(), group: nil, color: .none))
+
+        SessionBoardFilter.toggle(work, in: &filter.groups)
+        #expect(!filter.shows(folder: ghostty, group: nil, color: .none))
+        #expect(filter.shows(folder: ghostty, group: work, color: .none))
+
+        SessionBoardFilter.toggle(.purple, in: &filter.colors)
+        #expect(!filter.shows(folder: ghostty, group: work, color: .none))
+        #expect(filter.shows(folder: ghostty, group: work, color: .purple))
+
+        SessionBoardFilter.toggle("done", in: &filter.columns)
+        #expect(filter.shows(column: "done"))
+        #expect(!filter.shows(column: "todo"))
+        #expect(filter.count == 5)
+
+        SessionBoardFilter.toggle("done", in: &filter.columns)
+        #expect(filter.shows(column: "todo"))
     }
 
     @Test func columnsAreSaved() {

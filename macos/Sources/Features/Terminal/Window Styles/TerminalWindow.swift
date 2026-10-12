@@ -199,6 +199,38 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    /// The title's visibility before the session board hid it, to put back when it closes.
+    private var titleVisibilityBeforeBoard: NSWindow.TitleVisibility?
+
+    /// The folder the titlebar shows for the session, kept while the board hides it.
+    private var representedURLBehindBoard: URL?
+
+    /// Hides the session's title and folder while the board covers it, or shows them
+    /// as they are now.
+    func hidesTitleForBoard(_ hides: Bool) {
+        if hides {
+            guard titleVisibilityBeforeBoard == nil else { return }
+            titleVisibilityBeforeBoard = titleVisibility
+            titleVisibility = .hidden
+            representedURLBehindBoard = representedURL
+            representedURL = nil
+        } else if let before = titleVisibilityBeforeBoard {
+            titleVisibility = before
+            titleVisibilityBeforeBoard = nil
+            representedURL = representedURLBehindBoard
+            representedURLBehindBoard = nil
+        }
+    }
+
+    /// Shows the session's folder in the titlebar, or keeps it for when the board closes.
+    func showRepresentedURL(_ url: URL?) {
+        if titleVisibilityBeforeBoard != nil {
+            representedURLBehindBoard = url
+        } else {
+            representedURL = url
+        }
+    }
+
     /// Whether the tab offers to read its session's last response aloud: while it shows
     /// what an agent session is doing, or while it is reading.
     var canSpeakClaudeCodeResponse: Bool {
