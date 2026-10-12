@@ -4,7 +4,7 @@
   <br>Maggie
 </h1>
   <p align="center">
-    A macOS terminal for a flock of Claude Code and Codex sessions. Built on Ghostty.
+    The Agent Development Environment for parallel coding agents. Built on Ghostty.
     <br />
     <a href="#what-it-does">What it does</a>
     ·
@@ -18,13 +18,14 @@
   </p>
 </p>
 
-Maggie is [Ghostty](https://ghostty.org) with a sidebar that knows what every
-[Claude Code](https://claude.com/product/claude-code) or
-[Codex](https://developers.openai.com/codex/cli) session in it is doing.
+Maggie is an ADE, an Agent Development Environment: a desktop app for running
+many AI coding agents side by side, [Claude Code](https://claude.com/product/claude-code)
+and [Codex](https://developers.openai.com/codex/cli), each in a session of its own,
+with a sidebar and a board that show what every one of them is doing.
 Run a dozen sessions across worktrees, see at a glance which ones are working,
 which are waiting on you and which are done, and watch the cost and the token
-rate as they go. It is a real terminal underneath: Ghostty's renderer, Ghostty's
-config, Ghostty's shell integration.
+rate as they go. It is a real terminal underneath, [Ghostty](https://ghostty.org):
+Ghostty's renderer, Ghostty's config, Ghostty's shell integration.
 
 Maggie is macOS only. It is an independent project and is not affiliated with
 Ghostty, Anthropic or OpenAI.

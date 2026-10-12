@@ -95,7 +95,7 @@ struct AboutView: View {
                         .bold()
                         .font(.title)
                     Text(Maggie.isMaggie
-                         ? "A terminal for a flock of Claude Code sessions.\nBuilt on Ghostty."
+                         ? "The Agent Development Environment\nfor parallel coding agents.\nBuilt on Ghostty."
                          : "Fast, native, feature-rich terminal \nemulator pushing modern features.")
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
