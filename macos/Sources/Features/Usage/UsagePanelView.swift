@@ -665,7 +665,7 @@ struct UsagePanelView: View {
 
 /// A row of the breakdown tables, with a divider below and a highlight on hover.
 /// How much of a plan window is used.
-private struct UsageLimitBar: View {
+struct UsageLimitBar: View {
     let fraction: Double
     let color: Color
 

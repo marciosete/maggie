@@ -1,10 +1,14 @@
 import SwiftUI
 
-/// The cup at the bottom of the tab sidebar. Off, it offers to keep the Mac awake, with
-/// a time limit and a battery floor for the run. On, it is filled, shows the time left,
-/// and offers to turn it off.
+/// The cup in the status bar, or at the bottom of the tab sidebar when the status bar
+/// doesn't show it. Off, it offers to keep the Mac awake, with a time limit and a battery
+/// floor for the run. On, it is filled, shows the time left, and offers to turn it off.
 struct CaffeineButton: View {
     @ObservedObject var caffeine = Caffeine.shared
+
+    /// Says Off or On next to the cup, as the status bar's items have words.
+    var showsState = false
+
     @State private var isShowingPopover = false
 
     var body: some View {
@@ -13,11 +17,14 @@ struct CaffeineButton: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: caffeine.run == nil ? "cup.and.saucer" : "cup.and.saucer.fill")
+                    .font(.system(size: showsState ? 10 : 13))
                 if let run = caffeine.run, let until = run.until {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
                         Text(CaffeineFormat.remaining(until.timeIntervalSince(context.date)))
                             .monospacedDigit()
                     }
+                } else if showsState {
+                    Text(caffeine.run == nil ? "Off" : "On")
                 }
             }
             .contentShape(Rectangle())

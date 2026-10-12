@@ -45,11 +45,12 @@ extension AppDelegate {
         viewMenu.insertItem(searchSessions, at: 2)
         viewMenu.insertItem(toggleSourceControl, at: 3)
         viewMenu.insertItem(toggleUsage, at: 4)
+        StatusBarSettings.shared.installMenuItem(in: viewMenu, at: 5)
         MainActor.assumeIsolated {
-            ClaudeStreams.shared.installMenuItem(in: viewMenu, at: 5)
-            AgentStart.shared.installMenuItem(in: viewMenu, at: 6)
+            ClaudeStreams.shared.installMenuItem(in: viewMenu, at: 6)
+            AgentStart.shared.installMenuItem(in: viewMenu, at: 7)
         }
-        viewMenu.insertItem(.separator(), at: 7)
+        viewMenu.insertItem(.separator(), at: 8)
 
         let captureSystemPrompts = NSMenuItem(
             title: "Capture Claude Code Requests",
@@ -69,11 +70,11 @@ extension AppDelegate {
             action: #selector(AppDelegate.showCapturedCodexContext(_:)),
             keyEquivalent: "")
 
-        viewMenu.insertItem(captureSystemPrompts, at: 8)
-        viewMenu.insertItem(showSystemPrompts, at: 9)
-        viewMenu.insertItem(captureCodexContext, at: 10)
-        viewMenu.insertItem(showCodexContext, at: 11)
-        viewMenu.insertItem(.separator(), at: 12)
+        viewMenu.insertItem(captureSystemPrompts, at: 9)
+        viewMenu.insertItem(showSystemPrompts, at: 10)
+        viewMenu.insertItem(captureCodexContext, at: 11)
+        viewMenu.insertItem(showCodexContext, at: 12)
+        viewMenu.insertItem(.separator(), at: 13)
     }
 
     /// Takes effect in terminals opened afterwards.

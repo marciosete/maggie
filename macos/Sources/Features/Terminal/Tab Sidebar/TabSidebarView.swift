@@ -16,6 +16,7 @@ struct TabSidebarContainerView<Content: View>: View {
     @ObservedObject var usageSettings = UsageSettings.shared
     @ObservedObject var documentPane: DocumentPaneModel
     @ObservedObject var documentPaneSettings = DocumentPaneSettings.shared
+    @ObservedObject var statusBar = StatusBarSettings.shared
     let content: Content
 
     init(
@@ -30,7 +31,35 @@ struct TabSidebarContainerView<Content: View>: View {
         self.content = content()
     }
 
+    // The panes keep their place whether the status bar shows or not, so showing it
+    // doesn't make the terminal again.
     var body: some View {
+        VStack(spacing: 0) {
+            panes
+            if statusBar.isVisible {
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor))
+                    .frame(height: 1)
+                StatusBarView()
+                    .background(statusBarBackground)
+            }
+        }
+        .ignoresSafeArea(.container, edges: model.isActive ? .top : [])
+    }
+
+    /// The terminal's background where it has one, so the bar reads as the window's
+    /// edge; the sidebar's material otherwise.
+    @ViewBuilder
+    private var statusBarBackground: some View {
+        if let color = model.titlebarColor {
+            Color(nsColor: color)
+        } else {
+            TabSidebarVisualEffectBackground()
+        }
+    }
+
+    @ViewBuilder
+    private var panes: some View {
         if model.isActive {
             HStack(spacing: 0) {
                 if !settings.isCollapsed {
@@ -92,6 +121,7 @@ struct TabSidebarContainerView<Content: View>: View {
 struct TabSidebarView: View {
     @ObservedObject var model: TabSidebarModel
     @ObservedObject var settings = TabSidebarSettings.shared
+    @ObservedObject private var statusBar = StatusBarSettings.shared
     let topInset: CGFloat
 
     @State private var dropAtEnd = false
@@ -179,7 +209,9 @@ struct TabSidebarView: View {
                 .foregroundStyle(.secondary)
                 .help("Open Folder…")
 
-                CaffeineButton()
+                if !statusBar.shows(.caffeine) {
+                    CaffeineButton()
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 9)

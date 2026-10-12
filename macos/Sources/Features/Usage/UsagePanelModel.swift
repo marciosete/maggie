@@ -1,5 +1,5 @@
+import AppKit
 import Combine
-import Foundation
 
 /// App-wide settings of the usage panel, shared by all windows and saved in user defaults.
 final class UsageSettings: ObservableObject {
@@ -123,8 +123,14 @@ final class UsagePanelModel: ObservableObject {
     private let limitsQueue = DispatchQueue(label: "com.mitchellh.ghostty.usage-limits", qos: .userInitiated)
     private let codexLimitsQueue = DispatchQueue(label: "com.mitchellh.ghostty.usage-codex-limits", qos: .userInitiated)
     private var limitsTimer: Timer?
-    private var isReadingLimits = false
+
+    /// Whether the limits are being read, for the refresh buttons to show.
+    @Published private(set) var isReadingLimits = false
     private var pendingLimitReads = 0
+
+    /// How many status bars show the limits. They keep them fresh while the panel is
+    /// closed, too.
+    private var statusBarUsers = 0
 
     init(scanner: UsageScanner = .shared, settings: UsageSettings = .shared) {
         self.scanner = scanner
@@ -137,8 +143,10 @@ final class UsagePanelModel: ObservableObject {
             .sink { [weak self] isVisible in
                 guard let self else { return }
                 guard isVisible else {
-                    self.limitsTimer?.invalidate()
-                    self.limitsTimer = nil
+                    if self.statusBarUsers == 0 {
+                        self.limitsTimer?.invalidate()
+                        self.limitsTimer = nil
+                    }
                     return
                 }
                 self.refresh()
@@ -194,9 +202,35 @@ final class UsagePanelModel: ObservableObject {
         if pendingLimitReads <= 0 { isReadingLimits = false }
     }
 
+    /// A status bar showing the limits appeared; `stopShowingLimits` when it goes.
+    func startShowingLimits() {
+        statusBarUsers += 1
+        guard statusBarUsers == 1 else { return }
+        refreshLimits()
+        if limitsTimer == nil { startLimitsTimer() }
+        if activeObserver == nil {
+            // Back in the app after a while away, the limits are read again.
+            activeObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in self?.refreshLimits() }
+        }
+    }
+
+    func stopShowingLimits() {
+        statusBarUsers = max(0, statusBarUsers - 1)
+        guard statusBarUsers == 0, !settings.isVisible else { return }
+        limitsTimer?.invalidate()
+        limitsTimer = nil
+    }
+
+    private var activeObserver: NSObjectProtocol?
+
     private func startLimitsTimer() {
         limitsTimer?.invalidate()
         let timer = Timer(timeInterval: Self.limitsRefreshInterval, repeats: true) { [weak self] _ in
+            // Each check starts a CLI, so nothing is read while the app is in the
+            // background; coming back reads them.
+            guard NSApp.isActive else { return }
             self?.refreshLimits()
         }
         // The common mode keeps it firing while a menu is open or the panel scrolls.
