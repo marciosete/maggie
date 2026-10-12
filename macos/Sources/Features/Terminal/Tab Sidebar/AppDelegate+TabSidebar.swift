@@ -40,17 +40,25 @@ extension AppDelegate {
         searchSessions.keyEquivalentModifierMask = [.command, .shift]
         searchSessions.setImageIfDesired(systemSymbolName: "magnifyingglass")
 
+        // No shortcut, as on Orca, so it takes no chord a terminal program might want.
+        let toggleBoard = NSMenuItem(
+            title: "Show Session Board",
+            action: #selector(TerminalController.toggleSessionBoard(_:)),
+            keyEquivalent: "")
+        toggleBoard.setImageIfDesired(systemSymbolName: "rectangle.split.3x1")
+
         viewMenu.insertItem(toggleSidebar, at: 0)
         viewMenu.insertItem(verticalTabs, at: 1)
         viewMenu.insertItem(searchSessions, at: 2)
-        viewMenu.insertItem(toggleSourceControl, at: 3)
-        viewMenu.insertItem(toggleUsage, at: 4)
-        StatusBarSettings.shared.installMenuItem(in: viewMenu, at: 5)
+        viewMenu.insertItem(toggleBoard, at: 3)
+        viewMenu.insertItem(toggleSourceControl, at: 4)
+        viewMenu.insertItem(toggleUsage, at: 5)
+        StatusBarSettings.shared.installMenuItem(in: viewMenu, at: 6)
         MainActor.assumeIsolated {
-            ClaudeStreams.shared.installMenuItem(in: viewMenu, at: 6)
-            AgentStart.shared.installMenuItem(in: viewMenu, at: 7)
+            ClaudeStreams.shared.installMenuItem(in: viewMenu, at: 7)
+            AgentStart.shared.installMenuItem(in: viewMenu, at: 8)
         }
-        viewMenu.insertItem(.separator(), at: 8)
+        viewMenu.insertItem(.separator(), at: 9)
 
         let captureSystemPrompts = NSMenuItem(
             title: "Capture Claude Code Requests",
@@ -70,11 +78,11 @@ extension AppDelegate {
             action: #selector(AppDelegate.showCapturedCodexContext(_:)),
             keyEquivalent: "")
 
-        viewMenu.insertItem(captureSystemPrompts, at: 9)
-        viewMenu.insertItem(showSystemPrompts, at: 10)
-        viewMenu.insertItem(captureCodexContext, at: 11)
-        viewMenu.insertItem(showCodexContext, at: 12)
-        viewMenu.insertItem(.separator(), at: 13)
+        viewMenu.insertItem(captureSystemPrompts, at: 10)
+        viewMenu.insertItem(showSystemPrompts, at: 11)
+        viewMenu.insertItem(captureCodexContext, at: 12)
+        viewMenu.insertItem(showCodexContext, at: 13)
+        viewMenu.insertItem(.separator(), at: 14)
     }
 
     /// Takes effect in terminals opened afterwards.

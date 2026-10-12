@@ -189,6 +189,16 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    /// The session's column on the session board and its place there, once moved. A
+    /// session never moved shows in the default column.
+    var boardPlace: SessionBoardPlace? {
+        didSet {
+            guard boardPlace != oldValue else { return }
+            invalidateRestorableState()
+            postTabSidebarItemDidChange()
+        }
+    }
+
     /// Whether the tab offers to read its session's last response aloud: while it shows
     /// what an agent session is doing, or while it is reading.
     var canSpeakClaudeCodeResponse: Bool {

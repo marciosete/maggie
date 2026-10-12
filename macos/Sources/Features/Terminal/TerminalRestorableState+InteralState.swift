@@ -32,6 +32,10 @@ extension TerminalRestorableState {
 
         // The folder groups those folders are in. Optional, like the folders.
         let sidebarFolderGroups: [UserTabFolderGroup]?
+
+        // MARK: - Session board
+        // The session's column and place on the board. Optional, like the folders.
+        var boardPlace: SessionBoardPlace?
     }
 }
 
@@ -56,6 +60,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
             userTabFolder: folders[window?.userTabFolderID],
             sidebarFolders: sidebarFolders,
             sidebarFolderGroups: folderGroupIDs.compactMap { UserTabFolderGroupStore.shared[$0] },
+            boardPlace: window?.boardPlace,
         )
     }
 }

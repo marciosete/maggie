@@ -91,6 +91,9 @@ final class TerminalRestorableState: TerminalRestorable {
     var sidebarFolderGroups: [UserTabFolderGroup] {
         internalState.sidebarFolderGroups ?? []
     }
+    var boardPlace: SessionBoardPlace? {
+        internalState.boardPlace
+    }
 
     /// Internal State we use to perform unit tests
     ///
@@ -137,6 +140,7 @@ final class TerminalRestorableState: TerminalRestorable {
         c.titleOverride = titleOverride
 
         (window as? TerminalWindow)?.speechVoiceID = speechVoiceID
+        (window as? TerminalWindow)?.boardPlace = boardPlace
 
         // Restore the tab's group in the tab sidebar
         if let userTabGroup {

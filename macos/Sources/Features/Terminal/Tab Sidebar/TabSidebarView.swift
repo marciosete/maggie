@@ -75,6 +75,13 @@ struct TabSidebarContainerView<Content: View>: View {
                         .frame(height: model.titlebarHeight)
 
                     content
+                        // The board covers the terminal, beside the sidebar, and leaves
+                        // it running underneath.
+                        .overlay {
+                            if model.isBoardOpen {
+                                SessionBoardView(model: model)
+                            }
+                        }
                 }
 
                 rightPanels(topInset: model.titlebarHeight)
@@ -208,6 +215,17 @@ struct TabSidebarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("Open Folder…")
+
+                Button {
+                    model.isBoardOpen.toggle()
+                } label: {
+                    Image(systemName: "rectangle.split.3x1")
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(model.isBoardOpen ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                .help(model.isBoardOpen ? "Hide Session Board" : "Show Session Board")
 
                 if !statusBar.shows(.caffeine) {
                     CaffeineButton()

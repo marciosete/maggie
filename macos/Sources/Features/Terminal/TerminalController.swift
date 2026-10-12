@@ -1882,6 +1882,11 @@ extension TerminalController {
             item.title = UsageSettings.shared.isVisible ? "Hide Usage" : "Show Usage"
             return (window as? TerminalWindow)?.supportsTabSidebar ?? false
 
+        case #selector(toggleSessionBoard):
+            let isOpen = (window as? TerminalWindow)?.tabSidebarModel.isBoardOpen ?? false
+            item.title = isOpen ? "Hide Session Board" : "Show Session Board"
+            return (window as? TerminalWindow)?.supportsTabSidebar ?? false
+
         case #selector(returnToDefaultSize):
             guard let window else { return false }
 

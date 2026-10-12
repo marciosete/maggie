@@ -44,6 +44,9 @@ final class TabSidebarModel: ObservableObject {
         let folderID: UUID?
         let folderGroupID: UUID?
 
+        /// Its place on the session board, once moved there.
+        var boardPlace: SessionBoardPlace?
+
         /// What the tab is in at each nesting level, outermost first.
         var nestingKeys: [UUID?] { [folderGroupID, folderID, groupID] }
 
@@ -63,7 +66,8 @@ final class TabSidebarModel: ObservableObject {
                 lhs.isZoomed == rhs.isZoomed &&
                 lhs.groupID == rhs.groupID &&
                 lhs.folderID == rhs.folderID &&
-                lhs.folderGroupID == rhs.folderGroupID
+                lhs.folderGroupID == rhs.folderGroupID &&
+                lhs.boardPlace == rhs.boardPlace
         }
     }
 
@@ -178,6 +182,9 @@ final class TabSidebarModel: ObservableObject {
 
     /// The height of the titlebar that the sidebar and terminal content extend under.
     @Published var titlebarHeight: CGFloat = 0
+
+    /// Whether the session board covers the terminal.
+    @Published var isBoardOpen = false
 
     /// The tab currently being renamed inline, if any.
     @Published var editingTabID: ObjectIdentifier?
@@ -314,7 +321,8 @@ final class TabSidebarModel: ObservableObject {
                 isZoomed: window.surfaceIsZoomed,
                 groupID: UserTabGroupStore.shared[window.userTabGroupID]?.id,
                 folderID: folder?.id,
-                folderGroupID: folderGroups[folder?.groupID]?.id)
+                folderGroupID: folderGroups[folder?.groupID]?.id,
+                boardPlace: window.boardPlace)
         }
 
         var newRows = Self.rows(of: tabs[...], level: 0)
