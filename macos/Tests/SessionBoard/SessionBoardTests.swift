@@ -115,6 +115,50 @@ struct SessionBoardTests {
         #expect(filter.shows(column: "todo"))
     }
 
+    private func key(_ characters: String, _ modifiers: NSEvent.ModifierFlags) -> NSEvent? {
+        NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0,
+            context: nil, characters: characters, charactersIgnoringModifiers: characters,
+            isARepeat: false, keyCode: 0)
+    }
+
+    @Test func theEditingKeysAreKnown() throws {
+        #expect(SessionBoardEditing.action(for: try #require(key("v", .command))) == #selector(NSText.paste(_:)))
+        #expect(SessionBoardEditing.action(for: try #require(key("c", .command))) == #selector(NSText.copy(_:)))
+        #expect(SessionBoardEditing.action(for: try #require(key("x", .command))) == #selector(NSText.cut(_:)))
+        #expect(SessionBoardEditing.action(for: try #require(key("a", .command))) == #selector(NSText.selectAll(_:)))
+        #expect(SessionBoardEditing.action(for: try #require(key("z", [.command, .shift]))) == Selector(("redo:")))
+        #expect(SessionBoardEditing.action(for: try #require(key("v", [.command, .option]))) == nil)
+        #expect(SessionBoardEditing.action(for: try #require(key("v", []))) == nil)
+        #expect(SessionBoardEditing.action(for: try #require(key("k", .command))) == nil)
+    }
+
+    /// The paste the board sends reaches a text field being typed in.
+    @Test @MainActor func aPasteReachesTheFieldBeingTypedIn() async throws {
+        let field = NSTextField(string: "Review ")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 40), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = field
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        #expect(window.makeFirstResponder(field))
+        let editor = try #require(window.firstResponder as? NSTextView)
+        editor.moveToEndOfDocument(nil)
+
+        let pasteboard = NSPasteboard.general
+        let saved = pasteboard.string(forType: .string)
+        defer {
+            pasteboard.clearContents()
+            if let saved { pasteboard.setString(saved, forType: .string) }
+        }
+        pasteboard.clearContents()
+        pasteboard.setString("Neehar's papers", forType: .string)
+
+        let paste = try #require(key("v", .command))
+        let action = try #require(SessionBoardEditing.action(for: paste))
+        #expect(NSApp.sendAction(action, to: editor, from: nil))
+        #expect(field.stringValue == "Review Neehar's papers")
+    }
+
     @Test func columnsAreSaved() {
         let defaults = UserDefaults(suiteName: "SessionBoardTests-\(UUID().uuidString)")!
         let settings = SessionBoardSettings(defaults: defaults)

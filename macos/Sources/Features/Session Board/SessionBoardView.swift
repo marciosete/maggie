@@ -415,10 +415,17 @@ struct SessionBoardView: View {
     }
 
     /// Esc ends adding or renaming a card, then clears the search, then closes the board.
+    /// The editing keys go straight to the board's text field being typed in, so the
+    /// terminal under the board never takes them.
     private func watchEscape() {
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
-            guard event.keyCode == 53, let model, model.isBoardOpen,
-                  event.window === model.window else { return event }
+            guard let model, model.isBoardOpen, event.window === model.window else { return event }
+            if let action = SessionBoardEditing.action(for: event),
+               let editor = event.window?.firstResponder as? NSTextView,
+               NSApp.sendAction(action, to: editor, from: nil) {
+                return nil
+            }
+            guard event.keyCode == 53 else { return event }
             if addingIn != nil {
                 newTitle = ""
                 addingIn = nil
@@ -436,6 +443,23 @@ struct SessionBoardView: View {
     private func stopWatchingEscape() {
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
+    }
+}
+
+/// The standard editing keys, for the board's text fields.
+enum SessionBoardEditing {
+    /// What ⌘X, ⌘C, ⌘V, ⌘A, ⌘Z and ⇧⌘Z do in a text field, or nil for another key.
+    static func action(for event: NSEvent) -> Selector? {
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        switch (modifiers, event.charactersIgnoringModifiers?.lowercased()) {
+        case ([.command], "x"): return #selector(NSText.cut(_:))
+        case ([.command], "c"): return #selector(NSText.copy(_:))
+        case ([.command], "v"): return #selector(NSText.paste(_:))
+        case ([.command], "a"): return #selector(NSText.selectAll(_:))
+        case ([.command], "z"): return Selector(("undo:"))
+        case ([.command, .shift], "z"): return Selector(("redo:"))
+        default: return nil
+        }
     }
 }
 
