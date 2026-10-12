@@ -73,11 +73,17 @@ final class DocumentEditorView: NSView, NSTextViewDelegate {
 
     var hasUnsavedChanges: Bool { textView.string != savedText }
 
-    private func load() {
+    /// Returns whether the file contains new text. Our own saves also notify the
+    /// watcher, but must leave the editor's undo history and selection intact.
+    @discardableResult
+    private func load() -> Bool {
         let data = (try? Data(contentsOf: file)) ?? Data()
-        savedText = String(decoding: data, as: UTF8.self)
+        let text = String(decoding: data, as: UTF8.self)
+        guard text != savedText else { return false }
+        savedText = text
         textView.string = savedText
         textView.undoManager?.removeAllActions()
+        return true
     }
 
     /// Reloads the file after a change on disk, unless there are edits here
@@ -85,7 +91,7 @@ final class DocumentEditorView: NSView, NSTextViewDelegate {
     private func fileChanged() {
         guard !hasUnsavedChanges else { return }
         let selection = textView.selectedRange()
-        load()
+        guard load() else { return }
         let end = (textView.string as NSString).length
         textView.setSelectedRange(NSRange(location: min(selection.location, end), length: 0))
     }

@@ -17,6 +17,24 @@ struct DocumentEditorViewTests {
         editor.subviews.compactMap { ($0 as? NSScrollView)?.documentView as? NSTextView }.first
     }
 
+    /// Gives a windowless text view an undo manager while forwarding edits to
+    /// the editor as its usual delegate does.
+    @MainActor
+    private final class UndoDelegate: NSObject, NSTextViewDelegate {
+        let manager = UndoManager()
+        let editor: DocumentEditorView
+
+        init(editor: DocumentEditorView) {
+            self.editor = editor
+        }
+
+        func undoManager(for view: NSTextView) -> UndoManager? { manager }
+
+        func textDidChange(_ notification: Notification) {
+            editor.textDidChange(notification)
+        }
+    }
+
     @Test @MainActor func showsTheFileAndSavesEdits() throws {
         let file = try temporaryFile("# Notes\n")
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
@@ -43,6 +61,39 @@ struct DocumentEditorViewTests {
         text.didChangeText()
         try await Task.sleep(for: .seconds(DocumentEditorView.saveDelay + 0.4))
         #expect(try String(contentsOf: file, encoding: .utf8) == "two\n")
+    }
+
+    @Test(arguments: [true, false])
+    @MainActor func savingPreservesUndoAndSelection(autosave: Bool) async throws {
+        let file = try temporaryFile("original\n")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+
+        let editor = DocumentEditorView(file: file)
+        let text = try #require(textView(of: editor))
+        let delegate = UndoDelegate(editor: editor)
+        text.delegate = delegate
+        text.insertText("edit ", replacementRange: NSRange(location: 0, length: 0))
+        let selection = NSRange(location: 0, length: 4)
+        text.setSelectedRange(selection)
+        #expect(delegate.manager.canUndo)
+
+        if !autosave { editor.save() }
+        try await Task.sleep(for: .seconds(DocumentEditorView.saveDelay + 0.7))
+        #expect(try String(contentsOf: file, encoding: .utf8) == "edit original\n")
+        #expect(!editor.hasUnsavedChanges)
+        #expect(text.selectedRange() == selection)
+        #expect(delegate.manager.canUndo)
+
+        delegate.manager.undo()
+        #expect(text.string == "original\n")
+        // Calling the undo manager directly bypasses the text view's edit notification.
+        text.didChangeText()
+        if !autosave { editor.save() }
+        try await Task.sleep(for: .seconds(DocumentEditorView.saveDelay + 0.7))
+        #expect(try String(contentsOf: file, encoding: .utf8) == "original\n")
+        #expect(delegate.manager.canRedo)
+        delegate.manager.redo()
+        #expect(text.string == "edit original\n")
     }
 
     @Test @MainActor func aChangeOnDiskShowsWhenNothingIsUnsaved() async throws {
