@@ -159,6 +159,29 @@ struct SessionBoardTests {
         #expect(field.stringValue == "Review Neehar's papers")
     }
 
+    @Test func colorsTakeLabelsThatAreSaved() {
+        let defaults = UserDefaults(suiteName: "SessionBoardTests-\(UUID().uuidString)")!
+        let settings = SessionBoardSettings(defaults: defaults)
+        #expect(settings.name(of: .red) == "Red")
+
+        // Typed a key at a time, the space between the words stays.
+        settings.setLabel("Client ", of: .purple)
+        #expect(settings.typedLabel(of: .purple) == "Client ")
+        settings.setLabel("Client work", of: .purple)
+        settings.setLabel("  Urgent ", of: .red)
+        #expect(settings.label(of: .red) == "Urgent")
+        #expect(settings.name(of: .purple) == "Client work")
+
+        let again = SessionBoardSettings(defaults: defaults)
+        #expect(again.name(of: .purple) == "Client work")
+        #expect(again.name(of: .red) == "Urgent")
+
+        settings.setLabel("", of: .red)
+        #expect(settings.label(of: .red) == nil)
+        settings.setLabel("   ", of: .green)
+        #expect(settings.name(of: .green) == "Green")
+    }
+
     @Test func columnsAreSaved() {
         let defaults = UserDefaults(suiteName: "SessionBoardTests-\(UUID().uuidString)")!
         let settings = SessionBoardSettings(defaults: defaults)

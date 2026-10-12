@@ -1799,6 +1799,9 @@ struct TabSidebarColorMenu: View {
     let title: String
     let choices: [TerminalTabColor]
     let selected: TerminalTabColor
+
+    /// What each color is called, such as the board's label for it.
+    var name: (TerminalTabColor) -> String = \.localizedName
     let onSelect: (TerminalTabColor) -> Void
 
     var body: some View {
@@ -1808,7 +1811,7 @@ struct TabSidebarColorMenu: View {
                     onSelect(color)
                 } label: {
                     Label {
-                        Text(color == selected ? "\(color.localizedName) ✓" : color.localizedName)
+                        Text(color == selected ? "\(name(color)) ✓" : name(color))
                     } icon: {
                         Image(nsImage: color.swatchImage(selected: false))
                     }

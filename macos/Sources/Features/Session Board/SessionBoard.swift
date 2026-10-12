@@ -68,6 +68,36 @@ final class SessionBoardSettings: ObservableObject {
     }
 
     private static let modeKey = "SessionBoardMode"
+    private static let colorLabelsKey = "SessionBoardColorLabels"
+
+    /// What each color means on the board, such as Red for Urgent, named by hand.
+    @Published private(set) var colorLabels: [TerminalTabColor: String] = [:] {
+        didSet {
+            let saved = Dictionary(uniqueKeysWithValues: colorLabels.map { (String($0.key.rawValue), $0.value) })
+            defaults.set(saved, forKey: Self.colorLabelsKey)
+        }
+    }
+
+    func label(of color: TerminalTabColor) -> String? {
+        let label = colorLabels[color]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return label.isEmpty ? nil : label
+    }
+
+    /// The color's label, or its own name without one.
+    func name(of color: TerminalTabColor) -> String {
+        label(of: color) ?? color.localizedName
+    }
+
+    /// Kept as typed, so a space typed between two words stays; read trimmed.
+    func setLabel(_ label: String, of color: TerminalTabColor) {
+        let label = String(label.prefix(SessionBoardColumn.maxLabelLength))
+        colorLabels[color] = label.isEmpty ? nil : label
+    }
+
+    /// What the editor shows for the color's label: as typed.
+    func typedLabel(of color: TerminalTabColor) -> String {
+        colorLabels[color] ?? ""
+    }
 
     /// Whether the board shows work items, sessions, or both together.
     @Published var mode: SessionBoardMode {
@@ -79,6 +109,10 @@ final class SessionBoardSettings: ObservableObject {
     init(defaults: UserDefaults = .ghostty) {
         self.defaults = defaults
         mode = defaults.string(forKey: Self.modeKey).flatMap(SessionBoardMode.init(rawValue:)) ?? .sessions
+        let labels = defaults.dictionary(forKey: Self.colorLabelsKey) as? [String: String] ?? [:]
+        colorLabels = Dictionary(uniqueKeysWithValues: labels.compactMap { key, label in
+            Int(key).flatMap(TerminalTabColor.init(rawValue:)).map { ($0, label) }
+        })
         let saved = defaults.data(forKey: Self.columnsKey)
             .flatMap { try? JSONDecoder().decode([SessionBoardColumn].self, from: $0) }
         columns = saved.flatMap { $0.isEmpty ? nil : $0 } ?? Self.defaultColumns

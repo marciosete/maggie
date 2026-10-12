@@ -93,7 +93,7 @@ struct SessionBoardView: View {
             .frame(width: 200, height: 24)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
 
-            SessionBoardFilterBar(model: model, tabs: tabs, showsSessionFilters: settings.mode != .workItems)
+            SessionBoardFilterBar(model: model, tabs: tabs, items: store.items, mode: settings.mode)
 
             Spacer()
 
@@ -394,8 +394,9 @@ struct SessionBoardView: View {
         return words.allSatisfy { text.contains($0) }
     }
 
-    /// An item by its title, or by a session shown under it.
+    /// An item by its color, and by its title or a session shown under it.
     private func matches(_ item: WorkItem, sessions: [TabSidebarModel.Tab]) -> Bool {
+        guard model.boardFilter.colors.isEmpty || model.boardFilter.colors.contains(item.color) else { return false }
         guard !words.isEmpty else { return true }
         let title = item.title.lowercased()
         if words.allSatisfy({ title.contains($0) }) { return true }
@@ -622,6 +623,21 @@ private struct WorkItemCard<Field: Hashable, Sessions: View>: View {
             .onTapGesture(count: 2, perform: beginRename)
             .onTapGesture(perform: openNotes)
 
+            if let label = settings.label(of: item.color), let color = item.color.displayColor {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color(nsColor: color))
+                        .frame(width: 7, height: 7)
+                    Text(label)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.primary.opacity(0.12)))
+                .help("\(item.color.localizedName): \(label)")
+            }
+
             if hasSessions {
                 VStack(spacing: 6) {
                     sessions()
@@ -652,7 +668,10 @@ private struct WorkItemCard<Field: Hashable, Sessions: View>: View {
     private var menu: some View {
         Button("Open Notes", action: openNotes)
         Button("Rename…", action: beginRename)
-        TabSidebarColorMenu(title: "Card Color", choices: WorkItem.colorChoices, selected: item.color) { color in
+        TabSidebarColorMenu(
+            title: "Card Color", choices: WorkItem.colorChoices, selected: item.color,
+            name: settings.name(of:)
+        ) { color in
             WorkItemStore.shared.setColor(color, of: item.id)
         }
         Menu("Move to Status") {
@@ -859,11 +878,22 @@ private struct SessionBoardCompactLabel: LabelStyle {
 private struct SessionBoardFilterBar: View {
     @ObservedObject var model: TabSidebarModel
     let tabs: [TabSidebarModel.Tab]
+    let items: [WorkItem]
+    let mode: SessionBoardMode
 
-    /// Folders, groups and colors are the sessions'; work items alone have only a status.
-    let showsSessionFilters: Bool
+    /// Folders and groups are the sessions'; work items alone have a status and a color.
+    private var showsSessionFilters: Bool { mode != .workItems }
 
     @ObservedObject private var board = SessionBoardSettings.shared
+
+    /// The colors of the cards shown: the sessions', the work items', or both, by
+    /// their labels where they have them.
+    private var colorOptions: [SessionBoardFilterMenu<TerminalTabColor>.Option] {
+        let used = Set((mode == .workItems ? [] : tabs.map(\.color)) + (mode == .sessions ? [] : items.map(\.color)))
+        return TerminalTabColor.allCases
+            .filter(used.contains)
+            .map { .init(value: $0, label: board.name(of: $0), image: $0.swatchImage(selected: false)) }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -884,12 +914,11 @@ private struct SessionBoardFilterBar: View {
                 options: board.columns.map { .init(value: $0.id, label: $0.label, image: $0.menuImage) },
                 selection: $model.boardFilter.columns)
 
-            if showsSessionFilters {
+            // With one color there is nothing to choose between.
+            if colorOptions.count > 1 {
                 SessionBoardFilterMenu(
                     title: "Color", plural: "Colors",
-                    options: TerminalTabColor.allCases
-                        .filter { color in tabs.contains { $0.color == color } }
-                        .map { .init(value: $0, label: $0.localizedName, image: $0.swatchImage(selected: false)) },
+                    options: colorOptions,
                     selection: $model.boardFilter.colors)
             }
 
@@ -1098,6 +1127,27 @@ private struct SessionBoardColumnsEditor: View {
                     .help("Go back to Todo, In progress, In review and Done")
             }
             .buttonStyle(.borderless)
+
+            Divider()
+
+            Text("Colors")
+                .font(.system(size: 13, weight: .semibold))
+            Text("Name what a color means, such as Urgent. Cards show it, and the menus and the filter use it.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 6) {
+                ForEach(WorkItem.colorChoices.filter { $0.displayColor != nil }, id: \.self) { color in
+                    HStack(spacing: 6) {
+                        Image(nsImage: color.swatchImage(selected: false))
+                        TextField(color.localizedName, text: Binding(
+                            get: { settings.typedLabel(of: color) },
+                            set: { settings.setLabel($0, of: color) }))
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+            }
         }
         .font(.system(size: 12))
         .padding(14)
