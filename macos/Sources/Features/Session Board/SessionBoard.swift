@@ -67,10 +67,18 @@ final class SessionBoardSettings: ObservableObject {
         }
     }
 
+    private static let modeKey = "SessionBoardMode"
+
+    /// Whether the board shows work items, sessions, or both together.
+    @Published var mode: SessionBoardMode {
+        didSet { defaults.set(mode.rawValue, forKey: Self.modeKey) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .ghostty) {
         self.defaults = defaults
+        mode = defaults.string(forKey: Self.modeKey).flatMap(SessionBoardMode.init(rawValue:)) ?? .sessions
         let saved = defaults.data(forKey: Self.columnsKey)
             .flatMap { try? JSONDecoder().decode([SessionBoardColumn].self, from: $0) }
         columns = saved.flatMap { $0.isEmpty ? nil : $0 } ?? Self.defaultColumns

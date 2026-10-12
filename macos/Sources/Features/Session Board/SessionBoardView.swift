@@ -2,38 +2,54 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The session board: the sessions of a window's sidebar as cards in columns such as
-/// Todo, In progress, In review and Done. It covers the terminal, beside the sidebar,
-/// and ⌘K shows or hides it. Dragging a card moves the session to another column or
-/// another place in its own; nothing else moves it. Clicking a card goes to the session
-/// and closes the board.
+/// The session board: cards in columns such as Todo, In progress, In review and Done.
+/// It covers the terminal, beside the sidebar, and ⌘K shows or hides it. It shows the
+/// work items, kept by hand like a kanban board; the sessions of the window's sidebar;
+/// or both together, each session that is linked to an item under it, in its column.
+/// Dragging a card moves it to another column or another place in its own; nothing
+/// else moves it.
 struct SessionBoardView: View {
     @ObservedObject var model: TabSidebarModel
     @ObservedObject var settings = SessionBoardSettings.shared
+    @ObservedObject var store = WorkItemStore.shared
 
     @State private var query = ""
-    @State private var dragging: ObjectIdentifier?
+    @State private var dragging: SessionBoardCardID?
     @State private var dropTarget: SessionBoardDropTarget?
     @State private var isEditingColumns = false
     @State private var escapeMonitor: Any?
-    @FocusState private var searchFocused: Bool
+
+    /// The column whose new card is being typed, and what is typed.
+    @State private var addingIn: String?
+    @State private var newTitle = ""
+
+    /// The item whose title is being changed in place.
+    @State private var renaming: UUID?
+    @State private var renameDraft = ""
+
+    @FocusState private var focus: Field?
+
+    private enum Field: Hashable {
+        case search
+        case newCard
+        case rename
+    }
 
     static let columnWidth: CGFloat = 280
 
     private var tabs: [TabSidebarModel.Tab] { model.boardTabs }
 
-    private var lanes: [String: [ObjectIdentifier]] { model.boardLanes() }
-
     var body: some View {
-        let tabsByID = Dictionary(tabs.map { ($0.id, $0) }) { first, _ in first }
-        let lanes = lanes
+        let content = SessionBoardContent(
+            mode: settings.mode, tabs: tabs, items: store.items, settings: settings,
+            sessionLanes: model.boardLanes())
         VStack(spacing: 0) {
             header
             Divider()
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(settings.columns) { column in
-                        lane(column, tabs: (lanes[column.id] ?? []).compactMap { tabsByID[$0] }, lanes: lanes)
+                        lane(column, content: content)
                     }
                 }
                 .padding(14)
@@ -52,22 +68,32 @@ struct SessionBoardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Session Board")
+            Text("Board")
                 .font(.system(size: 14, weight: .semibold))
+
+            Picker("Show", selection: $settings.mode) {
+                ForEach(SessionBoardMode.allCases, id: \.self) { mode in
+                    Text(mode.localizedName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Show the work items, the sessions, or the work items with their sessions")
 
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.tertiary)
-                TextField("Search sessions", text: $query)
+                TextField(settings.mode == .sessions ? "Search sessions" : "Search", text: $query)
                     .textFieldStyle(.plain)
-                    .focused($searchFocused)
+                    .focused($focus, equals: .search)
             }
             .font(.system(size: 12))
             .padding(.horizontal, 8)
-            .frame(width: 220, height: 24)
+            .frame(width: 200, height: 24)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
 
-            SessionBoardFilterBar(model: model, tabs: tabs)
+            SessionBoardFilterBar(model: model, tabs: tabs, showsSessionFilters: settings.mode != .workItems)
 
             Spacer()
 
@@ -108,10 +134,16 @@ struct SessionBoardView: View {
 
     // MARK: Lanes
 
-    private func lane(_ column: SessionBoardColumn, tabs: [TabSidebarModel.Tab], lanes: [String: [ObjectIdentifier]]) -> some View {
+    private func lane(_ column: SessionBoardColumn, content: SessionBoardContent) -> some View {
         let color = Color(nsColor: column.displayColor)
         // Every column stays; filtered by status, only the picked ones keep their cards.
-        let shown = model.boardFilter.shows(column: column.id) ? tabs.filter(matches) : []
+        let showsColumn = model.boardFilter.shows(column: column.id)
+        let items = content.items(in: column.id)
+        let sessions = content.sessions(in: column.id)
+        let shownItems = showsColumn ? items.filter { matches($0, sessions: content.sessions(of: $0.id)) } : []
+        let shownSessions = showsColumn ? sessions.filter(matches) : []
+        let total = items.count + sessions.count
+        let shown = shownItems.count + shownSessions.count
         let isNarrowed = isSearching || model.boardFilter.isActive
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
@@ -120,7 +152,7 @@ struct SessionBoardView: View {
                 Text(column.label)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text(isNarrowed ? "\(shown.count) / \(tabs.count)" : "\(tabs.count)")
+                Text(isNarrowed ? "\(shown) / \(total)" : "\(total)")
                     .font(.system(size: 10, weight: .medium))
                     .monospacedDigit()
                     .padding(.horizontal, 5)
@@ -137,28 +169,19 @@ struct SessionBoardView: View {
 
             ScrollView(.vertical) {
                 VStack(spacing: 6) {
-                    ForEach(shown) { tab in
-                        if dropTarget == .init(column: column.id, before: tab.id), dragging != tab.id {
-                            insertionLine(color)
-                        }
-                        SessionBoardCard(model: model, tab: tab, open: { open(tab) })
-                            .opacity(dragging == tab.id ? 0.4 : 1)
-                            .onDrag {
-                                TabSidebarHoverCard.shared.hideNow()
-                                dragging = tab.id
-                                return NSItemProvider(object: SessionBoardDropTarget.dragText as NSString)
-                            }
-                            .onDrop(of: [.plainText], delegate: SessionBoardDropDelegate(
-                                target: .init(column: column.id, before: tab.id),
-                                dragging: $dragging, dropTarget: $dropTarget) { moved, target in
-                                    move(moved, to: target.column, before: target.before)
-                                })
+                    ForEach(shownItems) { item in
+                        insertionLine(before: .item(item.id), in: column.id, color: color)
+                        itemCard(item, sessions: content.sessions(of: item.id).filter(matches), column: column.id)
+                    }
+                    ForEach(shownSessions) { tab in
+                        insertionLine(before: .session(tab.id), in: column.id, color: color)
+                        sessionCard(tab, column: column.id)
                     }
                     if dropTarget == .init(column: column.id, before: nil) {
-                        insertionLine(color)
+                        line(color)
                     }
-                    if shown.isEmpty {
-                        Text(isNarrowed && !tabs.isEmpty ? "No matches" : "Empty")
+                    if shown == 0 && addingIn != column.id {
+                        Text(isNarrowed && total > 0 ? "No matches" : "Empty")
                             .font(.system(size: 12))
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity)
@@ -167,6 +190,9 @@ struct SessionBoardView: View {
                                 RoundedRectangle(cornerRadius: 8)
                                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                                     .foregroundStyle(Color.primary.opacity(0.15)))
+                    }
+                    if settings.mode != .sessions {
+                        addCard(in: column.id)
                     }
                 }
                 .padding(8)
@@ -185,28 +211,181 @@ struct SessionBoardView: View {
         }
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
         // Dropped anywhere else in the column, a card goes to its end.
-        .onDrop(of: [.plainText], delegate: SessionBoardDropDelegate(
-            target: .init(column: column.id, before: nil),
-            dragging: $dragging, dropTarget: $dropTarget) { moved, target in
-                move(moved, to: target.column, before: target.before)
-            })
+        .onDrop(of: [.plainText], delegate: dropDelegate(.init(column: column.id, before: nil)))
     }
 
-    private func insertionLine(_ color: Color) -> some View {
+    @ViewBuilder
+    private func insertionLine(before card: SessionBoardCardID, in column: String, color: Color) -> some View {
+        if dropTarget == .init(column: column, before: card), dragging != card, dragging?.isSameKind(as: card) == true {
+            line(color)
+        }
+    }
+
+    private func line(_ color: Color) -> some View {
         Capsule()
             .fill(color == Color(nsColor: .secondaryLabelColor) ? Color.accentColor : color)
             .frame(height: 2)
+    }
+
+    /// A card dropped on a card of its own kind goes before it. A session dropped on a
+    /// work item is linked to it, and a work item dropped on a session links the
+    /// session to it. Together, a linked session dragged anywhere else leaves its item.
+    private func dropDelegate(_ target: SessionBoardDropTarget) -> SessionBoardDropDelegate {
+        SessionBoardDropDelegate(target: target, dragging: $dragging, dropTarget: $dropTarget) { moved, target in
+            switch (moved, target.before) {
+            case (.session(let id), .item(let item)?):
+                window(of: id)?.workItemID = item
+            case (.item(let item), .session(let id)?):
+                window(of: id)?.workItemID = item
+            case (.session(let id), _):
+                if settings.mode == .together { window(of: id)?.workItemID = nil }
+                model.moveOnBoard(id, to: target.column, before: target.before?.session)
+            case (.item(let id), _):
+                store.move(id, to: target.column, before: target.before?.item, settings: settings)
+            }
+        }
+    }
+
+    private func window(of id: ObjectIdentifier) -> TerminalWindow? {
+        tabs.first { $0.id == id }?.window
+    }
+
+    /// Whether the card would be linked to what is dragged over it.
+    private func isLinkTarget(_ card: SessionBoardCardID, in column: String) -> Bool {
+        guard let dragging, dropTarget == .init(column: column, before: card) else { return false }
+        return !dragging.isSameKind(as: card)
+    }
+
+    // MARK: Cards
+
+    private func sessionCard(_ tab: TabSidebarModel.Tab, column: String) -> some View {
+        draggable(SessionBoardCard(
+            model: model, tab: tab, isLinkTarget: isLinkTarget(.session(tab.id), in: column), open: { open(tab) }),
+            as: .session(tab.id))
+            .onDrop(of: [.plainText], delegate: dropDelegate(.init(column: column, before: .session(tab.id))))
+    }
+
+    /// A session under its work item: the same card as on its own, dragged out to
+    /// leave the item. Dropped on, it is the item that takes the drop.
+    private func nestedSessionCard(_ tab: TabSidebarModel.Tab) -> some View {
+        draggable(SessionBoardCard(model: model, tab: tab, open: { open(tab) }), as: .session(tab.id))
+    }
+
+    private func draggable<Card: View>(_ card: Card, as id: SessionBoardCardID) -> some View {
+        card
+            .opacity(dragging == id ? 0.4 : 1)
+            .onDrag {
+                TabSidebarHoverCard.shared.hideNow()
+                dragging = id
+                return NSItemProvider(object: SessionBoardDropTarget.dragText as NSString)
+            }
+    }
+
+    private func itemCard(_ item: WorkItem, sessions: [TabSidebarModel.Tab], column: String) -> some View {
+        let nested = settings.mode == .together ? sessions : []
+        return WorkItemCard(
+            item: item,
+            hasSessions: !nested.isEmpty,
+            linkedCount: content(of: item.id),
+            isLinkTarget: isLinkTarget(.item(item.id), in: column),
+            model: model,
+            isRenaming: renaming == item.id,
+            renameDraft: $renameDraft,
+            renameFocus: $focus,
+            renameField: Field.rename,
+            openNotes: { openNotes(item) },
+            beginRename: { beginRename(item) },
+            commitRename: commitRename,
+            sessions: {
+                ForEach(nested) { tab in nestedSessionCard(tab) }
+            })
+            .opacity(dragging == .item(item.id) ? 0.4 : 1)
+            .onDrag {
+                TabSidebarHoverCard.shared.hideNow()
+                dragging = .item(item.id)
+                return NSItemProvider(object: SessionBoardDropTarget.dragText as NSString)
+            }
+            .onDrop(of: [.plainText], delegate: dropDelegate(.init(column: column, before: .item(item.id))))
+    }
+
+    /// How many sessions of this window are linked to the item.
+    private func content(of id: UUID) -> Int {
+        tabs.filter { $0.workItemID == id }.count
+    }
+
+    @ViewBuilder
+    private func addCard(in column: String) -> some View {
+        if addingIn == column {
+            TextField("Card title", text: $newTitle, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .lineLimit(1...4)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.6)))
+                .focused($focus, equals: .newCard)
+                .onSubmit { addCard(to: column) }
+                .onChange(of: focus) { field in
+                    // Clicking away ends adding, keeping what was typed as a card.
+                    if field != .newCard, addingIn == column { addCard(to: column, keepsAdding: false) }
+                }
+        } else {
+            Button {
+                newTitle = ""
+                addingIn = column
+                DispatchQueue.main.async { focus = .newCard }
+            } label: {
+                Label("Add a card", systemImage: "plus")
+                    .font(.system(size: 12))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Adds what was typed as a card, and keeps the field for the next one, as Return
+    /// does on a kanban board.
+    private func addCard(to column: String, keepsAdding: Bool = true) {
+        let title = newTitle
+        newTitle = ""
+        store.add(title, to: column)
+        if keepsAdding {
+            DispatchQueue.main.async { focus = .newCard }
+        } else {
+            addingIn = nil
+        }
+    }
+
+    private func beginRename(_ item: WorkItem) {
+        renameDraft = item.title
+        renaming = item.id
+        DispatchQueue.main.async { focus = .rename }
+    }
+
+    private func commitRename() {
+        if let renaming { store.rename(renaming, to: renameDraft) }
+        renaming = nil
+    }
+
+    private func openNotes(_ item: WorkItem) {
+        guard let window = model.window else { return }
+        window.documentPaneModel.show(store.preparedNotes(of: item), title: item.title)
+        window.documentPaneModel.isEditing = true
     }
 
     // MARK: Search and Filters
 
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    /// By the filters, and by what the card shows, so a card never hides for
+    private var words: [Substring] { query.lowercased().split(separator: " ") }
+
+    /// A session by the filters, and by what its card shows, so a card never hides for
     /// something not on it.
     private func matches(_ tab: TabSidebarModel.Tab) -> Bool {
         guard model.boardFilter.shows(folder: tab.folderID, group: tab.groupID, color: tab.color) else { return false }
-        let words = query.lowercased().split(separator: " ")
         guard !words.isEmpty else { return true }
         let info = model.infos[tab.id]
         let text = [tab.title, SessionBoardCard.folderName(tab), info?.branch, info?.model]
@@ -215,11 +394,15 @@ struct SessionBoardView: View {
         return words.allSatisfy { text.contains($0) }
     }
 
-    // MARK: Actions
-
-    private func move(_ moved: ObjectIdentifier, to column: String, before: ObjectIdentifier?) {
-        model.moveOnBoard(moved, to: column, before: before)
+    /// An item by its title, or by a session shown under it.
+    private func matches(_ item: WorkItem, sessions: [TabSidebarModel.Tab]) -> Bool {
+        guard !words.isEmpty else { return true }
+        let title = item.title.lowercased()
+        if words.allSatisfy({ title.contains($0) }) { return true }
+        return settings.mode == .together && sessions.contains { isSearching && matches($0) }
     }
+
+    // MARK: Actions
 
     private func open(_ tab: TabSidebarModel.Tab) {
         guard let window = tab.window else { return }
@@ -231,12 +414,17 @@ struct SessionBoardView: View {
         model.isBoardOpen = false
     }
 
-    /// Esc closes the board, unless it clears the search first.
+    /// Esc ends adding or renaming a card, then clears the search, then closes the board.
     private func watchEscape() {
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak model] event in
             guard event.keyCode == 53, let model, model.isBoardOpen,
                   event.window === model.window else { return event }
-            if searchFocused, !query.isEmpty {
+            if addingIn != nil {
+                newTitle = ""
+                addingIn = nil
+            } else if renaming != nil {
+                renaming = nil
+            } else if focus == .search, !query.isEmpty {
                 query = ""
             } else {
                 model.isBoardOpen = false
@@ -251,10 +439,67 @@ struct SessionBoardView: View {
     }
 }
 
+/// A card on the board: a session's, or a work item's.
+enum SessionBoardCardID: Hashable {
+    case session(ObjectIdentifier)
+    case item(UUID)
+
+    var session: ObjectIdentifier? {
+        if case .session(let id) = self { return id }
+        return nil
+    }
+
+    var item: UUID? {
+        if case .item(let id) = self { return id }
+        return nil
+    }
+
+    /// Items go among items, sessions among sessions.
+    func isSameKind(as other: Self) -> Bool {
+        (session != nil) == (other.session != nil)
+    }
+}
+
+/// What each column holds in the board's mode, apart from the views so it can be tested.
+struct SessionBoardContent {
+    let mode: SessionBoardMode
+    let tabs: [TabSidebarModel.Tab]
+    let items: [WorkItem]
+    let settings: SessionBoardSettings
+    let sessionLanes: [String: [ObjectIdentifier]]
+
+    private var itemIDs: Set<UUID> { Set(items.map(\.id)) }
+
+    /// The work items in `column`, in order. None in the sessions view.
+    func items(in column: String) -> [WorkItem] {
+        guard mode != .sessions else { return [] }
+        return items
+            .filter { settings.column(for: $0.column) == column }
+            .sorted { ($0.order, $0.createdAt) < ($1.order, $1.createdAt) }
+    }
+
+    /// The sessions shown as cards of their own in `column`: all of them in the sessions
+    /// view, none in the work items view, and those linked to no item when together.
+    func sessions(in column: String) -> [TabSidebarModel.Tab] {
+        let byID = Dictionary(tabs.map { ($0.id, $0) }) { first, _ in first }
+        let lane = (sessionLanes[column] ?? []).compactMap { byID[$0] }
+        switch mode {
+        case .sessions: return lane
+        case .workItems: return []
+        case .together: return lane.filter { tab in tab.workItemID.map { !itemIDs.contains($0) } ?? true }
+        }
+    }
+
+    /// The sessions linked to the item, in sidebar order.
+    func sessions(of item: UUID) -> [TabSidebarModel.Tab] {
+        tabs.filter { $0.workItemID == item }
+    }
+}
+
 /// Where a dragged card would land: in `column`, before the card `before`, or at the end.
 struct SessionBoardDropTarget: Equatable {
     let column: String
-    let before: ObjectIdentifier?
+    let before: SessionBoardCardID?
 
     /// What a dragged card carries. The card itself is known from the drag's start.
     static let dragText = "maggie-session-board-card"
@@ -262,9 +507,9 @@ struct SessionBoardDropTarget: Equatable {
 
 private struct SessionBoardDropDelegate: DropDelegate {
     let target: SessionBoardDropTarget
-    @Binding var dragging: ObjectIdentifier?
+    @Binding var dragging: SessionBoardCardID?
     @Binding var dropTarget: SessionBoardDropTarget?
-    let perform: (ObjectIdentifier, SessionBoardDropTarget) -> Void
+    let perform: (SessionBoardCardID, SessionBoardDropTarget) -> Void
 
     func validateDrop(info: DropInfo) -> Bool { dragging != nil }
 
@@ -286,8 +531,122 @@ private struct SessionBoardDropDelegate: DropDelegate {
             dropTarget = nil
         }
         guard let moved = dragging else { return false }
-        if target.before != moved { perform(moved, target) }
+        guard target.before != moved else { return true }
+        perform(moved, target)
         return true
+    }
+}
+
+// MARK: - Work Item Card
+
+/// A work item on the board: its title, with its sessions' cards under it when the
+/// board shows them together, or how many it has. Clicking it opens its notes beside
+/// the board; double-clicking renames it. A session dropped on it is linked to it.
+private struct WorkItemCard<Field: Hashable, Sessions: View>: View {
+    let item: WorkItem
+    let hasSessions: Bool
+    let linkedCount: Int
+    let isLinkTarget: Bool
+    @ObservedObject var model: TabSidebarModel
+    let isRenaming: Bool
+    @Binding var renameDraft: String
+    var renameFocus: FocusState<Field?>.Binding
+    let renameField: Field
+    let openNotes: () -> Void
+    let beginRename: () -> Void
+    let commitRename: () -> Void
+    @ViewBuilder let sessions: () -> Sessions
+
+    @ObservedObject private var settings = SessionBoardSettings.shared
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 6) {
+                if isRenaming {
+                    TextField("Card title", text: $renameDraft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1...4)
+                        .focused(renameFocus, equals: renameField)
+                        .onSubmit(commitRename)
+                } else {
+                    Text(item.title)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if isHovering && !isRenaming {
+                    Button(action: openNotes) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 10))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Open Notes")
+                } else if !hasSessions, linkedCount > 0 {
+                    Label("\(linkedCount)", systemImage: "apple.terminal")
+                        .labelStyle(SessionBoardCompactLabel())
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .help(linkedCount == 1 ? "1 session linked" : "\(linkedCount) sessions linked")
+                }
+            }
+            .font(.system(size: 13, weight: .medium))
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2, perform: beginRename)
+            .onTapGesture(perform: openNotes)
+
+            if hasSessions {
+                VStack(spacing: 6) {
+                    sessions()
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isLinkTarget ? Color.accentColor.opacity(0.14) : Color.primary.opacity(isHovering ? 0.1 : 0.065)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isLinkTarget ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: isLinkTarget ? 2 : 1))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onHover { isHovering = $0 }
+        .help(isLinkTarget ? "Drop to link the session to \(item.title)" : item.title)
+        .contextMenu { menu }
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        Button("Open Notes", action: openNotes)
+        Button("Rename…", action: beginRename)
+        Menu("Move to Status") {
+            ForEach(settings.columns) { column in
+                Toggle(isOn: Binding(
+                    get: { settings.column(for: item.column) == column.id },
+                    set: { _ in WorkItemStore.shared.move(item.id, to: column.id, before: nil, settings: settings) })) {
+                    Label {
+                        Text(column.label)
+                    } icon: {
+                        if let image = column.menuImage { Image(nsImage: image) }
+                    }
+                }
+            }
+        }
+        let tabs = model.boardTabs
+        if !tabs.isEmpty {
+            Menu("Link Sessions") {
+                ForEach(tabs) { tab in
+                    Toggle(tab.title, isOn: Binding(
+                        get: { tab.workItemID == item.id },
+                        set: { linked in tab.window?.workItemID = linked ? item.id : nil }))
+                }
+            }
+        }
+        Divider()
+        Button("Delete Card") { WorkItemStore.shared.delete(item.id) }
     }
 }
 
@@ -299,6 +658,9 @@ private struct SessionBoardDropDelegate: DropDelegate {
 private struct SessionBoardCard: View {
     @ObservedObject var model: TabSidebarModel
     let tab: TabSidebarModel.Tab
+
+    /// A work item is dragged over it, to be linked to it.
+    var isLinkTarget = false
     let open: () -> Void
 
     @State private var isHovering = false
@@ -379,7 +741,7 @@ private struct SessionBoardCard: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(cardBackground))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(outline, lineWidth: 1))
+                .strokeBorder(isLinkTarget ? Color.accentColor : outline, lineWidth: isLinkTarget ? 2 : 1))
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .background(GeometryReader { geometry in
             Color.clear
@@ -465,31 +827,38 @@ private struct SessionBoardFilterBar: View {
     @ObservedObject var model: TabSidebarModel
     let tabs: [TabSidebarModel.Tab]
 
+    /// Folders, groups and colors are the sessions'; work items alone have only a status.
+    let showsSessionFilters: Bool
+
     @ObservedObject private var board = SessionBoardSettings.shared
 
     var body: some View {
         HStack(spacing: 6) {
-            SessionBoardFilterMenu(
-                title: "Folder", plural: "Folders",
-                options: folderOptions,
-                selection: $model.boardFilter.folders)
+            if showsSessionFilters {
+                SessionBoardFilterMenu(
+                    title: "Folder", plural: "Folders",
+                    options: folderOptions,
+                    selection: $model.boardFilter.folders)
 
-            SessionBoardFilterMenu(
-                title: "Group", plural: "Groups",
-                options: groupOptions,
-                selection: $model.boardFilter.groups)
+                SessionBoardFilterMenu(
+                    title: "Group", plural: "Groups",
+                    options: groupOptions,
+                    selection: $model.boardFilter.groups)
+            }
 
             SessionBoardFilterMenu(
                 title: "Status", plural: "Statuses",
                 options: board.columns.map { .init(value: $0.id, label: $0.label, image: $0.menuImage) },
                 selection: $model.boardFilter.columns)
 
-            SessionBoardFilterMenu(
-                title: "Color", plural: "Colors",
-                options: TerminalTabColor.allCases
-                    .filter { color in tabs.contains { $0.color == color } }
-                    .map { .init(value: $0, label: $0.localizedName, image: $0.swatchImage(selected: false)) },
-                selection: $model.boardFilter.colors)
+            if showsSessionFilters {
+                SessionBoardFilterMenu(
+                    title: "Color", plural: "Colors",
+                    options: TerminalTabColor.allCases
+                        .filter { color in tabs.contains { $0.color == color } }
+                        .map { .init(value: $0, label: $0.localizedName, image: $0.swatchImage(selected: false)) },
+                    selection: $model.boardFilter.colors)
+            }
 
             if model.boardFilter.isActive {
                 Button {
@@ -676,12 +1045,13 @@ private struct SessionBoardColumnsEditor: View {
                     Button {
                         if let target = settings.removeColumn(column.id) {
                             TerminalWindow.moveBoardSessions(from: column.id, to: target)
+                            WorkItemStore.shared.moveItems(from: column.id, to: target)
                         }
                     } label: {
                         Image(systemName: "trash")
                     }
                     .disabled(settings.columns.count <= 1)
-                    .help("Remove \(column.label); its sessions move to the column before it")
+                    .help("Remove \(column.label); its work items and sessions move to the column before it")
                 }
                 .buttonStyle(.borderless)
             }

@@ -199,6 +199,16 @@ class TerminalWindow: NSWindow {
         }
     }
 
+    /// The work item the session is linked to, by hand. On the board's Together view
+    /// the session shows under it, in its column.
+    var workItemID: UUID? {
+        didSet {
+            guard workItemID != oldValue else { return }
+            invalidateRestorableState()
+            postTabSidebarItemDidChange()
+        }
+    }
+
     /// The title's visibility before the session board hid it, to put back when it closes.
     private var titleVisibilityBeforeBoard: NSWindow.TitleVisibility?
 

@@ -47,6 +47,9 @@ final class TabSidebarModel: ObservableObject {
         /// Its place on the session board, once moved there.
         var boardPlace: SessionBoardPlace?
 
+        /// The work item it is linked to.
+        var workItemID: UUID?
+
         /// What the tab is in at each nesting level, outermost first.
         var nestingKeys: [UUID?] { [folderGroupID, folderID, groupID] }
 
@@ -67,7 +70,8 @@ final class TabSidebarModel: ObservableObject {
                 lhs.groupID == rhs.groupID &&
                 lhs.folderID == rhs.folderID &&
                 lhs.folderGroupID == rhs.folderGroupID &&
-                lhs.boardPlace == rhs.boardPlace
+                lhs.boardPlace == rhs.boardPlace &&
+                lhs.workItemID == rhs.workItemID
         }
     }
 
@@ -359,7 +363,8 @@ final class TabSidebarModel: ObservableObject {
                 groupID: UserTabGroupStore.shared[window.userTabGroupID]?.id,
                 folderID: folder?.id,
                 folderGroupID: folderGroups[folder?.groupID]?.id,
-                boardPlace: window.boardPlace)
+                boardPlace: window.boardPlace,
+                workItemID: window.workItemID)
         }
 
         var newRows = Self.rows(of: tabs[...], level: 0)

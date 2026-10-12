@@ -36,6 +36,9 @@ extension TerminalRestorableState {
         // MARK: - Session board
         // The session's column and place on the board. Optional, like the folders.
         var boardPlace: SessionBoardPlace?
+
+        // The work item the session is linked to. Optional, like the place.
+        var workItemID: UUID?
     }
 }
 
@@ -61,6 +64,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
             sidebarFolders: sidebarFolders,
             sidebarFolderGroups: folderGroupIDs.compactMap { UserTabFolderGroupStore.shared[$0] },
             boardPlace: window?.boardPlace,
+            workItemID: window?.workItemID,
         )
     }
 }

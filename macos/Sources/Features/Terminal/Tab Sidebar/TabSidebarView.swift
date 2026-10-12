@@ -1610,6 +1610,22 @@ struct TabSidebarSessionMenu: View {
                 }
             }
 
+            // Linked by hand: on the board's Together view the session shows under it.
+            let items = WorkItemStore.shared.items
+            if !items.isEmpty {
+                Menu("Work Item") {
+                    ForEach(items) { item in
+                        Toggle(item.title, isOn: Binding(
+                            get: { tab.workItemID == item.id },
+                            set: { linked in window.workItemID = linked ? item.id : nil }))
+                    }
+                    if tab.workItemID != nil {
+                        Divider()
+                        Button("Unlink") { window.workItemID = nil }
+                    }
+                }
+            }
+
             Divider()
 
             Button("Add Session to New Group") { model.createGroup(with: window) }

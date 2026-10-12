@@ -94,6 +94,9 @@ final class TerminalRestorableState: TerminalRestorable {
     var boardPlace: SessionBoardPlace? {
         internalState.boardPlace
     }
+    var workItemID: UUID? {
+        internalState.workItemID
+    }
 
     /// Internal State we use to perform unit tests
     ///
@@ -141,6 +144,7 @@ final class TerminalRestorableState: TerminalRestorable {
 
         (window as? TerminalWindow)?.speechVoiceID = speechVoiceID
         (window as? TerminalWindow)?.boardPlace = boardPlace
+        (window as? TerminalWindow)?.workItemID = workItemID
 
         // Restore the tab's group in the tab sidebar
         if let userTabGroup {
