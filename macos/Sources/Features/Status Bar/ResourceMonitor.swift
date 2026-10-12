@@ -82,7 +82,7 @@ final class ResourceMonitor: ObservableObject {
 
         // The terminals are read here; the processes off the main thread.
         let folders = UserTabFolderStore.shared.folders
-        let windows = NSApp.windows.compactMap { $0 as? TerminalWindow }.filter { $0.terminalController != nil }
+        let windows = Self.sessionWindows()
         let terminals = windows.map { window in
             ResourceSampler.Terminals(
                 id: ObjectIdentifier(window),
@@ -97,6 +97,18 @@ final class ResourceMonitor: ObservableObject {
                 self.isSampling = false
                 self.show(result, windows: windows, folders: folders)
             }
+        }
+    }
+
+    /// The sessions the sidebars list: the terminal windows on the screen or in the Dock,
+    /// with the tabs behind them. The app's window list can also hold windows no longer
+    /// shown, such as ones being closed, which aren't sessions.
+    static func sessionWindows() -> [TerminalWindow] {
+        NSApp.windows.compactMap { $0 as? TerminalWindow }.filter { window in
+            guard let controller = window.terminalController, !controller.surfaceTree.isEmpty else { return false }
+            let front = window.tabGroup?.selectedWindow ?? window
+            let isShown = front.isVisible || front.isMiniaturized
+            return isShown && (window === front || window.tabGroup?.windows.contains(window) == true)
         }
     }
 

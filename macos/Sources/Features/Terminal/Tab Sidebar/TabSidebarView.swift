@@ -438,8 +438,9 @@ private struct TabSidebarFolderGroupHeader: View {
                     .foregroundStyle(Color.primary.opacity(0.85))
             }
 
+            // The sessions in its folders, not the folders: empty ones count for nothing.
             if group.isCollapsed {
-                Text("(\(section.folders.count))")
+                Text("(\(section.tabs.count))")
                     .font(TabSidebarStyle.titleFont)
                     .foregroundStyle(.secondary)
             }
