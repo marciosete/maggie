@@ -15,20 +15,45 @@ enum AgentImagePaste {
         NSPasteboard.PasteboardType("public.jpeg"),
     ]
 
-    /// `pasteboard` has an image and nothing a paste would type.
+    /// `pasteboard` holds an image, and nothing a paste would type but the image's own
+    /// address: a browser's Copy Image adds the image's URL as text. An image copied
+    /// with other text, as from a document, is a text paste, and a copied file still
+    /// pastes its path.
     static func hasOnlyImage(_ pasteboard: NSPasteboard) -> Bool {
-        pasteboard.availableType(from: imageTypes) != nil
-            && pasteboard.ghosttyData(forMime: "text/plain") == nil
+        guard pasteboard.availableType(from: imageTypes) != nil else { return false }
+        guard let text = pasteboard.ghosttyData(forMime: "text/plain").flatMap({ String(data: $0, encoding: .utf8) }) else {
+            return true
+        }
+        if pasteboard.types?.contains(.fileURL) == true { return false }
+        return isWebAddress(text)
+    }
+
+    /// `text` is one http or https URL and nothing else, as a browser copies with an image.
+    nonisolated static func isWebAddress(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace),
+              let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else { return false }
+        return (scheme == "http" || scheme == "https") && url.host != nil
     }
 
     /// Process `pid`, the foreground process of a terminal, is an agent. Claude Code
-    /// registers its process; Codex installed with npm runs under a node wrapper.
+    /// registers its process, but in a configuration directory of its own the app may
+    /// not look in, so it is also known by its command; Codex installed with npm runs
+    /// under a node wrapper.
     nonisolated static func isAgent(pid: Int) -> Bool {
         if ClaudeCodeSession.directory(ofRunning: pid) != nil { return true }
         guard let pid = pid_t(exactly: pid), pid > 0 else { return false }
-        return ([pid] + RunningProcess.children(pid)).contains {
-            RunningProcess.name($0)?.hasPrefix(CodingAgent.codex.command) ?? false
+        return ([pid] + RunningProcess.children(pid)).contains { process in
+            if RunningProcess.name(process)?.hasPrefix(CodingAgent.codex.command) ?? false { return true }
+            return isClaudeCode(RunningProcess.name(process), arguments: RunningProcess.arguments(process) ?? [])
         }
+    }
+
+    /// A process named `claude`, or a node running Claude Code's package.
+    nonisolated static func isClaudeCode(_ name: String?, arguments: [String]) -> Bool {
+        let command = arguments.first.map { URL(fileURLWithPath: $0).lastPathComponent }
+        if name == "claude" || command == "claude" { return true }
+        return arguments.prefix(3).contains { $0.contains("@anthropic-ai/claude-code") || $0.hasSuffix("/bin/claude") }
     }
 
     /// `event` is the key bound to paste.
