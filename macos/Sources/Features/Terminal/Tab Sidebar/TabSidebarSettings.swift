@@ -12,6 +12,8 @@ final class TabSidebarSettings: ObservableObject {
     private static let widthKey = "TabSidebarWidth"
     private static let rowStyleKey = "TabSidebarRowStyle"
     private static let showsSubagentsKey = "TabSidebarShowsSubagents"
+    private static let groupByKey = "TabSidebarGroupBy"
+    private static let collapsedStatusesKey = "TabSidebarCollapsedStatuses"
 
     static let minWidth: CGFloat = 150
     static let maxWidth: CGFloat = 420
@@ -60,9 +62,36 @@ final class TabSidebarSettings: ObservableObject {
         didSet { UserDefaults.ghostty.set(showsSubagents, forKey: Self.showsSubagentsKey) }
     }
 
+    /// How the sidebar lists sessions.
+    enum GroupBy: String, CaseIterable {
+        /// In their folders and groups.
+        case folders
+
+        /// Under their columns on the session board.
+        case status
+
+        var localizedName: String {
+            switch self {
+            case .folders: return "Folders"
+            case .status: return "Status"
+            }
+        }
+    }
+
+    @Published var groupBy: GroupBy {
+        didSet { UserDefaults.ghostty.set(groupBy.rawValue, forKey: Self.groupByKey) }
+    }
+
+    /// The board columns folded away while the sidebar lists by status.
+    @Published var collapsedStatuses: Set<String> {
+        didSet { UserDefaults.ghostty.set(collapsedStatuses.sorted(), forKey: Self.collapsedStatusesKey) }
+    }
+
     private init() {
         let defaults = UserDefaults.ghostty
         isEnabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
+        groupBy = defaults.string(forKey: Self.groupByKey).flatMap(GroupBy.init(rawValue:)) ?? .folders
+        collapsedStatuses = Set(defaults.stringArray(forKey: Self.collapsedStatusesKey) ?? [])
         showsSubagents = defaults.object(forKey: Self.showsSubagentsKey) as? Bool ?? true
         isCollapsed = defaults.bool(forKey: Self.collapsedKey)
         rowStyle = defaults.string(forKey: Self.rowStyleKey).flatMap(RowStyle.init(rawValue:)) ?? .extended

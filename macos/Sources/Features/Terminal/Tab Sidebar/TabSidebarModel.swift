@@ -186,6 +186,34 @@ final class TabSidebarModel: ObservableObject {
     /// Whether the session board covers the terminal.
     @Published var isBoardOpen = false
 
+    /// Goes up each time the selected session is to be scrolled into view.
+    @Published private(set) var revealRequest = 0
+
+    /// The session the sidebar scrolls to on `revealRequest`.
+    var selectedTabID: ObjectIdentifier? {
+        rows.lazy.flatMap(\.allTabs).first(where: \.isSelected)?.id
+    }
+
+    /// Unfolds whatever holds the selected session and scrolls the sidebar to it. A
+    /// search that hides it is cleared.
+    func revealSelected() {
+        guard let tab = rows.lazy.flatMap(\.allTabs).first(where: \.isSelected) else { return }
+        if isSearching, !shownRows.flatMap(\.allTabs).contains(where: { $0.id == tab.id }) {
+            searchQuery = ""
+        }
+        if let groupID = tab.groupID {
+            UserTabGroupStore.shared.update(groupID) { $0.isCollapsed = false }
+        }
+        if let folderID = tab.folderID {
+            UserTabFolderStore.shared.update(folderID) { $0.isCollapsed = false }
+        }
+        if let folderGroupID = tab.folderGroupID {
+            UserTabFolderGroupStore.shared.update(folderGroupID) { $0.isCollapsed = false }
+        }
+        TabSidebarSettings.shared.collapsedStatuses.remove(SessionBoardSettings.shared.column(for: tab.boardPlace?.column))
+        revealRequest += 1
+    }
+
     /// The tab currently being renamed inline, if any.
     @Published var editingTabID: ObjectIdentifier?
 

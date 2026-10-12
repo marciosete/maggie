@@ -19,11 +19,9 @@ struct SessionBoardView: View {
 
     static let columnWidth: CGFloat = 280
 
-    private var tabs: [TabSidebarModel.Tab] { model.rows.flatMap(\.allTabs) }
+    private var tabs: [TabSidebarModel.Tab] { model.boardTabs }
 
-    private var lanes: [String: [ObjectIdentifier]] {
-        SessionBoardLayout.lanes(tabs.map { .init(id: $0.id, place: $0.boardPlace) }, settings: settings)
-    }
+    private var lanes: [String: [ObjectIdentifier]] { model.boardLanes() }
 
     var body: some View {
         let tabsByID = Dictionary(tabs.map { ($0.id, $0) }) { first, _ in first }
@@ -224,10 +222,7 @@ struct SessionBoardView: View {
     // MARK: Actions
 
     private func move(_ moved: ObjectIdentifier, to column: String, before: ObjectIdentifier?, lanes: [String: [ObjectIdentifier]]) {
-        let places = SessionBoardLayout.move(moved, to: column, before: before, lanes: lanes)
-        for tab in tabs {
-            if let place = places[tab.id] { tab.window?.boardPlace = place }
-        }
+        model.moveOnBoard(moved, to: column, before: before)
     }
 
     private func open(_ tab: TabSidebarModel.Tab) {

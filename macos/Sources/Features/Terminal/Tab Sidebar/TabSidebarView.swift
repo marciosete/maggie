@@ -134,6 +134,25 @@ struct TabSidebarView: View {
     @State private var dropAtEnd = false
     @State private var resizeStartWidth: CGFloat?
 
+    /// The sessions in their folders and groups.
+    private var rows: some View {
+        ForEach(model.shownRows) { row in
+            switch row {
+            case .tab(let tab):
+                TabSidebarSession(model: model, tab: tab, group: nil, indent: 0)
+
+            case .group(let section):
+                TabSidebarGroupSection(model: model, section: section, indent: 0)
+
+            case .folder(let section):
+                TabSidebarFolderSection(model: model, section: section, indent: 0)
+
+            case .folderGroup(let section):
+                TabSidebarFolderGroupSection(model: model, section: section)
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Leave room for the traffic lights and the titlebar.
@@ -145,50 +164,49 @@ struct TabSidebarView: View {
 
             TabSidebarLostSessionsBanner()
 
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: TabSidebarStyle.rowSpacing(settings.rowStyle)) {
-                    if model.isSearching && model.shownRows.isEmpty {
-                        Text("No sessions match")
-                            .font(TabSidebarStyle.titleFont)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 12)
-                    }
-
-                    ForEach(model.shownRows) { row in
-                        switch row {
-                        case .tab(let tab):
-                            TabSidebarSession(model: model, tab: tab, group: nil, indent: 0)
-
-                        case .group(let section):
-                            TabSidebarGroupSection(model: model, section: section, indent: 0)
-
-                        case .folder(let section):
-                            TabSidebarFolderSection(model: model, section: section, indent: 0)
-
-                        case .folderGroup(let section):
-                            TabSidebarFolderGroupSection(model: model, section: section)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: TabSidebarStyle.rowSpacing(settings.rowStyle)) {
+                        if model.isSearching && model.shownRows.isEmpty {
+                            Text("No sessions match")
+                                .font(TabSidebarStyle.titleFont)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 12)
                         }
-                    }
 
-                    // Dropping below the last tab moves a tab to the end, outside any
-                    // group or folder. A directory dropped from the Finder opens as a folder.
-                    Color.clear
-                        .frame(height: 32)
-                        .overlay(alignment: .top) {
-                            if dropAtEnd { TabSidebarDropIndicator() }
+                        if settings.groupBy == .status {
+                            TabSidebarStatusSections(model: model)
+                        } else {
+                            rows
                         }
-                        .onDrop(of: [.plainText, .fileURL], delegate: TabSidebarDropDelegate(
-                            model: model,
-                            target: .end,
-                            height: 32,
-                            placement: Binding(
-                                get: { dropAtEnd ? .before : nil },
-                                set: { dropAtEnd = $0 != nil })))
-                        .onReceive(TabSidebarDragState.shared.$endedDrags.dropFirst()) { _ in dropAtEnd = false }
+
+                        // Dropping below the last tab moves a tab to the end, outside any
+                        // group or folder. A directory dropped from the Finder opens as a folder.
+                        Color.clear
+                            .frame(height: 32)
+                            .overlay(alignment: .top) {
+                                if dropAtEnd { TabSidebarDropIndicator() }
+                            }
+                            .onDrop(of: [.plainText, .fileURL], delegate: TabSidebarDropDelegate(
+                                model: model,
+                                target: .end,
+                                height: 32,
+                                placement: Binding(
+                                    get: { dropAtEnd ? .before : nil },
+                                    set: { dropAtEnd = $0 != nil })))
+                            .onReceive(TabSidebarDragState.shared.$endedDrags.dropFirst()) { _ in dropAtEnd = false }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 4)
                 }
-                .padding(.horizontal, 8)
-                .padding(.top, 4)
+                .onChange(of: model.revealRequest) { _ in
+                    // After what was folded has unfolded, so the row is there to scroll to.
+                    DispatchQueue.main.async {
+                        guard let id = model.selectedTabID else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+                    }
+                }
             }
 
             Divider()
@@ -215,6 +233,17 @@ struct TabSidebarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("Open Folder…")
+
+                Button {
+                    model.revealSelected()
+                } label: {
+                    Image(systemName: "scope")
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Reveal Active Session")
 
                 Button {
                     model.isBoardOpen.toggle()
@@ -876,6 +905,111 @@ private struct TabSidebarGroupHeader: View {
     }
 }
 
+// MARK: - By Status
+
+/// The sessions under their columns on the session board, in board order, when the
+/// sidebar is grouped by status. A column with no sessions isn't shown. A column's
+/// header folds it, and takes a session dropped on it.
+private struct TabSidebarStatusSections: View {
+    @ObservedObject var model: TabSidebarModel
+    @ObservedObject private var board = SessionBoardSettings.shared
+    @ObservedObject private var settings = TabSidebarSettings.shared
+
+    var body: some View {
+        // What the search leaves, in board order.
+        let tabs = model.shownRows.flatMap(\.allTabs)
+        let byID = Dictionary(tabs.map { ($0.id, $0) }) { first, _ in first }
+        let lanes = model.boardLanes(of: tabs)
+        ForEach(board.columns) { column in
+            let lane = (lanes[column.id] ?? []).compactMap { byID[$0] }
+            if !lane.isEmpty {
+                let isCollapsed = settings.collapsedStatuses.contains(column.id) && !model.isSearching
+                TabSidebarStatusHeader(model: model, column: column, count: lane.count, isCollapsed: isCollapsed)
+                if !isCollapsed {
+                    ForEach(lane) { tab in
+                        TabSidebarSession(model: model, tab: tab, group: nil, indent: TabSidebarStyle.indent)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct TabSidebarStatusHeader: View {
+    @ObservedObject var model: TabSidebarModel
+    let column: SessionBoardColumn
+    let count: Int
+    let isCollapsed: Bool
+
+    @ObservedObject private var settings = TabSidebarSettings.shared
+    @State private var isHovering = false
+    @State private var isTargeted = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: column.icon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color(nsColor: column.displayColor))
+                .frame(width: 14)
+            Text(column.label)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            if isCollapsed || isHovering {
+                Text("\(count)")
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 4)
+            if isHovering {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isTargeted ? Color.accentColor.opacity(0.18) : Color.primary.opacity(isHovering ? 0.05 : 0)))
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if isCollapsed {
+                    settings.collapsedStatuses.remove(column.id)
+                } else {
+                    settings.collapsedStatuses.insert(column.id)
+                }
+            }
+        }
+        .help(isCollapsed ? "Show \(column.label)" : "Hide \(column.label)")
+        .onDrop(of: [.plainText], isTargeted: $isTargeted) { providers in
+            guard let provider = providers.first else { return false }
+            let model = model
+            let column = column.id
+            _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                guard let token = object as? String else { return }
+                DispatchQueue.main.async {
+                    guard case .tab(let window) = TabSidebarDragState.shared.take(token: token) else { return }
+                    model.moveOnBoard(window, to: column)
+                }
+            }
+            return true
+        }
+        .contextMenu {
+            Menu("Group By") {
+                ForEach(TabSidebarSettings.GroupBy.allCases, id: \.self) { groupBy in
+                    Button(groupBy == settings.groupBy ? "\(groupBy.localizedName) ✓" : groupBy.localizedName) {
+                        settings.groupBy = groupBy
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Session
 
 /// A session's row, with the subagents and teammates its Claude Code started set in
@@ -920,6 +1054,8 @@ private struct TabSidebarSession: View {
                 }
             }
         }
+        // What Reveal Active Session scrolls to.
+        .id(tab.id)
         .onAppear { subagents.start() }
     }
 }
@@ -1521,6 +1657,23 @@ private struct TabSidebarTabRow: View {
 
             Divider()
 
+            Menu("Move to Status") {
+                let current = SessionBoardSettings.shared.column(for: tab.boardPlace?.column)
+                ForEach(SessionBoardSettings.shared.columns) { column in
+                    Toggle(isOn: Binding(
+                        get: { column.id == current },
+                        set: { _ in model.moveOnBoard(window, to: column.id) })) {
+                        Label {
+                            Text(column.label)
+                        } icon: {
+                            if let image = column.menuImage { Image(nsImage: image) }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
             Button("Add Session to New Group") { model.createGroup(with: window) }
             let otherGroups = model.groupsInWindow.filter { $0.id != tab.groupID }
             if !otherGroups.isEmpty {
@@ -1567,6 +1720,13 @@ private struct TabSidebarTabRow: View {
                 ForEach(TabSidebarSettings.RowStyle.allCases, id: \.self) { style in
                     Button(style == settings.rowStyle ? "\(style.localizedName) ✓" : style.localizedName) {
                         settings.rowStyle = style
+                    }
+                }
+            }
+            Menu("Group By") {
+                ForEach(TabSidebarSettings.GroupBy.allCases, id: \.self) { groupBy in
+                    Button(groupBy == settings.groupBy ? "\(groupBy.localizedName) ✓" : groupBy.localizedName) {
+                        settings.groupBy = groupBy
                     }
                 }
             }
@@ -1947,7 +2107,18 @@ private struct TabSidebarDropDelegate: DropDelegate {
             guard let token = object as? String else { return }
             DispatchQueue.main.async {
                 let after = finalPlacement == .after
-                switch (TabSidebarDragState.shared.take(token: token), target) {
+                let payload = TabSidebarDragState.shared.take(token: token)
+
+                // Listed by status, a session dropped on another takes its column and
+                // its place there; it leaves its folder and group alone.
+                if TabSidebarSettings.shared.groupBy == .status {
+                    if case .tab(let window) = payload, case .tab(let targetWindow?) = target, window !== targetWindow {
+                        model.moveOnBoard(window, nextTo: targetWindow, after: after)
+                    }
+                    return
+                }
+
+                switch (payload, target) {
                 case (nil, _):
                     return
 
