@@ -14,6 +14,9 @@ struct WorkItem: Codable, Equatable, Identifiable {
     /// Its place in the column, lowest first.
     var order: Double
 
+    /// The color the card is filled with, picked by hand.
+    var color: TerminalTabColor = .none
+
     let createdAt: Date
     var updatedAt: Date
 
@@ -27,6 +30,26 @@ struct WorkItem: Codable, Equatable, Identifiable {
     }
 
     static let maxTitleLength = 200
+
+    /// The colors a card can be given: every color a session can show, the ones the
+    /// session lights use too, but not Auto or Attention, which follow a session.
+    static let colorChoices: [TerminalTabColor] = TerminalTabColor.allCases.filter { !$0.followsClaudeCode }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, column, order, color, createdAt, updatedAt
+    }
+
+    // Items saved before cards had colors read as uncolored.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        column = try container.decode(String.self, forKey: .column)
+        order = try container.decode(Double.self, forKey: .order)
+        color = try container.decodeIfPresent(TerminalTabColor.self, forKey: .color) ?? .none
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
 }
 
 /// The work items, saved by Maggie in its own folder: the items in `items.json`, each
@@ -74,6 +97,10 @@ final class WorkItemStore: ObservableObject {
         let title = Self.clean(title)
         guard !title.isEmpty else { return }
         update(id, at: now) { $0.title = title }
+    }
+
+    func setColor(_ color: TerminalTabColor, of id: UUID, at now: Date = Date()) {
+        update(id, at: now) { $0.color = color }
     }
 
     /// Removes an item and its notes. Its sessions stay, linked to nothing.

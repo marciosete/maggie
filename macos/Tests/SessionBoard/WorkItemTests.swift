@@ -27,6 +27,31 @@ struct WorkItemTests {
         #expect(again.items == store.items)
     }
 
+    @Test func cardsTakeAColorAndKeepIt() throws {
+        let store = store()
+        defer { try? FileManager.default.removeItem(at: store.directory) }
+        let item = try #require(store.add("Capitalisation", to: "todo"))
+        #expect(item.color == .none)
+        store.setColor(.green, of: item.id)
+        #expect(WorkItemStore(directory: store.directory)[item.id]?.color == .green)
+    }
+
+    /// Cards saved before they had colors still read.
+    @Test func aCardSavedWithoutAColorReads() throws {
+        let json = #"[{"id":"\#(UUID().uuidString)","title":"FinOps","column":"done","order":0,"createdAt":0,"updatedAt":0}]"#
+        let items = try JSONDecoder().decode([WorkItem].self, from: Data(json.utf8))
+        #expect(items.first?.color == TerminalTabColor.none)
+    }
+
+    @Test func cardsOfferEveryColorButTheFollowingOnes() {
+        #expect(WorkItem.colorChoices.first == TerminalTabColor.none)
+        #expect(WorkItem.colorChoices.contains(.blue))
+        #expect(WorkItem.colorChoices.contains(.green))
+        #expect(WorkItem.colorChoices.contains(.purple))
+        #expect(!WorkItem.colorChoices.contains(.auto))
+        #expect(!WorkItem.colorChoices.contains(.attention))
+    }
+
     @Test func cardsRenameAndMove() throws {
         let store = store()
         defer { try? FileManager.default.removeItem(at: store.directory) }

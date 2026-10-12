@@ -1795,7 +1795,7 @@ private enum TabSidebarStyle {
 }
 
 /// A submenu that picks a tab color, showing a swatch for each color.
-private struct TabSidebarColorMenu: View {
+struct TabSidebarColorMenu: View {
     let title: String
     let choices: [TerminalTabColor]
     let selected: TerminalTabColor

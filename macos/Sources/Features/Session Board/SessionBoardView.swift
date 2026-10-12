@@ -630,9 +630,7 @@ private struct WorkItemCard<Field: Hashable, Sessions: View>: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isLinkTarget ? Color.accentColor.opacity(0.14) : Color.primary.opacity(isHovering ? 0.1 : 0.065)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(fill))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(isLinkTarget ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: isLinkTarget ? 2 : 1))
@@ -642,10 +640,21 @@ private struct WorkItemCard<Field: Hashable, Sessions: View>: View {
         .contextMenu { menu }
     }
 
+    /// A card given a color is filled with it as a session row given one is; one
+    /// without keeps a card's faint fill.
+    private var fill: Color {
+        if isLinkTarget { return Color.accentColor.opacity(0.14) }
+        guard let color = item.color.displayColor else { return Color.primary.opacity(isHovering ? 0.1 : 0.065) }
+        return Color(nsColor: color).opacity(isHovering ? 0.55 : 0.4)
+    }
+
     @ViewBuilder
     private var menu: some View {
         Button("Open Notes", action: openNotes)
         Button("Rename…", action: beginRename)
+        TabSidebarColorMenu(title: "Card Color", choices: WorkItem.colorChoices, selected: item.color) { color in
+            WorkItemStore.shared.setColor(color, of: item.id)
+        }
         Menu("Move to Status") {
             ForEach(settings.columns) { column in
                 Toggle(isOn: Binding(
