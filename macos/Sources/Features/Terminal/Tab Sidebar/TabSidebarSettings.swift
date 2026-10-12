@@ -11,6 +11,7 @@ final class TabSidebarSettings: ObservableObject {
     private static let collapsedKey = "TabSidebarCollapsed"
     private static let widthKey = "TabSidebarWidth"
     private static let rowStyleKey = "TabSidebarRowStyle"
+    private static let showsSubagentsKey = "TabSidebarShowsSubagents"
 
     static let minWidth: CGFloat = 150
     static let maxWidth: CGFloat = 420
@@ -53,9 +54,16 @@ final class TabSidebarSettings: ObservableObject {
         didSet { UserDefaults.ghostty.set(rowStyle.rawValue, forKey: Self.rowStyleKey) }
     }
 
+    /// Whether the subagents and teammates a Claude Code session starts are listed under
+    /// its row.
+    @Published var showsSubagents: Bool {
+        didSet { UserDefaults.ghostty.set(showsSubagents, forKey: Self.showsSubagentsKey) }
+    }
+
     private init() {
         let defaults = UserDefaults.ghostty
         isEnabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
+        showsSubagents = defaults.object(forKey: Self.showsSubagentsKey) as? Bool ?? true
         isCollapsed = defaults.bool(forKey: Self.collapsedKey)
         rowStyle = defaults.string(forKey: Self.rowStyleKey).flatMap(RowStyle.init(rawValue:)) ?? .extended
 

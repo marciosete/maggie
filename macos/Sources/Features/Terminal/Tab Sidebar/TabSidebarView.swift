@@ -121,7 +121,7 @@ struct TabSidebarView: View {
                     ForEach(model.shownRows) { row in
                         switch row {
                         case .tab(let tab):
-                            TabSidebarTabRow(model: model, tab: tab, group: nil, indent: 0)
+                            TabSidebarSession(model: model, tab: tab, group: nil, indent: 0)
 
                         case .group(let section):
                             TabSidebarGroupSection(model: model, section: section, indent: 0)
@@ -475,7 +475,7 @@ private struct TabSidebarFolderSection: View {
                 ForEach(section.rows) { row in
                     switch row {
                     case .tab(let tab):
-                        TabSidebarTabRow(model: model, tab: tab, group: nil, indent: indent + TabSidebarStyle.indent)
+                        TabSidebarSession(model: model, tab: tab, group: nil, indent: indent + TabSidebarStyle.indent)
 
                     case .group(let group):
                         TabSidebarGroupSection(model: model, section: group, indent: indent + TabSidebarStyle.indent)
@@ -662,7 +662,7 @@ private struct TabSidebarGroupSection: View {
 
             if !section.group.isCollapsed {
                 ForEach(section.tabs) { tab in
-                    TabSidebarTabRow(model: model, tab: tab, group: section.group, indent: indent + TabSidebarStyle.indent)
+                    TabSidebarSession(model: model, tab: tab, group: section.group, indent: indent + TabSidebarStyle.indent)
                 }
             }
         }
@@ -823,6 +823,226 @@ private struct TabSidebarGroupHeader: View {
         Divider()
         Button("Ungroup") { model.ungroup(group.id) }
         Button("Close Group") { model.closeGroup(group.id) }
+    }
+}
+
+// MARK: - Session
+
+/// A session's row, with the subagents and teammates its Claude Code started set in
+/// below it.
+private struct TabSidebarSession: View {
+    @ObservedObject var model: TabSidebarModel
+    let tab: TabSidebarModel.Tab
+    let group: UserTabGroup?
+    let indent: CGFloat
+
+    @ObservedObject private var subagents = ClaudeSubagents.shared
+    @ObservedObject private var settings = TabSidebarSettings.shared
+
+    private var sessions: [UUID] {
+        (model.infos[tab.id]?.sessions ?? []).compactMap { session -> UUID? in
+            if case .claude(let claude) = session { return claude.id }
+            return nil
+        }
+    }
+
+    var body: some View {
+        let sessions = sessions
+        let agents = settings.showsSubagents ? subagents.agents(of: sessions) : []
+        let isCollapsed = subagents.isCollapsed(sessions)
+        VStack(alignment: .leading, spacing: TabSidebarStyle.rowSpacing(settings.rowStyle)) {
+            TabSidebarTabRow(model: model, tab: tab, group: group, indent: indent)
+            if !agents.isEmpty {
+                TabSidebarSubagentsHeader(
+                    agents: agents,
+                    isCollapsed: isCollapsed,
+                    toggle: {
+                        withAnimation(.easeInOut(duration: 0.15)) { subagents.setCollapsed(sessions, !isCollapsed) }
+                    },
+                    clear: {
+                        withAnimation(.easeInOut(duration: 0.15)) { subagents.clearFinished(of: sessions) }
+                    })
+                .padding(.leading, indent + TabSidebarStyle.indent)
+                if !isCollapsed {
+                    ForEach(agents) { agent in
+                        TabSidebarSubagentRow(model: model, tab: tab, agent: agent, indent: indent + TabSidebarStyle.indent)
+                    }
+                }
+            }
+        }
+        .onAppear { subagents.start() }
+    }
+}
+
+/// Folds a session's subagents away, and counts them by what they are doing so the
+/// folded list still tells whether any is at work.
+private struct TabSidebarSubagentsHeader: View {
+    let agents: [ClaudeSubagent]
+    let isCollapsed: Bool
+    let toggle: () -> Void
+    let clear: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        TabSidebarSubagentsHeaderLabel(agents: agents, isCollapsed: isCollapsed, isHovering: isHovering, clear: clear)
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .onTapGesture(perform: toggle)
+            .help(isCollapsed ? "Show the subagents" : "Hide the subagents")
+    }
+}
+
+/// The header's look: a disclosure chevron, the count, a count for each state, and,
+/// once any is over, a button that clears those off the list.
+struct TabSidebarSubagentsHeaderLabel: View {
+    let agents: [ClaudeSubagent]
+    let isCollapsed: Bool
+    var isHovering = false
+    var clear: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .bold))
+                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                .foregroundStyle(.tertiary)
+                .frame(width: 9)
+            Text(agents.count == 1 ? "1 subagent" : "\(agents.count) subagents")
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            ForEach(ClaudeSubagent.State.shownOrder, id: \.self) { state in
+                let count = agents.filter { $0.state == state }.count
+                if count > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: state.symbolName)
+                            .font(.system(size: 8, weight: .semibold))
+                        Text("\(count)")
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(state.color)
+                }
+            }
+            if agents.contains(where: { $0.state.isOver }) {
+                Button(action: clear) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(agents.allSatisfy(\.state.isOver) ? "Clear the subagents" : "Clear the finished subagents")
+            }
+        }
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .frame(height: 18)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(isHovering ? 0.06 : 0)))
+    }
+}
+
+extension ClaudeSubagent.State {
+    /// The order the header counts them in: what is at work first.
+    static let shownOrder: [Self] = [.working, .idle, .failed, .finished]
+
+    var symbolName: String {
+        switch self {
+        case .working: return ClaudeCodeLight.working.symbolName
+        case .idle: return "moon.zzz"
+        case .finished: return ClaudeCodeLight.clean.symbolName
+        case .failed: return "exclamationmark.triangle"
+        }
+    }
+
+    /// The session lights' colors: blue at work, green done, red failed, and yellow for
+    /// a teammate waiting on its next message.
+    var color: Color {
+        let tabColor: TerminalTabColor
+        switch self {
+        case .working: tabColor = .blue
+        case .idle: tabColor = .yellow
+        case .finished: tabColor = .green
+        case .failed: tabColor = .red
+        }
+        return tabColor.displayColor.map { Color(nsColor: $0) } ?? .secondary
+    }
+}
+
+/// A subagent or teammate of a session: what it was asked to do, and whether it works,
+/// waits for its next message or is done. Clicking it reads its transcript beside the
+/// session.
+private struct TabSidebarSubagentRow: View {
+    @ObservedObject var model: TabSidebarModel
+    let tab: TabSidebarModel.Tab
+    let agent: ClaudeSubagent
+    let indent: CGFloat
+
+    @State private var isHovering = false
+
+    var body: some View {
+        TabSidebarSubagentLabel(agent: agent, isHovering: isHovering)
+            .padding(.leading, indent)
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .onTapGesture { open() }
+            .help(help)
+    }
+
+    private var help: String {
+        let state: String
+        switch agent.state {
+        case .working: state = "Working"
+        case .idle: state = "Waiting for a message"
+        case .finished: state = "Done"
+        case .failed: state = "Failed on an API error"
+        }
+        let what = [agent.runsAs ?? agent.agentType, agent.name].compactMap { $0 }.joined(separator: " · ")
+        return [agent.title, what.isEmpty ? nil : what, state, agent.transcript == nil ? nil : "Click to read its transcript"]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+    }
+
+    private func open() {
+        guard let window = tab.window else { return }
+        model.select(window)
+        guard let transcript = agent.transcript else { return }
+        window.documentPaneModel.show(transcript, title: agent.title)
+    }
+}
+
+/// What a subagent's row shows: a turn arrow, its task, its type, and a symbol for what
+/// it is doing. Smaller than a session's row, so it reads as belonging to it.
+struct TabSidebarSubagentLabel: View {
+    let agent: ClaudeSubagent
+    var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.turn.down.right")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.tertiary)
+            Text(agent.title)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 4)
+            if let type = agent.shownType {
+                Text(type)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            Image(systemName: agent.state.symbolName)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(agent.state.color)
+                .frame(width: 12)
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(agent.state.isOver ? Color.secondary : Color.primary.opacity(0.85))
+        .padding(.horizontal, 8)
+        .frame(height: 20)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(isHovering ? 0.06 : 0)))
     }
 }
 
@@ -1299,6 +1519,9 @@ private struct TabSidebarTabRow: View {
                         settings.rowStyle = style
                     }
                 }
+            }
+            Button(settings.showsSubagents ? "Show Subagents ✓" : "Show Subagents") {
+                settings.showsSubagents.toggle()
             }
         }
     }

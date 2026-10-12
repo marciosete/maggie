@@ -10,9 +10,9 @@ final class DocumentViewerController: NSWindowController, NSWindowDelegate, NSTo
     private static var cascadePoint = NSPoint.zero
 
     /// Shows `file`, in the window already showing it when there is one.
-    static func show(_ file: URL) {
+    static func show(_ file: URL, title: String? = nil) {
         let key = file.standardizedFileURL
-        let controller = open[key] ?? DocumentViewerController(file: key)
+        let controller = open[key] ?? DocumentViewerController(file: key, title: title)
         open[key] = controller
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
@@ -24,16 +24,16 @@ final class DocumentViewerController: NSWindowController, NSWindowDelegate, NSTo
     private var editorView: DocumentEditorView?
     private var isEditing = false
 
-    private init(file: URL) {
+    private init(file: URL, title: String?) {
         self.file = file
-        documentView = DocumentWebView(file: file)
+        documentView = DocumentWebView(file: file, title: title)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 780, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = file.lastPathComponent
+        window.title = title ?? file.lastPathComponent
         window.subtitle = (file.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
         window.representedURL = file
         window.isReleasedWhenClosed = false
@@ -65,7 +65,10 @@ final class DocumentViewerController: NSWindowController, NSWindowDelegate, NSTo
     private static let openInAppItem = NSToolbarItem.Identifier("openInApp")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.editItem, Self.openInAppItem]
+        // A transcript is Claude Code's to write, so it is only read.
+        ClaudeTranscriptMarkdown.handles(file)
+            ? [.flexibleSpace, Self.openInAppItem]
+            : [.flexibleSpace, Self.editItem, Self.openInAppItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {

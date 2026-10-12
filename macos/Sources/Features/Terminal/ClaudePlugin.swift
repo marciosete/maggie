@@ -97,12 +97,14 @@ enum ClaudePlugin {
     }
 
     /// Adds the plugin to the terminal's plugin directories, after any the terminal or
-    /// the app's own environment already lists.
+    /// the app's own environment already lists, and tells its hooks where this app
+    /// reads their events (see `ClaudeSubagents`).
     static func addEnvironment(to configuration: inout Ghostty.SurfaceConfiguration) {
         guard let directory else { return }
         let existing = configuration.environmentVariables[environmentVariable]
             ?? ProcessInfo.processInfo.environment[environmentVariable]
         configuration.environmentVariables[environmentVariable] = pluginDirectories(existing, adding: directory.path)
+        configuration.environmentVariables[ClaudeSubagents.environmentVariable] = ClaudeSubagents.eventsDirectory.path
     }
 
     /// `existing`, a colon-separated list, with `path` on the end unless it is there.

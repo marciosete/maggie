@@ -4,20 +4,25 @@ import WebKit
 
 /// A Markdown file rendered in a web view. It rereads the file as it changes, so a
 /// document an agent is still writing keeps up, and follows the links in it: another
-/// Markdown file opens where this one is shown, the web opens in the browser.
+/// Markdown file opens where this one is shown, the web opens in the browser. A Claude
+/// Code transcript is shown as Markdown made from it (`ClaudeTranscriptMarkdown`).
 @MainActor
 final class DocumentWebView: NSView, WKNavigationDelegate {
     /// Called with a Markdown file a link in the document points at.
     var onOpenDocument: ((URL) -> Void)?
 
     private(set) var file: URL
+
+    /// The heading a transcript is shown under.
+    private(set) var title: String?
     private let webView: WKWebView
     private var watcher: FileChangeWatcher?
     /// Where the page was scrolled before a reload, to go back to once it loads.
     private var scrollToRestore: Double?
 
-    init(file: URL) {
+    init(file: URL, title: String? = nil) {
         self.file = file
+        self.title = title
 
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -45,9 +50,10 @@ final class DocumentWebView: NSView, WKNavigationDelegate {
     }
 
     /// Shows `file` instead, from the top.
-    func show(_ file: URL) {
-        guard file != self.file else { return }
+    func show(_ file: URL, title: String? = nil) {
+        guard file != self.file || title != self.title else { return }
         self.file = file
+        self.title = title
         scrollToRestore = nil
         watch()
         load()
@@ -62,9 +68,13 @@ final class DocumentWebView: NSView, WKNavigationDelegate {
             let message = "\(file.lastPathComponent) can't be read. It may have been moved or deleted."
             return MarkdownHTML.page(markdown: "_\(message)_", title: file.lastPathComponent, baseDirectory: nil)
         }
+        let text = String(decoding: data, as: UTF8.self)
+        let markdown = ClaudeTranscriptMarkdown.handles(file)
+            ? ClaudeTranscriptMarkdown.markdown(fromJSONL: text, title: title)
+            : text
         return MarkdownHTML.page(
-            markdown: String(decoding: data, as: UTF8.self),
-            title: file.lastPathComponent,
+            markdown: markdown,
+            title: title ?? file.lastPathComponent,
             baseDirectory: file.deletingLastPathComponent())
     }
 
@@ -153,17 +163,18 @@ final class DocumentWebView: NSView, WKNavigationDelegate {
 /// `DocumentWebView` for SwiftUI.
 struct DocumentWebRepresentable: NSViewRepresentable {
     let file: URL
+    var title: String?
     var onOpenDocument: ((URL) -> Void)?
 
     func makeNSView(context: Context) -> DocumentWebView {
-        let view = DocumentWebView(file: file)
+        let view = DocumentWebView(file: file, title: title)
         view.onOpenDocument = onOpenDocument
         return view
     }
 
     func updateNSView(_ view: DocumentWebView, context: Context) {
         view.onOpenDocument = onOpenDocument
-        view.show(file)
+        view.show(file, title: title)
     }
 }
 

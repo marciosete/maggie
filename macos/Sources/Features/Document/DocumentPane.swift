@@ -31,26 +31,36 @@ final class DocumentPaneSettings: ObservableObject {
 @MainActor
 final class DocumentPaneModel: ObservableObject {
     @Published private(set) var file: URL?
+
+    /// What the header calls the file in place of its name, such as the task of the
+    /// subagent whose transcript it is.
+    @Published private(set) var title: String?
     @Published var isEditing = false
 
     var isVisible: Bool { file != nil }
 
-    func show(_ file: URL) {
+    /// A transcript is Claude Code's to write, so it is only read.
+    var isReadOnly: Bool { file.map(ClaudeTranscriptMarkdown.handles) ?? false }
+
+    func show(_ file: URL, title: String? = nil) {
         let standardized = file.standardizedFileURL
         if standardized != self.file { isEditing = false }
         self.file = standardized
+        self.title = title
     }
 
     func close() {
         file = nil
+        title = nil
         isEditing = false
     }
 
     /// Moves the document into a window of its own and closes the pane.
     func popOut() {
         guard let file else { return }
+        let title = title
         close()
-        DocumentViewerController.show(file)
+        DocumentViewerController.show(file, title: title)
     }
 }
 
@@ -72,11 +82,11 @@ struct DocumentPaneView: View {
             if let file = model.file {
                 header(file)
                 Divider()
-                if model.isEditing {
+                if model.isEditing && !model.isReadOnly {
                     DocumentEditorRepresentable(file: file)
                         .id(file)
                 } else {
-                    DocumentWebRepresentable(file: file) { model.show($0) }
+                    DocumentWebRepresentable(file: file, title: model.title) { model.show($0) }
                 }
             }
         }
@@ -86,12 +96,12 @@ struct DocumentPaneView: View {
 
     private func header(_ file: URL) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "doc.text")
+            Image(systemName: model.isReadOnly ? "text.bubble" : "doc.text")
                 .foregroundStyle(.secondary)
                 .padding(.trailing, 2)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(file.lastPathComponent)
+                Text(model.title ?? file.lastPathComponent)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -105,7 +115,9 @@ struct DocumentPaneView: View {
 
             Spacer(minLength: 8)
 
-            if model.isEditing {
+            if model.isReadOnly {
+                EmptyView()
+            } else if model.isEditing {
                 PaneHeaderButton(symbol: "checkmark", help: "Done Editing", prominent: true) {
                     model.isEditing = false
                 }
