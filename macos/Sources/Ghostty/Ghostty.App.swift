@@ -829,18 +829,48 @@ extension Ghostty {
                 if target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface {
                     surfaceView = self.surfaceView(from: surface)
                 }
-                if let file = DocumentLink.markdownFile(in: action.url, relativeTo: surfaceView?.pwd) {
+                // The agent's directory too: one started with --worktree works in a
+                // worktree while the shell, whose directory the terminal reports,
+                // stays in the checkout.
+                // Actions arrive on the main thread, as reading the window below needs.
+                let foregroundPID = MainActor.assumeIsolated { surfaceView?.surfaceModel?.foregroundPID }
+                let agentDirectory = foregroundPID
+                    .flatMap { pid_t(exactly: $0) }
+                    .flatMap(RunningProcess.directory)
+                var directories: [String] = []
+                for directory in [surfaceView?.pwd, agentDirectory].compactMap({ $0 }) where !directories.contains(directory) {
+                    directories.append(directory)
+                }
+                var pane: DocumentPaneModel?
+                if let window = surfaceView?.window as? TerminalWindow, window.supportsTabSidebar {
+                    pane = window.documentPaneModel
+                }
+                @MainActor func show(_ file: URL) {
+                    if let pane {
+                        pane.show(file)
+                    } else {
+                        DocumentViewerController.show(file)
+                    }
+                }
+
+                if let file = DocumentLink.markdownFile(in: action.url, relativeTo: directories) {
                     // This runs with the renderer mutex held; let AppKit have the
                     // next turn of the main loop before the view changes.
-                    var pane: DocumentPaneModel?
-                    if let window = surfaceView?.window as? TerminalWindow, window.supportsTabSidebar {
-                        pane = window.documentPaneModel
-                    }
-                    DispatchQueue.main.async {
-                        if let pane {
-                            pane.show(file)
-                        } else {
-                            DocumentViewerController.show(file)
+                    DispatchQueue.main.async { show(file) }
+                    return true
+                }
+
+                // A relative Markdown path that isn't there as written may be the end
+                // of one: an agent names a file from a folder it was talking about,
+                // or the link caught only part of a path. It is looked for off the
+                // main thread, and a beep says when there is no one file it names.
+                let candidates = DocumentLink.candidates(action.url.trimmingCharacters(in: .whitespacesAndNewlines))
+                if !directories.isEmpty,
+                   let relative = candidates.first(where: { DocumentLink.isRelativeMarkdownPath($0) }) {
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let file = directories.lazy.compactMap { DocumentLink.markdownFile(endingWith: relative, under: $0) }.first
+                        DispatchQueue.main.async {
+                            if let file { show(file) } else { NSSound.beep() }
                         }
                     }
                     return true
