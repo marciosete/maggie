@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The app's settings: which coding agent new sessions start, and whether they start one.
-/// Everything else Ghostty configures is in its configuration file, which the view opens.
+/// The app's settings: which coding agent new sessions start, and whether they start one,
+/// and the mobile companion. Everything else Ghostty configures is in its configuration
+/// file, which the view opens.
 struct SettingsView: View {
     @ObservedObject private var agentSettings = CodingAgentSettings.shared
     @ObservedObject private var agentStart = AgentStart.shared
@@ -13,6 +14,16 @@ struct SettingsView: View {
     var openConfiguration: () -> Void = {}
 
     var body: some View {
+        TabView {
+            agents
+                .tabItem { Label("Agents", systemImage: "terminal") }
+            RemoteSettingsView()
+                .tabItem { Label("Mobile", systemImage: "iphone") }
+        }
+        .frame(width: 480, height: 560)
+    }
+
+    private var agents: some View {
         Form {
             Section {
                 ForEach(CodingAgent.allCases, id: \.self) { agent in
@@ -70,7 +81,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480)
         .task { await checkInstalled() }
     }
 

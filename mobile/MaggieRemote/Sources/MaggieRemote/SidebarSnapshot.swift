@@ -73,8 +73,15 @@ public struct SidebarSession: Codable, Equatable, Sendable, Identifiable {
     /// The light's words, as the Mac's hover card shows them.
     public var lightLabel: String?
 
-    /// How long it has been working or how long ago it finished, as the sidebar shows it.
-    public var elapsedLabel: String?
+    /// When the current request started, while working.
+    public var workingSince: Date?
+
+    /// When it stopped working or started waiting, once stopped.
+    public var stoppedSince: Date?
+
+    /// The files waiting to be committed while pending, the commits waiting to land
+    /// while unlanded.
+    public var badge: Int?
 
     /// It finished a request that hasn't been looked at.
     public var finishedUnseen: Bool
@@ -100,7 +107,9 @@ public struct SidebarSession: Codable, Equatable, Sendable, Identifiable {
         agent: AgentKind? = nil,
         light: SessionLight? = nil,
         lightLabel: String? = nil,
-        elapsedLabel: String? = nil,
+        workingSince: Date? = nil,
+        stoppedSince: Date? = nil,
+        badge: Int? = nil,
         finishedUnseen: Bool = false,
         model: String? = nil,
         branch: String? = nil,
@@ -117,7 +126,9 @@ public struct SidebarSession: Codable, Equatable, Sendable, Identifiable {
         self.agent = agent
         self.light = light
         self.lightLabel = lightLabel
-        self.elapsedLabel = elapsedLabel
+        self.workingSince = workingSince
+        self.stoppedSince = stoppedSince
+        self.badge = badge
         self.finishedUnseen = finishedUnseen
         self.model = model
         self.branch = branch
@@ -128,6 +139,43 @@ public struct SidebarSession: Codable, Equatable, Sendable, Identifiable {
         self.bell = bell
         self.isSelected = isSelected
         self.color = color
+    }
+}
+
+extension SidebarSession {
+    /// The few characters the Mac's sidebar shows beside the light at `now`: how long
+    /// it has been working, how many files or commits are left, or how long ago it
+    /// finished. The device works it out itself so the Mac needn't send a change every
+    /// second.
+    public func statusText(at now: Date) -> String? {
+        switch light {
+        case .working: return workingSince.map { SidebarTime.elapsed(since: $0, at: now) }
+        case .pending, .unlanded: return badge.map(String.init)
+        case .clean: return stoppedSince.map { SidebarTime.ago($0, at: now) }
+        case .waiting, nil: return nil
+        }
+    }
+}
+
+/// The Mac's `ClaudeCodeActivity` time formatting.
+public enum SidebarTime {
+    /// How long a request has been working, to the second while it is short: "12s",
+    /// "4m", "1h 5m".
+    public static func elapsed(since start: Date, at now: Date) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(start)))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        return minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
+    }
+
+    /// How long ago something happened, in its largest unit: "now", "4m", "3h", "2d".
+    public static func ago(_ date: Date, at now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(date))) / 60
+        if minutes < 1 { return "now" }
+        if minutes < 60 { return "\(minutes)m" }
+        if minutes < 60 * 24 { return "\(minutes / 60)h" }
+        return "\(minutes / (60 * 24))d"
     }
 }
 

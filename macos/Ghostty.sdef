@@ -13,6 +13,9 @@
         <cocoa key="frontWindow"/>
       </property>
       <property name="version" code="vers" type="text" access="r" description="The version number of the application."/>
+      <property name="mobile pairing link" code="GMPl" type="text" access="r" description="A new one-time link that pairs a device with Maggie Mobile, as the QR code in Settings › Mobile carries. Empty while Maggie Mobile is turned off.">
+        <cocoa key="mobilePairingLink"/>
+      </property>
       <responds-to command="perform action">
         <cocoa method="handlePerformActionScriptCommand:"/>
       </responds-to>

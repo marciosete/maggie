@@ -5,7 +5,7 @@ import PackageDescription
 // both apps depend on it so every message is typed in one place.
 let package = Package(
     name: "MaggieRemote",
-    platforms: [.macOS(.v14), .iOS(.v17)],
+    platforms: [.macOS(.v13), .iOS(.v17)],
     products: [
         .library(name: "MaggieRemote", targets: ["MaggieRemote"]),
     ],

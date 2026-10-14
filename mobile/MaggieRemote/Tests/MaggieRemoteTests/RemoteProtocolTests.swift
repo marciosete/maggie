@@ -4,7 +4,14 @@ import Testing
 
 struct RemoteProtocolTests {
     static let sidebar = SidebarSnapshot(rows: [
-        .session(SidebarSession(id: "s1", title: "loose", agent: .claude, light: .working, lightLabel: "Working", elapsedLabel: "3m")),
+        .session(SidebarSession(
+            id: "s1",
+            title: "loose",
+            agent: .claude,
+            light: .working,
+            lightLabel: "Working",
+            workingSince: Date(timeIntervalSince1970: 1_700_000_000)
+        )),
         .group(SidebarGroup(id: "g1", name: "Group", collapsed: true, color: .purple, sessions: [
             SidebarSession(id: "s2", title: "in group", agent: .codex, light: .waiting, bell: true),
         ])),
@@ -88,6 +95,24 @@ struct RemoteProtocolTests {
         #expect(sidebar.sessions.map(\.id) == ["s1", "s2", "s3"])
         #expect(sidebar.session(id: "s3")?.branch == "main")
         #expect(sidebar.folders.map(\.hasGit) == [true, false])
+    }
+
+    @Test func statusTextMatchesTheSidebar() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func text(_ light: SessionLight, seconds: TimeInterval, badge: Int? = nil) -> String? {
+            SidebarSession(id: "s", title: "s", light: light, workingSince: start, stoppedSince: start, badge: badge)
+                .statusText(at: start.addingTimeInterval(seconds))
+        }
+        #expect(text(.working, seconds: 12) == "12s")
+        #expect(text(.working, seconds: 4 * 60 + 5) == "4m")
+        #expect(text(.working, seconds: 65 * 60) == "1h 5m")
+        #expect(text(.working, seconds: 120 * 60) == "2h")
+        #expect(text(.waiting, seconds: 10) == nil)
+        #expect(text(.pending, seconds: 10, badge: 3) == "3")
+        #expect(text(.unlanded, seconds: 10) == nil)
+        #expect(text(.clean, seconds: 30) == "now")
+        #expect(text(.clean, seconds: 3 * 3600) == "3h")
+        #expect(text(.clean, seconds: 2 * 86400) == "2d")
     }
 
     @Test func mostUrgentLightMatchesTheMac() {

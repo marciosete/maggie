@@ -67,6 +67,17 @@ extension NSApplication {
         return scriptWindows.first
     }
 
+    /// Exposed as the AppleScript `mobile pairing link` property: a new one-time
+    /// pairing link, as the QR code in Settings › Mobile carries, so a script can pair
+    /// a device. Empty while Maggie Mobile is off.
+    @objc(mobilePairingLink)
+    var mobilePairingLink: String {
+        guard isAppleScriptEnabled else { return "" }
+        return MainActor.assumeIsolated {
+            RemoteService.shared.beginPairing()?.invitation.url.absoluteString ?? ""
+        }
+    }
+
     /// Enables AppleScript unique-ID lookup for window references.
     ///
     /// Required selector name pattern for element key `scriptWindows`:

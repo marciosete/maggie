@@ -340,6 +340,54 @@ final class TabSidebarModel: ObservableObject {
         unifyFolderSpace(windows)
 
         let selected = tabGroup?.selectedWindow ?? hostWindow
+        let newRows = Self.rows(of: windows, selected: selected, folderIDs: hostWindow.folderSpace.folderIDs)
+        if newRows != rows { rows = newRows }
+
+        // Refreshes run on the main loop.
+        let jump = MainActor.assumeIsolated {
+            hostWindow.terminalController?.ghostty.config.keyboardShortcut(for: "goto_tab:1")
+                .map { NSEvent.ModifierFlags(swiftUIFlags: $0.modifiers) }
+        }
+        if jump != jumpModifiers { jumpModifiers = jump }
+
+        // Only the sidebar that shows reads the info, since every tab's window has one.
+        if selected === hostWindow {
+            scheduleInfoRead()
+        } else {
+            stopReadingInfo()
+        }
+
+        // If the tab order was changed outside of the sidebar (e.g. "Merge All Windows"
+        // or a move_tab keybind), a group or folder can end up split. Put it back
+        // together. Only the selected window does this so the windows in a tab group
+        // don't all race.
+        if selected === hostWindow {
+            var ids: [UUID] = []
+            func collect(_ rows: [Row]) {
+                for row in rows {
+                    switch row {
+                    case .tab: break
+                    case .group(let section): ids.append(section.group.id)
+                    case .folder(let section):
+                        ids.append(section.folder.id)
+                        collect(section.rows)
+                    case .folderGroup(let section):
+                        ids.append(section.group.id)
+                        collect(section.folders.map(Row.folder))
+                    }
+                }
+            }
+            collect(newRows)
+            if Set(ids).count != ids.count {
+                DispatchQueue.main.async { [weak self] in self?.normalizeOrder() }
+            }
+        }
+    }
+
+    /// The rows for the tab windows of one native tab group, in tab order, then the
+    /// folders in `folderIDs` that have no sessions, each in its folder group where that
+    /// group shows. The mobile companion builds them too, sidebar shown or not.
+    static func rows(of windows: [TerminalWindow], selected: NSWindow?, folderIDs: [UUID]) -> [Row] {
         let folders = UserTabFolderStore.shared
         let folderGroups = UserTabFolderGroupStore.shared
         let tabs = windows.enumerated().map { index, window in
@@ -382,7 +430,7 @@ final class TabSidebarModel: ObservableObject {
             }
         }
         collect(newRows)
-        for id in hostWindow.folderSpace.folderIDs where !shownFolders.contains(id) {
+        for id in folderIDs where !shownFolders.contains(id) {
             guard let folder = folders[id] else { continue }
             let section = FolderSection(folder: folder, rows: [])
             guard let group = folderGroups[folder.groupID] else {
@@ -399,48 +447,7 @@ final class TabSidebarModel: ObservableObject {
                 newRows.append(.folderGroup(.init(group: group, folders: [section])))
             }
         }
-
-        if newRows != rows { rows = newRows }
-
-        // Refreshes run on the main loop.
-        let jump = MainActor.assumeIsolated {
-            hostWindow.terminalController?.ghostty.config.keyboardShortcut(for: "goto_tab:1")
-                .map { NSEvent.ModifierFlags(swiftUIFlags: $0.modifiers) }
-        }
-        if jump != jumpModifiers { jumpModifiers = jump }
-
-        // Only the sidebar that shows reads the info, since every tab's window has one.
-        if selected === hostWindow {
-            scheduleInfoRead()
-        } else {
-            stopReadingInfo()
-        }
-
-        // If the tab order was changed outside of the sidebar (e.g. "Merge All Windows"
-        // or a move_tab keybind), a group or folder can end up split. Put it back
-        // together. Only the selected window does this so the windows in a tab group
-        // don't all race.
-        if selected === hostWindow {
-            var ids: [UUID] = []
-            func collect(_ rows: [Row]) {
-                for row in rows {
-                    switch row {
-                    case .tab: break
-                    case .group(let section): ids.append(section.group.id)
-                    case .folder(let section):
-                        ids.append(section.folder.id)
-                        collect(section.rows)
-                    case .folderGroup(let section):
-                        ids.append(section.group.id)
-                        collect(section.folders.map(Row.folder))
-                    }
-                }
-            }
-            collect(newRows)
-            if Set(ids).count != ids.count {
-                DispatchQueue.main.async { [weak self] in self?.normalizeOrder() }
-            }
-        }
+        return newRows
     }
 
     /// The rows for `tabs`, nesting from `level` in: runs of tabs in the same folder

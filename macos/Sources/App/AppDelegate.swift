@@ -249,6 +249,9 @@ class AppDelegate: NSObject,
         // Keep the open windows and tabs saved so they can be opened again, and offer the
         // kept versions in the File menu, after the close items.
         TerminalWorkspace.shared.start(ghostty)
+
+        // Let Maggie Mobile connect, if turned on in Settings → Mobile.
+        MainActor.assumeIsolated { RemoteService.shared.startIfEnabled() }
         if let closeAll = menuCloseAllWindows, let menu = closeAll.menu {
             let item = NSMenuItem(
                 title: "Reopen Sessions from Backup…",
