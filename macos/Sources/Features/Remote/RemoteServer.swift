@@ -227,9 +227,14 @@ final class RemoteClient {
     private(set) var subscribedToSidebar = false
     private var helloTimer: Timer?
 
+    /// The sessions this device mirrors.
+    private let streams: RemoteTerminalStreams
+
     init(socket: RemoteSocket, service: RemoteService) {
         self.socket = socket
         self.service = service
+        streams = RemoteTerminalStreams(socket: socket, feed: service.feed)
+        streams.onClosed = { [weak self] closed in self?.send(.sessionClosed(closed)) }
     }
 
     func start() {
@@ -237,11 +242,18 @@ final class RemoteClient {
             MainActor.assumeIsolated {
                 guard let self, case .closed = state else { return }
                 self.helloTimer?.invalidate()
+                self.streams.closeAll()
                 self.service?.clientClosed(self)
             }
         }
         socket.onText = { [weak self] data in
             MainActor.assumeIsolated { self?.received(data) }
+        }
+        socket.onBinary = { [weak self] data in
+            MainActor.assumeIsolated {
+                guard let self, self.device != nil, let frame = try? RemoteFrame(decoding: data) else { return }
+                self.streams.input(frame)
+            }
         }
         socket.start()
 
@@ -258,7 +270,9 @@ final class RemoteClient {
         socket.send(message)
     }
 
+    /// Closes the connection. Its taps go first, while their mirrors are still alive.
     func close() {
+        streams.closeAll()
         socket.close()
     }
 
@@ -316,7 +330,7 @@ final class RemoteClient {
         send(.welcome(Welcome(hostName: Host.current().localizedName ?? "Mac", capabilities: Self.capabilities)))
     }
 
-    static let capabilities = ["sidebar", "newSession"]
+    static let capabilities = ["sidebar", "newSession", "terminal"]
 
     private func authenticated(_ device: RemoteDevice) {
         helloTimer?.invalidate()
@@ -352,8 +366,19 @@ final class RemoteClient {
             let reason = RemoteCommands.close(sessionID: request.id, force: request.force, feed: service.feed)
             send(.sessionClosed(SessionClosed(id: request.id, reason: reason)))
 
-        case .openSession(let ref), .leaveSession(let ref), .resyncSession(let ref):
-            send(.error(RemoteError(code: .badRequest, message: "This Mac can't mirror \(ref.id) yet.")))
+        case .openSession(let ref):
+            if case .failure = streams.open(sessionID: ref.id) {
+                send(.sessionClosed(SessionClosed(id: ref.id, reason: .notFound)))
+            }
+
+        case .leaveSession(let ref):
+            streams.leave(sessionID: ref.id)
+            send(.sessionClosed(SessionClosed(id: ref.id, reason: .left)))
+
+        case .resyncSession(let ref):
+            if !streams.resync(sessionID: ref.id), case .failure = streams.open(sessionID: ref.id) {
+                send(.sessionClosed(SessionClosed(id: ref.id, reason: .notFound)))
+            }
 
         case .registerPush(let push):
             service.devices.update(id: device.id) {
