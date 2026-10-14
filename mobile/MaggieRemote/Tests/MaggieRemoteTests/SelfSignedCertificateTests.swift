@@ -45,6 +45,20 @@ struct SelfSignedCertificateTests {
         #expect(CertificateFingerprint(certificate: der).bytes.count == 32)
     }
 
+    @Test func pinningAcceptsOnlyThePairedCertificate() throws {
+        let der = try SelfSignedCertificate.make(privateKey: try makeKey(), commonName: "paired")
+        let other = try SelfSignedCertificate.make(privateKey: try makeKey(), commonName: "paired")
+        let certificate = try #require(SecCertificateCreateWithData(nil, der as CFData))
+
+        var trust: SecTrust?
+        SecTrustCreateWithCertificates(certificate, SecPolicyCreateBasicX509(), &trust)
+        let secTrust = try #require(trust)
+        let presented = try #require(sec_trust_create(secTrust))
+
+        #expect(RemoteTLS.isPinned(presented, to: CertificateFingerprint(certificate: der)))
+        #expect(!RemoteTLS.isPinned(presented, to: CertificateFingerprint(certificate: other)))
+    }
+
     @Test func derLengthsAndIntegers() {
         typealias DER = SelfSignedCertificate.DER
         #expect(Array(DER.element(0x04, Data(count: 200)).prefix(3)) == [0x04, 0x81, 200])

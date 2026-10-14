@@ -55,9 +55,8 @@ public final class RemoteSocket: @unchecked Sendable {
             case .failed(let error):
                 self.finish(error.localizedDescription)
             case .waiting(let error):
-                // Unreachable for now: report it and keep the connection's own retry.
-                self.onState?(.closed(error.localizedDescription))
-                self.cancel()
+                // Unreachable for now. The owner decides when to try again.
+                self.finish(error.localizedDescription)
             case .cancelled:
                 self.finish(nil)
             default:
@@ -174,9 +173,15 @@ public enum RemoteTLS {
         let tls = NWProtocolTLS.Options()
         sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
         sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, trust, complete in
-            complete(Self.leafFingerprint(of: trust) == fingerprint)
+            complete(Self.isPinned(trust, to: fingerprint))
         }, queue)
         return parameters(tls: tls)
+    }
+
+    /// Whether the certificate a peer presented is the one paired with. Nothing else
+    /// about it matters: it is self-signed, and its name is whatever the Mac is called.
+    public static func isPinned(_ trust: sec_trust_t, to fingerprint: CertificateFingerprint) -> Bool {
+        leafFingerprint(of: trust) == fingerprint
     }
 
     /// The fingerprint of the certificate a peer presented.
