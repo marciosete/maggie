@@ -458,6 +458,26 @@ pub const Surface = struct {
     /// that getTitle works without the implementer needing to save it.
     title: ?[:0]const u8 = null,
 
+    /// The host's pty tap (ghostty_surface_set_pty_tap), if any. Guarded by
+    /// the core surface's renderer state mutex, like the termio tap.
+    pty_tap: ?PtyTap = null,
+
+    const PtyTap = struct {
+        callback: *const fn (?*anyopaque, *const PtyTapEvent) callconv(.c) void,
+        userdata: ?*anyopaque,
+    };
+
+    /// C type: ghostty_pty_tap_event_s
+    const PtyTapEvent = extern struct {
+        kind: Kind,
+        bytes: ?[*]const u8,
+        len: usize,
+        columns: u16,
+        rows: u16,
+
+        const Kind = enum(c_int) { snapshot, output, resize };
+    };
+
     /// Surface initialization options.
     pub const Options = extern struct {
         /// The platform that this surface is being initialized for and
@@ -641,8 +661,63 @@ pub const Surface = struct {
         // Remove ourselves from the list of known surfaces in the app.
         self.app.core_app.deleteSurface(self);
 
+        // The host's tap userdata may not outlive us, so no more events.
+        self.setPtyTap(null);
+
         // Clean up our core surface so that all the rendering and IO stop.
         self.core_surface.deinit();
+    }
+
+    /// Install, replace or remove (null) the host's pty tap.
+    pub fn setPtyTap(self: *Surface, tap: ?PtyTap) void {
+        const core_surface = &self.core_surface;
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
+        self.pty_tap = tap;
+        core_surface.io.setPtyTapLocked(if (tap != null) .{
+            .userdata = self,
+            .callback = ptyTapEvent,
+        } else null);
+    }
+
+    /// Ask for a fresh snapshot on the host's pty tap.
+    pub fn requestPtyTapSnapshot(self: *Surface) void {
+        const core_surface = &self.core_surface;
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
+        core_surface.io.requestPtyTapSnapshotLocked();
+    }
+
+    fn ptyTapEvent(
+        userdata: ?*anyopaque,
+        event: @import("../termio.zig").PtyTap.Event,
+    ) void {
+        const self: *Surface = @ptrCast(@alignCast(userdata.?));
+        const tap = self.pty_tap orelse return;
+        const c_event: PtyTapEvent = switch (event) {
+            .snapshot => |snapshot| .{
+                .kind = .snapshot,
+                .bytes = snapshot.vt.ptr,
+                .len = snapshot.vt.len,
+                .columns = snapshot.cols,
+                .rows = snapshot.rows,
+            },
+            .output => |bytes| .{
+                .kind = .output,
+                .bytes = bytes.ptr,
+                .len = bytes.len,
+                .columns = 0,
+                .rows = 0,
+            },
+            .resize => |size| .{
+                .kind = .resize,
+                .bytes = null,
+                .len = 0,
+                .columns = size.cols,
+                .rows = size.rows,
+            },
+        };
+        tap.callback(tap.userdata, &c_event);
     }
 
     /// Initialize the inspector instance. A surface can only have one
@@ -1936,6 +2011,34 @@ pub const CAPI = struct {
         return true;
     }
 
+    /// The terminal as VT sequences, for a mirror; see PtyTap.screenVt.
+    export fn ghostty_surface_read_screen_vt(surface: *Surface, result: *Text) bool {
+        const alloc = global.alloc();
+        surface.core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        const vt = @import("../termio.zig").PtyTap.screenVt(
+            alloc,
+            surface.core_surface.renderer_state.terminal,
+            @import("../termio.zig").PtyTap.history_rows,
+        );
+        surface.core_surface.renderer_state.mutex.unlock(global.io());
+        const bytes = vt catch |err| {
+            log.warn("error writing screen as VT err={}", .{err});
+            return false;
+        };
+        defer alloc.free(bytes);
+        const text = alloc.dupeZ(u8, bytes) catch return false;
+
+        result.* = .{
+            .tl_px_x = -1,
+            .tl_px_y = -1,
+            .offset_start = 0,
+            .offset_len = 0,
+            .text = text.ptr,
+            .text_len = text.len,
+        };
+        return true;
+    }
+
     export fn ghostty_surface_free_text(_: *Surface, ptr: *Text) void {
         ptr.deinit();
     }
@@ -2073,6 +2176,36 @@ pub const CAPI = struct {
         len: usize,
     ) void {
         surface.textCallback(ptr[0..len]);
+    }
+
+    /// Write bytes straight to the pty, bypassing key encoding and paste
+    /// handling. For input a remote terminal has already encoded.
+    export fn ghostty_surface_pty_write(
+        surface: *Surface,
+        ptr: [*]const u8,
+        len: usize,
+    ) void {
+        surface.core_surface.ptyWrite(ptr[0..len]) catch |err| {
+            log.err("error writing to pty err={}", .{err});
+        };
+    }
+
+    /// Install, replace or remove (null callback) a pty tap. See the
+    /// header for the event stream's contract.
+    export fn ghostty_surface_set_pty_tap(
+        surface: *Surface,
+        callback: ?*const fn (?*anyopaque, *const Surface.PtyTapEvent) callconv(.c) void,
+        userdata: ?*anyopaque,
+    ) void {
+        surface.setPtyTap(if (callback) |cb| .{
+            .callback = cb,
+            .userdata = userdata,
+        } else null);
+    }
+
+    /// Ask the pty tap for a fresh snapshot.
+    export fn ghostty_surface_pty_tap_snapshot(surface: *Surface) void {
+        surface.requestPtyTapSnapshot();
     }
 
     /// Set the preedit text for the surface. This is used for IME

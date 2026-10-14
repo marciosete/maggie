@@ -12,6 +12,7 @@ const EnvMap = std.process.Environ.Map;
 const posix = std.posix;
 const termio = @import("../termio.zig");
 const StreamHandler = @import("stream_handler.zig").StreamHandler;
+const PtyTap = @import("PtyTap.zig");
 const terminalpkg = @import("../terminal/main.zig");
 const global = @import("../global.zig");
 const xev = global.xev;
@@ -82,6 +83,10 @@ pending_input: ?[]u8 = null,
 
 /// When the subprocess started, for the pending input's grace period.
 pending_input_start: std.Io.Timestamp = undefined,
+
+/// An observer of everything the pty prints, for mirroring this terminal
+/// elsewhere. Read and written only with the renderer state mutex held.
+pty_tap: ?PtyTap = null,
 
 /// How long after the subprocess starts its first prompt still gets the
 /// pending input. Generous for a slow shell startup, short for a program
@@ -584,6 +589,9 @@ pub fn resize(
             },
         );
 
+        // A pty tap's mirror resizes at the same point in the stream.
+        if (self.pty_tap) |*tap| tap.resized(self.terminal.cols, self.terminal.rows);
+
         // If we have size reporting enabled we need to send a report.
         if (self.terminal.modes.get(.in_band_size_reports)) {
             try self.sizeReportLocked(td, .mode_2048);
@@ -742,10 +750,34 @@ pub fn processOutput(self: *Termio, buf: []const u8) void {
     self.processOutputLocked(buf);
 }
 
+/// Install, replace or remove (null) the pty tap. A new tap first receives
+/// a snapshot. The renderer state mutex must be held.
+pub fn setPtyTapLocked(self: *Termio, tap: ?PtyTap) void {
+    self.pty_tap = tap;
+    self.requestPtyTapSnapshotLocked();
+}
+
+/// Ask for a fresh snapshot on the pty tap, for a mirror that fell behind
+/// and dropped output. The renderer state mutex must be held.
+pub fn requestPtyTapSnapshotLocked(self: *Termio) void {
+    if (self.pty_tap) |*tap| tap.requestSnapshot(
+        self.alloc,
+        &self.terminal,
+        &self.terminal_stream,
+    );
+}
+
 /// Process output from readdata but the lock is already held.
-fn processOutputLocked(self: *Termio, buf: []const u8) void {
+fn processOutputLocked(self: *Termio, buf_: []const u8) void {
     // Schedule a render. We can call this first because we have the lock.
     self.terminal_stream.handler.queueRender() catch unreachable;
+
+    // The pty tap sees the output first, and may process the part of it
+    // that a pending snapshot waits on.
+    const buf = if (self.pty_tap) |*tap|
+        tap.output(self.alloc, &self.terminal, &self.terminal_stream, buf_)
+    else
+        buf_;
 
     // Whenever a character is typed, we ensure the cursor is in the
     // non-blink state so it is rendered if visible. If we're under

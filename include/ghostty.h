@@ -529,6 +529,36 @@ typedef struct {
   uint32_t cell_height_px;
 } ghostty_surface_size_s;
 
+// Pty tap: a mirror of everything a surface's pty prints.
+//
+// The events form one ordered stream. SNAPSHOT is the terminal as VT
+// sequences (see ghostty_surface_read_screen_vt) with its grid size in
+// columns and rows, taken with the stream parser at ground. OUTPUT is bytes
+// the pty printed, delivered before the terminal processes them. RESIZE is
+// a grid resize (columns, rows). A mirror that writes the latest SNAPSHOT
+// into a fresh terminal of its size and applies each later event in order
+// holds the same terminal.
+//
+// The callback runs with the terminal locked, on the thread that installed
+// the tap or requested the snapshot, or on the pty read thread. It must copy
+// what it needs and return quickly, and must not call back into the
+// surface. `bytes` is only valid for the duration of the call.
+typedef enum {
+  GHOSTTY_PTY_TAP_SNAPSHOT,
+  GHOSTTY_PTY_TAP_OUTPUT,
+  GHOSTTY_PTY_TAP_RESIZE,
+} ghostty_pty_tap_event_e;
+
+typedef struct {
+  ghostty_pty_tap_event_e kind;
+  const uint8_t* bytes;
+  uintptr_t len;
+  uint16_t columns;
+  uint16_t rows;
+} ghostty_pty_tap_event_s;
+
+typedef void (*ghostty_pty_tap_cb)(void*, const ghostty_pty_tap_event_s*);
+
 // Config types
 
 // config.Path
@@ -1202,6 +1232,26 @@ GHOSTTY_API bool ghostty_surface_key_is_binding(ghostty_surface_t,
                                                    ghostty_input_key_s,
                                                    ghostty_binding_flags_e*);
 GHOSTTY_API void ghostty_surface_text(ghostty_surface_t, const char*, uintptr_t);
+// Bytes straight to the pty, with no key encoding or paste handling.
+GHOSTTY_API void ghostty_surface_pty_write(ghostty_surface_t,
+                                              const uint8_t*,
+                                              uintptr_t);
+// Install, replace or remove (NULL callback) the pty tap. A new tap first
+// receives a SNAPSHOT, during this call or once the pty's output brings the
+// parser to ground. When this returns after removal, no further callback
+// runs, so userdata may be freed. Freeing the surface removes the tap.
+GHOSTTY_API void ghostty_surface_set_pty_tap(ghostty_surface_t,
+                                                ghostty_pty_tap_cb,
+                                                void*);
+// Ask the tap for a fresh SNAPSHOT, for a mirror that fell behind. Output
+// before it is not delivered; the snapshot contains it.
+GHOSTTY_API void ghostty_surface_pty_tap_snapshot(ghostty_surface_t);
+// The terminal as VT sequences: written into a fresh terminal of the same
+// size, they reproduce its screen, the last 2000 rows of scrollback, styles,
+// colors, cursor, modes (including those the key encoder needs) and the
+// alternate screen if it shows. Free with ghostty_surface_free_text.
+GHOSTTY_API bool ghostty_surface_read_screen_vt(ghostty_surface_t,
+                                                ghostty_text_s*);
 GHOSTTY_API void ghostty_surface_preedit(ghostty_surface_t, const char*, uintptr_t);
 GHOSTTY_API bool ghostty_surface_mouse_captured(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_mouse_button(ghostty_surface_t,

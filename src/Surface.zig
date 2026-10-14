@@ -3396,6 +3396,13 @@ pub fn textCallback(self: *Surface, text: []const u8) !void {
     try self.completeClipboardPaste(text, true);
 }
 
+/// Write bytes straight to the pty, as a remote terminal already encoded
+/// them: no key encoding, paste handling or bracketing.
+pub fn ptyWrite(self: *Surface, data: []const u8) !void {
+    if (data.len == 0) return;
+    self.queueIo(try termio.Message.writeReq(self.alloc, data), .unlocked);
+}
+
 /// Callback for when the surface is fully visible or not, regardless
 /// of focus state. This is used to pause rendering when the surface
 /// is not visible, and also re-render when it becomes visible again.
