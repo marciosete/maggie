@@ -10,6 +10,27 @@
   - Output: `macos/build/<configuration>/Ghostty.app` (e.g. `macos/build/Debug/Ghostty.app`)
 - Run unit tests directly with `macos/build.nu --action test`
 
+## Maggie Mobile
+
+The iPhone and iPad companion lives in `mobile/` (the plan is
+`fork/plans/mobile-companion.md`, the human setup `fork/plans/mobile-companion-setup.md`):
+
+- `mobile/MaggieRemote/`: the protocol package, shared by the Mac and the device. The
+  Mac app compiles its sources directly (a synchronized folder in the Xcode project),
+  since the release build's `xcodebuild -target` doesn't build source packages, so
+  don't `import MaggieRemote` in `macos/`. Test with `swift test` in that folder.
+- `macos/Sources/Features/Remote/`: the Mac's server (Settings › Mobile). Its tests
+  are `macos/Tests/Remote/`.
+- `mobile/MaggieMobile/`: the iOS app. `fork/mobile-build.sh [build | test]` builds
+  libghostty-vt's xcframework and the app, and runs its tests on an iPad and an iPhone
+  simulator. `fork/mobile-archive.sh` archives it for TestFlight.
+- `mobile/Tools/remote-cli/`: a command-line client (`pair`, `sidebar`, `new`,
+  `tail`, `send`, `close`) for checking a Mac end to end. Pair it with the link from
+  `osascript -e 'tell application id "<bundle id>" to get mobile pairing link'`.
+- The UI tests in `mobile/MaggieMobile/MaggieMobileUITests` drive the app against a
+  running Mac when given `TEST_RUNNER_MAGGIE_PAIRING_LINK` and friends; without them
+  they skip.
+
 ## AppleScript
 
 - The AppleScript scripting definition is in `macos/Ghostty.sdef`.
