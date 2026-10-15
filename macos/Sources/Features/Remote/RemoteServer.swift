@@ -15,7 +15,7 @@ final class RemoteService: ObservableObject {
     static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.mitchellh.ghostty", category: "remote")
 
     /// Apart for each build, so Maggie Dev's devices aren't Maggie's.
-    static var directory: URL {
+    nonisolated static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "com.mitchellh.ghostty", isDirectory: true)
             .appendingPathComponent("Remote", isDirectory: true)
@@ -70,14 +70,19 @@ final class RemoteService: ObservableObject {
 
     let devices: RemoteDeviceStore
     let pairing = RemotePairing()
-    let feed = RemoteSessionFeed()
+    let feed: RemoteSessionFeed
+    let push: RemotePush
 
     private var listener: NWListener?
     private var clients: [ObjectIdentifier: RemoteClient] = [:]
 
     init(devices: RemoteDeviceStore? = nil) {
         let defaults = UserDefaults.ghostty
-        self.devices = devices ?? RemoteDeviceStore(file: RemoteDeviceStore.defaultFile)
+        let devices = devices ?? RemoteDeviceStore(file: RemoteDeviceStore.defaultFile)
+        self.devices = devices
+        let feed = RemoteSessionFeed()
+        self.feed = feed
+        push = RemotePush(devices: devices, ids: feed.ids)
         isEnabled = defaults.bool(forKey: Keys.enabled)
         let savedPort = defaults.integer(forKey: Keys.port)
         port = (1...65535).contains(savedPort) ? UInt16(savedPort) : RemoteProtocol.defaultPort
@@ -350,7 +355,9 @@ final class RemoteClient {
             service.devices.update(id: device.id) { $0.name = hello.deviceName }
         }
         authenticated(device)
-        send(.welcome(Welcome(hostName: Host.current().localizedName ?? "Mac", capabilities: Self.capabilities)))
+        var capabilities = Self.capabilities
+        if service.push.isEnabled, service.push.isConfigured { capabilities.append("push") }
+        send(.welcome(Welcome(hostName: Host.current().localizedName ?? "Mac", capabilities: capabilities)))
     }
 
     static let capabilities = ["sidebar", "newSession", "terminal"]

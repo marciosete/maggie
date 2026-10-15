@@ -56,6 +56,8 @@ struct RemoteSettingsView: View {
                 Text("Devices")
             }
 
+            RemotePushSettings(push: service.push)
+
             if let fingerprint = service.fingerprint {
                 Section("Certificate") {
                     Text(fingerprint.displayString)
@@ -102,6 +104,49 @@ struct RemoteSettingsView: View {
             service.port = port
         } else {
             portText = String(service.port)
+        }
+    }
+}
+
+/// Push notifications: the switch, and the APNs key from the Apple developer account.
+struct RemotePushSettings: View {
+    @ObservedObject var push: RemotePush
+    @State private var error: String?
+
+    var body: some View {
+        Section {
+            Toggle("Notify devices when a session waits or finishes", isOn: $push.isEnabled)
+            TextField("Key ID", text: $push.keyID)
+            TextField("Team ID", text: $push.teamID)
+            TextField("App Bundle ID", text: $push.topic)
+            LabeledContent("Key") {
+                HStack {
+                    Text(push.hasKey ? "AuthKey.p8 loaded" : "None").foregroundStyle(.secondary)
+                    Button("Choose .p8…", action: chooseKey)
+                }
+            }
+            if let message = error ?? push.lastResult {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Push Notifications")
+        } footer: {
+            Text("Create an APNs key in your Apple developer account and choose its .p8 here. These pushes are apart from the Mac's own notifications.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func chooseKey() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.init(filenameExtension: "p8") ?? .data]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try push.importKey(from: url)
+            error = nil
+        } catch {
+            self.error = "That isn't an APNs .p8 key."
         }
     }
 }
