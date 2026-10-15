@@ -49,6 +49,11 @@ struct RemoteProtocolTests {
         .resyncSession(SessionRef(id: "s1")),
         .registerPush(RegisterPush(token: "abcd", environment: .sandbox)),
         .ping(Ping(nonce: .max)),
+        .fetchBoard,
+        .moveCard(MoveCard(kind: .workItem, id: "w1", column: "done")),
+        .fetchUsage,
+        .renameSession(RenameSession(id: "s1", title: "Release notes")),
+        .peekSession(SessionRef(id: "s1")),
     ]
 
     static let hostMessages: [HostMessage] = [
@@ -60,6 +65,21 @@ struct RemoteProtocolTests {
         .sessionCreated(SessionCreated(id: "s9", folderID: "f1")),
         .error(RemoteError(code: .unauthorized, message: "Unknown device")),
         .pong(Ping(nonce: 42)),
+        .board(BoardSnapshot(
+            columns: [BoardColumn(id: "todo", label: "To Do", color: .blue, icon: "circle")],
+            cards: [
+                BoardCard(kind: .workItem, id: "w1", title: "Mobile", column: "todo", color: .purple, colorLabel: "Feature", sessionIDs: ["s1"]),
+                BoardCard(kind: .session, id: "s2", title: "Fix", column: "todo", light: .waiting),
+            ])),
+        .usage(RemoteUsageReport(
+            rangeLabel: "Last 7 days",
+            costUsd: 12.5,
+            tokens: 1_200_000,
+            sessions: 9,
+            latestCostUsd: 2.25,
+            latestTokens: 200_000,
+            models: [.init(provider: "claude", model: "opus", costUsd: nil, tokens: 900_000)])),
+        .sessionPeek(SessionPeek(id: "s1", lines: ["$ ls", "README.md"])),
     ]
 
     @Test(arguments: clientMessages)

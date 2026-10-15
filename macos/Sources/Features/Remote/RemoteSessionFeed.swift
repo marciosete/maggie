@@ -147,6 +147,11 @@ final class RemoteSessionFeed {
         onChange?(new)
     }
 
+    /// Every session, in sidebar order.
+    func allTabs() -> [TabSidebarModel.Tab] {
+        currentRows().flatMap(\.allTabs)
+    }
+
     /// The sidebar rows of every window's native tab group.
     private func currentRows() -> [TabSidebarModel.Row] {
         var seen = Set<ObjectIdentifier>()

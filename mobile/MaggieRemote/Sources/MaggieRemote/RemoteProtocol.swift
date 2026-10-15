@@ -51,6 +51,22 @@ public enum ClientMessage: Equatable, Sendable {
     case registerPush(RegisterPush)
 
     case ping(Ping)
+
+    /// Send the session board once.
+    case fetchBoard
+
+    /// Move a card to another column of the board, at its end.
+    case moveCard(MoveCard)
+
+    /// Send the usage summary once.
+    case fetchUsage
+
+    /// Give a session a title, as renaming its tab does; empty goes back to the
+    /// terminal's own.
+    case renameSession(RenameSession)
+
+    /// Send the last lines a session shows, for a preview.
+    case peekSession(SessionRef)
 }
 
 /// A message the Mac sends the device.
@@ -75,6 +91,12 @@ public enum HostMessage: Equatable, Sendable {
     case error(RemoteError)
 
     case pong(Ping)
+
+    case board(BoardSnapshot)
+
+    case usage(RemoteUsageReport)
+
+    case sessionPeek(SessionPeek)
 }
 
 // MARK: - Payloads
@@ -290,6 +312,11 @@ extension ClientMessage: Codable {
         case .resyncSession: return "resyncSession"
         case .registerPush: return "registerPush"
         case .ping: return "ping"
+        case .fetchBoard: return "fetchBoard"
+        case .moveCard: return "moveCard"
+        case .fetchUsage: return "fetchUsage"
+        case .renameSession: return "renameSession"
+        case .peekSession: return "peekSession"
         }
     }
 
@@ -309,6 +336,10 @@ extension ClientMessage: Codable {
         case .resyncSession(let body): try container.encode(body, forKey: .body)
         case .registerPush(let body): try container.encode(body, forKey: .body)
         case .ping(let body): try container.encode(body, forKey: .body)
+        case .fetchBoard, .fetchUsage: break
+        case .moveCard(let body): try container.encode(body, forKey: .body)
+        case .renameSession(let body): try container.encode(body, forKey: .body)
+        case .peekSession(let body): try container.encode(body, forKey: .body)
         }
     }
 
@@ -327,6 +358,11 @@ extension ClientMessage: Codable {
         case "resyncSession": self = .resyncSession(try container.decode(SessionRef.self, forKey: .body))
         case "registerPush": self = .registerPush(try container.decode(RegisterPush.self, forKey: .body))
         case "ping": self = .ping(try container.decode(Ping.self, forKey: .body))
+        case "fetchBoard": self = .fetchBoard
+        case "moveCard": self = .moveCard(try container.decode(MoveCard.self, forKey: .body))
+        case "fetchUsage": self = .fetchUsage
+        case "renameSession": self = .renameSession(try container.decode(RenameSession.self, forKey: .body))
+        case "peekSession": self = .peekSession(try container.decode(SessionRef.self, forKey: .body))
         default: throw RemoteProtocolError.unknownKind(kind)
         }
     }
@@ -343,6 +379,9 @@ extension HostMessage: Codable {
         case .sessionCreated: return "sessionCreated"
         case .error: return "error"
         case .pong: return "pong"
+        case .board: return "board"
+        case .usage: return "usage"
+        case .sessionPeek: return "sessionPeek"
         }
     }
 
@@ -359,6 +398,9 @@ extension HostMessage: Codable {
         case .sessionCreated(let body): try container.encode(body, forKey: .body)
         case .error(let body): try container.encode(body, forKey: .body)
         case .pong(let body): try container.encode(body, forKey: .body)
+        case .board(let body): try container.encode(body, forKey: .body)
+        case .usage(let body): try container.encode(body, forKey: .body)
+        case .sessionPeek(let body): try container.encode(body, forKey: .body)
         }
     }
 
@@ -374,6 +416,9 @@ extension HostMessage: Codable {
         case "sessionCreated": self = .sessionCreated(try container.decode(SessionCreated.self, forKey: .body))
         case "error": self = .error(try container.decode(RemoteError.self, forKey: .body))
         case "pong": self = .pong(try container.decode(Ping.self, forKey: .body))
+        case "board": self = .board(try container.decode(BoardSnapshot.self, forKey: .body))
+        case "usage": self = .usage(try container.decode(RemoteUsageReport.self, forKey: .body))
+        case "sessionPeek": self = .sessionPeek(try container.decode(SessionPeek.self, forKey: .body))
         default: throw RemoteProtocolError.unknownKind(kind)
         }
     }

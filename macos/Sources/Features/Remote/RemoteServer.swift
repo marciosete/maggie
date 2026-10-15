@@ -360,7 +360,16 @@ final class RemoteClient {
         send(.welcome(Welcome(hostName: Host.current().localizedName ?? "Mac", capabilities: capabilities)))
     }
 
-    static let capabilities = ["sidebar", "newSession", "terminal"]
+    static let capabilities = ["sidebar", "newSession", "terminal", "board", "usage"]
+
+    private func sendBoard() {
+        guard let feed = service?.feed else { return }
+        send(.board(RemoteBoard.snapshot(
+            tabs: feed.allTabs(),
+            items: WorkItemStore.shared.items,
+            settings: .shared,
+            id: { tab in tab.window.map(feed.ids.id(for:)) ?? tab.id.debugDescription })))
+    }
 
     private func authenticated(_ device: RemoteDevice) {
         helloTimer?.invalidate()
@@ -418,6 +427,40 @@ final class RemoteClient {
 
         case .ping(let ping):
             send(.pong(ping))
+
+        case .fetchBoard:
+            sendBoard()
+
+        case .moveCard(let request):
+            if !RemoteBoard.move(request, tabs: service.feed.allTabs(), feed: service.feed) {
+                send(.error(RemoteError(code: .notFound, message: "That card or column is no longer on the Mac's board.")))
+            }
+            sendBoard()
+
+        case .fetchUsage:
+            Task { [weak self] in
+                guard let report = await RemoteUsage.current() else {
+                    self?.send(.error(RemoteError(code: .notFound, message: "The Mac has no usage to show yet.")))
+                    return
+                }
+                self?.send(.usage(report))
+            }
+
+        case .renameSession(let request):
+            guard let controller = service.feed.ids.window(for: request.id)?.terminalController else {
+                send(.sessionClosed(SessionClosed(id: request.id, reason: .notFound)))
+                return
+            }
+            let title = request.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            controller.titleOverride = title.isEmpty ? nil : title
+            service.feed.setNeedsUpdate()
+
+        case .peekSession(let ref):
+            if let peek = RemotePeek.peek(sessionID: ref.id, feed: service.feed) {
+                send(.sessionPeek(peek))
+            } else {
+                send(.sessionClosed(SessionClosed(id: ref.id, reason: .notFound)))
+            }
         }
     }
 }
