@@ -32,6 +32,7 @@ final class RemoteService: ObservableObject {
         static let enabled = "RemoteEnabled"
         static let port = "RemotePort"
         static let host = "RemoteAdvertisedHost"
+        static let homeFolder = "RemoteHomeFolder"
     }
 
     @Published var isEnabled: Bool {
@@ -57,6 +58,21 @@ final class RemoteService: ObservableObject {
     /// The address the pairing QR code gives devices. Empty uses `suggestedHost`.
     @Published var advertisedHost: String {
         didSet { UserDefaults.ghostty.set(advertisedHost, forKey: Keys.host) }
+    }
+
+    /// The folder devices start sessions in and browse below. Empty is the user's home.
+    @Published var homeFolderSetting: String {
+        didSet { UserDefaults.ghostty.set(homeFolderSetting, forKey: Keys.homeFolder) }
+    }
+
+    /// `homeFolderSetting` as a folder that exists, else the user's home.
+    var homeFolder: URL {
+        let path = (homeFolderSetting as NSString).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        if !path.isEmpty, FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return URL(fileURLWithPath: path).standardizedFileURL
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
     }
 
     /// The best address found for this Mac, preferring its Tailscale name.
@@ -87,6 +103,7 @@ final class RemoteService: ObservableObject {
         let savedPort = defaults.integer(forKey: Keys.port)
         port = (1...65535).contains(savedPort) ? UInt16(savedPort) : RemoteProtocol.defaultPort
         advertisedHost = defaults.string(forKey: Keys.host) ?? ""
+        homeFolderSetting = defaults.string(forKey: Keys.homeFolder) ?? ""
         suggestedHost = Host.current().localizedName ?? "localhost"
 
         feed.onChange = { [weak self] snapshot in
@@ -356,11 +373,14 @@ final class RemoteClient {
         }
         authenticated(device)
         var capabilities = Self.capabilities
-        if service.push.isEnabled, service.push.isConfigured { capabilities.append("push") }
+        if service.push.isEnabled, service.push.isConfigured { capabilities.append(RemoteCapability.push) }
         send(.welcome(Welcome(hostName: Host.current().localizedName ?? "Mac", capabilities: capabilities)))
     }
 
-    static let capabilities = ["sidebar", "newSession", "terminal", "board", "usage"]
+    static let capabilities = [
+        "sidebar", "newSession", "terminal", "board", "usage",
+        RemoteCapability.fitSession, RemoteCapability.homeFolder,
+    ]
 
     private func sendBoard() {
         guard let feed = service?.feed else { return }
@@ -391,9 +411,20 @@ final class RemoteClient {
             send(.sidebar(service.feed.snapshot))
 
         case .newSession(let request):
-            switch RemoteCommands.newSession(folderID: request.folderID, feed: service.feed) {
+            switch RemoteCommands.newSession(request, home: service.homeFolder, feed: service.feed) {
             case .success(let created): send(.sessionCreated(created))
             case .failure(let error): send(.error(error))
+            }
+
+        case .listFolders(let request):
+            switch RemoteFolders.list(request.path, home: service.homeFolder) {
+            case .success(let listing): send(.folders(listing))
+            case .failure(let error): send(.error(error))
+            }
+
+        case .fitSession(let request):
+            if !streams.fit(request) {
+                send(.sessionClosed(SessionClosed(id: request.id, reason: .notFound)))
             }
 
         case .focusSession(let ref):

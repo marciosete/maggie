@@ -54,6 +54,12 @@ struct RemoteProtocolTests {
         .fetchUsage,
         .renameSession(RenameSession(id: "s1", title: "Release notes")),
         .peekSession(SessionRef(id: "s1")),
+        .newSession(NewSession()),
+        .newSession(NewSession(path: "/Users/me/projects/orca")),
+        .fitSession(FitSession(id: "s1", columns: 92, rows: 40)),
+        .fitSession(FitSession(id: "s1", columns: nil, rows: nil)),
+        .listFolders(ListFolders()),
+        .listFolders(ListFolders(path: "/Users/me/projects")),
     ]
 
     static let hostMessages: [HostMessage] = [
@@ -80,6 +86,13 @@ struct RemoteProtocolTests {
             latestTokens: 200_000,
             models: [.init(provider: "claude", model: "opus", costUsd: nil, tokens: 900_000)])),
         .sessionPeek(SessionPeek(id: "s1", lines: ["$ ls", "README.md"])),
+        .sessionCreated(SessionCreated(id: "s10", folderID: nil)),
+        .folders(FolderListing(
+            path: "/Users/me/projects",
+            displayPath: "~/projects",
+            parent: "/Users/me",
+            isRepository: false,
+            entries: [.init(name: "orca", path: "/Users/me/projects/orca", isRepository: true)])),
     ]
 
     @Test(arguments: clientMessages)
@@ -100,6 +113,12 @@ struct RemoteProtocolTests {
         #expect(json["version"] as? Int == RemoteProtocol.version)
         #expect(json["kind"] as? String == "openSession")
         #expect((json["body"] as? [String: Any])?["id"] as? String == "s1")
+    }
+
+    /// A device that knows only folder sessions still reads as one from a newer Mac.
+    @Test func aNewSessionWithAFolderReadsAsBefore() throws {
+        let old = Data(#"{"version":1,"kind":"newSession","body":{"folderID":"f1"}}"#.utf8)
+        #expect(try JSONDecoder().decode(ClientMessage.self, from: old) == .newSession(NewSession(folderID: "f1")))
     }
 
     @Test func unknownKindIsReported() throws {

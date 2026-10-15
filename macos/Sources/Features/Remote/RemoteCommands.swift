@@ -3,6 +3,44 @@ import AppKit
 /// What a device can ask the Mac to do with its sessions, done the way the sidebar does.
 @MainActor
 enum RemoteCommands {
+    /// Opens a session where `request` says: in a sidebar folder, in a folder under
+    /// `home` (opened in the sidebar first, or found there), or in `home` itself, outside
+    /// any folder, like a plain new tab.
+    static func newSession(_ request: NewSession, home: URL, feed: RemoteSessionFeed) -> Result<SessionCreated, RemoteError> {
+        if let folderID = request.folderID {
+            return newSession(folderID: folderID, feed: feed)
+        }
+        let windows = NSApp.windows.compactMap { $0 as? TerminalWindow }
+        guard let host = windows.first(where: \.isKeyWindow) ?? windows.first else {
+            return .failure(RemoteError(code: .internal, message: "The Mac has no window to open a session in."))
+        }
+
+        guard let path = request.path else {
+            var configuration = Ghostty.SurfaceConfiguration()
+            configuration.workingDirectory = home.path
+            guard let window = host.tabSidebarModel.newTab(configuration: configuration) else {
+                return .failure(RemoteError(code: .internal, message: "The Mac could not open a session."))
+            }
+            feed.setNeedsUpdate()
+            return .success(SessionCreated(id: feed.ids.id(for: window), folderID: nil))
+        }
+
+        guard let url = RemoteFolders.resolve(path, home: home) else {
+            return .failure(RemoteError(code: .notFound, message: "That folder isn't inside the Mac's home folder for devices."))
+        }
+        // A folder already open in a sidebar is used as it is.
+        let open = windows.lazy.compactMap { window in
+            window.folderSpace.folderIDs.first { UserTabFolderStore.shared[$0]?.url.standardizedFileURL == url }
+        }.first
+        guard let folderID = open ?? host.tabSidebarModel.openFolder(at: url),
+              let window = (windows.first { $0.folderSpace.folderIDs.contains(folderID) } ?? host)
+                .tabSidebarModel.newTab(inFolder: folderID) else {
+            return .failure(RemoteError(code: .internal, message: "The Mac could not open a session."))
+        }
+        feed.setNeedsUpdate()
+        return .success(SessionCreated(id: feed.ids.id(for: window), folderID: folderID.uuidString))
+    }
+
     /// Opens a session in a folder, as the folder's New Session does, so the agent starts
     /// in it as in any new tab. Only folders holding a git checkout take one.
     static func newSession(folderID: String, feed: RemoteSessionFeed) -> Result<SessionCreated, RemoteError> {

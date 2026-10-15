@@ -1,3 +1,4 @@
+import AppKit
 import CoreImage.CIFilterBuiltins
 import SwiftUI
 
@@ -25,7 +26,7 @@ struct RemoteSettingsView: View {
             } header: {
                 Text("Mobile")
             } footer: {
-                Text("Your phone or iPad reaches this Mac over Tailscale, at home or away. Only devices paired here can connect.")
+                Text("Your phone or iPad reaches this Mac on the same network, or from anywhere when Tailscale runs on both. Only devices paired here can connect.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -37,6 +38,27 @@ struct RemoteSettingsView: View {
                     }
                 }
                 TextField("Address in the QR code", text: $service.advertisedHost, prompt: Text(service.suggestedHost))
+            }
+
+            Section {
+                LabeledContent("Home folder") {
+                    HStack {
+                        Text((service.homeFolder.path as NSString).abbreviatingWithTildeInPath)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Button("Choose…") { chooseHomeFolder() }
+                        if !service.homeFolderSetting.isEmpty {
+                            Button("Reset") { service.homeFolderSetting = "" }
+                        }
+                    }
+                }
+            } header: {
+                Text("Sessions")
+            } footer: {
+                Text("A new session from a device starts here, outside any sidebar folder, and devices can open any folder inside it.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -75,6 +97,18 @@ struct RemoteSettingsView: View {
         .sheet(isPresented: $pairing) {
             RemotePairingSheet(pairing: service.pairing) { pairing = false }
         }
+    }
+
+    private func chooseHomeFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = service.homeFolder
+        panel.prompt = "Choose"
+        panel.message = "Choose the folder devices start sessions in and can open folders from"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        service.homeFolderSetting = url.path
     }
 
     private var isListening: Bool {

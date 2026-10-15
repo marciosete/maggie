@@ -509,8 +509,29 @@ extension Ghostty {
             contentSize = size
         }
 
+        /// A grid a device mirroring this surface asked for (see `RemoteFit`), so lines
+        /// wrap at the device's edge. The surface is kept no larger, drawn at the view's
+        /// top left, until the device lets go.
+        var deviceGridLimit: (columns: UInt16, rows: UInt16)? {
+            didSet { sizeDidChange(contentSize) }
+        }
+
         private func setSurfaceSize(width: UInt32, height: UInt32) {
             guard let surface = self.surface else { return }
+
+            // Under a device's limit, the size is whole cells less, with the padding the
+            // surface has now, so the grid lands on the limit in one resize.
+            var width = width
+            var height = height
+            let current = ghostty_surface_size(surface)
+            if let limit = deviceGridLimit, current.cell_width_px > 0, current.cell_height_px > 0 {
+                let gridWidth = UInt32(current.columns) * current.cell_width_px
+                let gridHeight = UInt32(current.rows) * current.cell_height_px
+                let paddingX = current.width_px > gridWidth ? current.width_px - gridWidth : 0
+                let paddingY = current.height_px > gridHeight ? current.height_px - gridHeight : 0
+                width = min(width, paddingX + UInt32(limit.columns) * current.cell_width_px)
+                height = min(height, paddingY + UInt32(limit.rows) * current.cell_height_px)
+            }
 
             // Update our core surface
             ghostty_surface_set_size(surface, width, height)

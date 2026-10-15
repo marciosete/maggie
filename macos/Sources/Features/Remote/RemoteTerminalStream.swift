@@ -120,6 +120,10 @@ final class RemoteMirror: @unchecked Sendable {
         assert(hub == nil, "a mirror must be detached before it goes")
     }
 
+    /// The grid the device asked for, which follows the mirror to another split. Main
+    /// thread only.
+    private var fit: RemoteFit.Size?
+
     /// Mirrors `view`'s surface, replacing any other, starting with a snapshot.
     @MainActor
     func attach(_ view: Ghostty.SurfaceView) {
@@ -128,14 +132,24 @@ final class RemoteMirror: @unchecked Sendable {
         surfaceView = view
         hub = RemoteTapHub.hub(for: model)
         hub?.subscribe(self)
+        if let fit { RemoteFit.set(fit, by: self, on: view) }
     }
 
-    /// Stops mirroring. Nothing more is received after this returns.
+    /// Stops mirroring. Nothing more is received after this returns, and the surface
+    /// gets back the size it had before this device's fit.
     @MainActor
     func detach() {
+        if let surfaceView { RemoteFit.set(nil, by: self, on: surfaceView) }
         hub?.unsubscribe(self)
         hub = nil
         surfaceView = nil
+    }
+
+    /// Sizes the surface to the device's grid, or with nil gives it its own size back.
+    @MainActor
+    func setFit(_ size: RemoteFit.Size?) {
+        fit = size
+        if let surfaceView { RemoteFit.set(size, by: self, on: surfaceView) }
     }
 
     @MainActor
@@ -356,6 +370,18 @@ final class RemoteTerminalStreams {
         if mirrors.isEmpty { stopWatching() }
     }
 
+    /// Sizes a mirrored session's terminal to the device's grid; false when it isn't
+    /// mirrored.
+    func fit(_ request: FitSession) -> Bool {
+        guard let mirror = mirrors[request.id] else { return false }
+        if let columns = request.columns, let rows = request.rows, columns > 0, rows > 0 {
+            mirror.setFit(RemoteFit.Size(columns: max(columns, RemoteFit.minimum.columns), rows: max(rows, RemoteFit.minimum.rows)))
+        } else {
+            mirror.setFit(nil)
+        }
+        return true
+    }
+
     func resync(sessionID: String) -> Bool {
         guard let mirror = mirrors[sessionID] else { return false }
         mirror.requestSnapshot()
@@ -403,5 +429,50 @@ final class RemoteTerminalStreams {
             }
         }
         if mirrors.isEmpty { stopWatching() }
+    }
+}
+
+/// The grids devices asked for, per terminal: a device that shows a session at a larger
+/// text size asks for fewer columns and rows, so lines wrap at its edge. With several
+/// devices on one terminal the smallest grid wins; when the last lets go, the terminal
+/// fills its view again.
+@MainActor
+enum RemoteFit {
+    struct Size: Equatable {
+        var columns: UInt16
+        var rows: UInt16
+    }
+
+    /// The smallest grid a device can ask for, so a slip of the fingers can't leave the
+    /// Mac with an unusable terminal.
+    static let minimum = Size(columns: 20, rows: 5)
+
+    private struct Entry {
+        weak var view: Ghostty.SurfaceView?
+        var sizes: [ObjectIdentifier: Size]
+    }
+
+    private static var entries: [ObjectIdentifier: Entry] = [:]
+
+    /// Sets or clears `owner`'s grid for `view`, and applies the smallest of them all.
+    static func set(_ size: Size?, by owner: AnyObject, on view: Ghostty.SurfaceView) {
+        let key = ObjectIdentifier(view)
+        var entry = entries[key] ?? Entry(view: view, sizes: [:])
+        entry.sizes[ObjectIdentifier(owner)] = size
+        entries[key] = entry.sizes.isEmpty ? nil : entry
+        entries = entries.filter { $0.value.view != nil }
+
+        let limit = smallest(Array(entry.sizes.values))
+        let current = view.deviceGridLimit.map { Size(columns: $0.columns, rows: $0.rows) }
+        guard limit != current else { return }
+        view.deviceGridLimit = limit.map { ($0.columns, $0.rows) }
+    }
+
+    /// The grid that fits every one of `sizes`; none for none.
+    static func smallest(_ sizes: [Size]) -> Size? {
+        guard let first = sizes.first else { return nil }
+        return sizes.dropFirst().reduce(first) {
+            Size(columns: min($0.columns, $1.columns), rows: min($0.rows, $1.rows))
+        }
     }
 }

@@ -67,6 +67,15 @@ public enum ClientMessage: Equatable, Sendable {
 
     /// Send the last lines a session shows, for a preview.
     case peekSession(SessionRef)
+
+    /// Size a session's terminal to what the device shows at its text size, so lines
+    /// wrap at the device's edge; no size gives the Mac its own size back. Needs the
+    /// `fitSession` capability.
+    case fitSession(FitSession)
+
+    /// List the folders inside one under the Mac's home folder for devices. Needs the
+    /// `homeFolder` capability.
+    case listFolders(ListFolders)
 }
 
 /// A message the Mac sends the device.
@@ -97,6 +106,9 @@ public enum HostMessage: Equatable, Sendable {
     case usage(RemoteUsageReport)
 
     case sessionPeek(SessionPeek)
+
+    /// The answer to `listFolders`.
+    case folders(FolderListing)
 }
 
 // MARK: - Payloads
@@ -177,22 +189,95 @@ public struct CloseSession: Codable, Equatable, Sendable {
     }
 }
 
+/// Where a new session opens: one of the Mac's sidebar folders, a folder from
+/// `listFolders` (opened in the sidebar first), or with neither, the Mac's home folder
+/// for devices, outside any sidebar folder.
 public struct NewSession: Codable, Equatable, Sendable {
-    public var folderID: String
+    public var folderID: String?
+    public var path: String?
 
-    public init(folderID: String) {
+    public init(folderID: String? = nil, path: String? = nil) {
         self.folderID = folderID
+        self.path = path
     }
 }
 
 public struct SessionCreated: Codable, Equatable, Sendable {
     public var id: String
-    public var folderID: String
 
-    public init(id: String, folderID: String) {
+    /// The sidebar folder it opened in; none for the home folder.
+    public var folderID: String?
+
+    public init(id: String, folderID: String?) {
         self.id = id
         self.folderID = folderID
     }
+}
+
+/// The grid a device wants for a session, or none to give it back to the Mac.
+public struct FitSession: Codable, Equatable, Sendable {
+    public var id: String
+    public var columns: UInt16?
+    public var rows: UInt16?
+
+    public init(id: String, columns: UInt16?, rows: UInt16?) {
+        self.id = id
+        self.columns = columns
+        self.rows = rows
+    }
+}
+
+public struct ListFolders: Codable, Equatable, Sendable {
+    /// A path from an earlier listing; none for the home folder itself.
+    public var path: String?
+
+    public init(path: String? = nil) {
+        self.path = path
+    }
+}
+
+/// The folders directly inside one, under the Mac's home folder for devices.
+public struct FolderListing: Codable, Equatable, Sendable {
+    public struct Entry: Codable, Equatable, Sendable, Identifiable {
+        public var name: String
+        public var path: String
+
+        /// Holds a repository, so a session there gets an agent like the sidebar's.
+        public var isRepository: Bool
+
+        public var id: String { path }
+
+        public init(name: String, path: String, isRepository: Bool) {
+            self.name = name
+            self.path = path
+            self.isRepository = isRepository
+        }
+    }
+
+    public var path: String
+
+    /// `path` as the Mac shows it, such as `~/projects`.
+    public var displayPath: String
+
+    /// The folder above, while still inside the home folder.
+    public var parent: String?
+    public var isRepository: Bool
+    public var entries: [Entry]
+
+    public init(path: String, displayPath: String, parent: String?, isRepository: Bool, entries: [Entry]) {
+        self.path = path
+        self.displayPath = displayPath
+        self.parent = parent
+        self.isRepository = isRepository
+        self.entries = entries
+    }
+}
+
+/// What `Welcome.capabilities` may list.
+public enum RemoteCapability {
+    public static let push = "push"
+    public static let fitSession = "fitSession"
+    public static let homeFolder = "homeFolder"
 }
 
 public struct SessionOpened: Codable, Equatable, Sendable {
@@ -317,6 +402,8 @@ extension ClientMessage: Codable {
         case .fetchUsage: return "fetchUsage"
         case .renameSession: return "renameSession"
         case .peekSession: return "peekSession"
+        case .fitSession: return "fitSession"
+        case .listFolders: return "listFolders"
         }
     }
 
@@ -340,6 +427,8 @@ extension ClientMessage: Codable {
         case .moveCard(let body): try container.encode(body, forKey: .body)
         case .renameSession(let body): try container.encode(body, forKey: .body)
         case .peekSession(let body): try container.encode(body, forKey: .body)
+        case .fitSession(let body): try container.encode(body, forKey: .body)
+        case .listFolders(let body): try container.encode(body, forKey: .body)
         }
     }
 
@@ -363,6 +452,8 @@ extension ClientMessage: Codable {
         case "fetchUsage": self = .fetchUsage
         case "renameSession": self = .renameSession(try container.decode(RenameSession.self, forKey: .body))
         case "peekSession": self = .peekSession(try container.decode(SessionRef.self, forKey: .body))
+        case "fitSession": self = .fitSession(try container.decode(FitSession.self, forKey: .body))
+        case "listFolders": self = .listFolders(try container.decode(ListFolders.self, forKey: .body))
         default: throw RemoteProtocolError.unknownKind(kind)
         }
     }
@@ -382,6 +473,7 @@ extension HostMessage: Codable {
         case .board: return "board"
         case .usage: return "usage"
         case .sessionPeek: return "sessionPeek"
+        case .folders: return "folders"
         }
     }
 
@@ -401,6 +493,7 @@ extension HostMessage: Codable {
         case .board(let body): try container.encode(body, forKey: .body)
         case .usage(let body): try container.encode(body, forKey: .body)
         case .sessionPeek(let body): try container.encode(body, forKey: .body)
+        case .folders(let body): try container.encode(body, forKey: .body)
         }
     }
 
@@ -419,6 +512,7 @@ extension HostMessage: Codable {
         case "board": self = .board(try container.decode(BoardSnapshot.self, forKey: .body))
         case "usage": self = .usage(try container.decode(RemoteUsageReport.self, forKey: .body))
         case "sessionPeek": self = .sessionPeek(try container.decode(SessionPeek.self, forKey: .body))
+        case "folders": self = .folders(try container.decode(FolderListing.self, forKey: .body))
         default: throw RemoteProtocolError.unknownKind(kind)
         }
     }
