@@ -91,7 +91,7 @@ struct RemoteOutputBuffer {
 ///
 /// The tap calls in on the pty's read thread with the terminal locked, so it only copies
 /// into the buffer. A serial queue sends what piled up, every 8 ms or at 16 KB.
-final class RemoteMirror: @unchecked Sendable {
+final class RemoteMirror: @unchecked Sendable, RemoteFitOwner {
     let stream: UInt32
     let sessionID: String
 
@@ -124,6 +124,9 @@ final class RemoteMirror: @unchecked Sendable {
     /// thread only.
     private var fit: RemoteFit.Size?
 
+    /// The device's name, for the Mac's note on a terminal it sized. Main thread only.
+    private var deviceName = "a device"
+
     /// Mirrors `view`'s surface, replacing any other, starting with a snapshot.
     @MainActor
     func attach(_ view: Ghostty.SurfaceView) {
@@ -132,14 +135,14 @@ final class RemoteMirror: @unchecked Sendable {
         surfaceView = view
         hub = RemoteTapHub.hub(for: model)
         hub?.subscribe(self)
-        if let fit { RemoteFit.set(fit, by: self, on: view) }
+        if let fit { RemoteFit.set(fit, by: self, deviceName: deviceName, on: view) }
     }
 
     /// Stops mirroring. Nothing more is received after this returns, and the surface
     /// gets back the size it had before this device's fit.
     @MainActor
     func detach() {
-        if let surfaceView { RemoteFit.set(nil, by: self, on: surfaceView) }
+        if let surfaceView { RemoteFit.set(nil, by: self, deviceName: deviceName, on: surfaceView) }
         hub?.unsubscribe(self)
         hub = nil
         surfaceView = nil
@@ -147,14 +150,23 @@ final class RemoteMirror: @unchecked Sendable {
 
     /// Sizes the surface to the device's grid, or with nil gives it its own size back.
     @MainActor
-    func setFit(_ size: RemoteFit.Size?) {
+    func setFit(_ size: RemoteFit.Size?, deviceName: String) {
         fit = size
-        if let surfaceView { RemoteFit.set(size, by: self, on: surfaceView) }
+        self.deviceName = deviceName
+        if let surfaceView { RemoteFit.set(size, by: self, deviceName: deviceName, on: surfaceView) }
     }
 
     @MainActor
     func requestSnapshot() {
         hub?.requestSnapshot(for: self)
+    }
+
+    /// The Mac used the terminal and took its size back: forget the device's grid, so
+    /// following focus to another split doesn't ask again, and tell the device.
+    @MainActor
+    func fitTakenBack() {
+        fit = nil
+        socket.send(.fitReleased(SessionRef(id: sessionID)))
     }
 
     /// Bytes the device encoded, straight to the pty.
@@ -375,12 +387,16 @@ final class RemoteTerminalStreams {
     func fit(_ request: FitSession) -> Bool {
         guard let mirror = mirrors[request.id] else { return false }
         if let columns = request.columns, let rows = request.rows, columns > 0, rows > 0 {
-            mirror.setFit(RemoteFit.Size(columns: max(columns, RemoteFit.minimum.columns), rows: max(rows, RemoteFit.minimum.rows)))
+            let size = RemoteFit.Size(columns: max(columns, RemoteFit.minimum.columns), rows: max(rows, RemoteFit.minimum.rows))
+            mirror.setFit(size, deviceName: deviceName)
         } else {
-            mirror.setFit(nil)
+            mirror.setFit(nil, deviceName: deviceName)
         }
         return true
     }
+
+    /// The device's name, once it said hello.
+    var deviceName = "a device"
 
     func resync(sessionID: String) -> Bool {
         guard let mirror = mirrors[sessionID] else { return false }
@@ -432,10 +448,17 @@ final class RemoteTerminalStreams {
     }
 }
 
+/// What asks `RemoteFit` for a grid: a device's mirror of one session.
+protocol RemoteFitOwner: AnyObject {
+    /// The terminal was used on the Mac, which took its size back.
+    @MainActor func fitTakenBack()
+}
+
 /// The grids devices asked for, per terminal: a device that shows a session at a larger
 /// text size asks for fewer columns and rows, so lines wrap at its edge. With several
 /// devices on one terminal the smallest grid wins; when the last lets go, the terminal
-/// fills its view again.
+/// fills its view again. Typing or clicking in the terminal on the Mac, or its Use Full
+/// Window button, takes the size back from every device at once.
 @MainActor
 enum RemoteFit {
     struct Size: Equatable {
@@ -447,25 +470,56 @@ enum RemoteFit {
     /// Mac with an unusable terminal.
     static let minimum = Size(columns: 20, rows: 5)
 
+    private struct Request {
+        weak var owner: RemoteFitOwner?
+        var size: Size
+        var deviceName: String
+    }
+
     private struct Entry {
         weak var view: Ghostty.SurfaceView?
-        var sizes: [ObjectIdentifier: Size]
+        var requests: [ObjectIdentifier: Request]
     }
 
     private static var entries: [ObjectIdentifier: Entry] = [:]
 
-    /// Sets or clears `owner`'s grid for `view`, and applies the smallest of them all.
-    static func set(_ size: Size?, by owner: AnyObject, on view: Ghostty.SurfaceView) {
-        let key = ObjectIdentifier(view)
-        var entry = entries[key] ?? Entry(view: view, sizes: [:])
-        entry.sizes[ObjectIdentifier(owner)] = size
-        entries[key] = entry.sizes.isEmpty ? nil : entry
-        entries = entries.filter { $0.value.view != nil }
+    private static let takeBackObserver = NotificationCenter.default.addObserver(
+        forName: Ghostty.SurfaceView.didTakeBackFromDevice,
+        object: nil,
+        queue: .main
+    ) { notification in
+        guard let view = notification.object as? Ghostty.SurfaceView else { return }
+        MainActor.assumeIsolated { takeBack(view) }
+    }
 
-        let limit = smallest(Array(entry.sizes.values))
-        let current = view.deviceGridLimit.map { Size(columns: $0.columns, rows: $0.rows) }
-        guard limit != current else { return }
-        view.deviceGridLimit = limit.map { ($0.columns, $0.rows) }
+    /// Sets or clears `owner`'s grid for `view`, and applies the smallest of them all.
+    static func set(_ size: Size?, by owner: RemoteFitOwner, deviceName: String, on view: Ghostty.SurfaceView) {
+        _ = takeBackObserver
+        let key = ObjectIdentifier(view)
+        var entry = entries[key] ?? Entry(view: view, requests: [:])
+        entry.requests[ObjectIdentifier(owner)] = size.map { Request(owner: owner, size: $0, deviceName: deviceName) }
+        entries[key] = entry.requests.isEmpty ? nil : entry
+        entries = entries.filter { $0.value.view != nil }
+        apply(entry, to: view)
+    }
+
+    /// The Mac uses `view` again: every device's grid for it goes, and each is told.
+    static func takeBack(_ view: Ghostty.SurfaceView) {
+        let owners = entries.removeValue(forKey: ObjectIdentifier(view))?.requests.values.compactMap(\.owner) ?? []
+        view.deviceGrid = nil
+        owners.forEach { $0.fitTakenBack() }
+    }
+
+    private static func apply(_ entry: Entry, to view: Ghostty.SurfaceView) {
+        let requests = Array(entry.requests.values)
+        guard let limit = smallest(requests.map(\.size)) else {
+            view.deviceGrid = nil
+            return
+        }
+        // Named after the device whose grid is the narrowest.
+        let name = requests.min { $0.size.columns < $1.size.columns }?.deviceName ?? "a device"
+        let grid = Ghostty.SurfaceView.DeviceGrid(columns: limit.columns, rows: limit.rows, deviceName: name)
+        if view.deviceGrid != grid { view.deviceGrid = grid }
     }
 
     /// The grid that fits every one of `sizes`; none for none.

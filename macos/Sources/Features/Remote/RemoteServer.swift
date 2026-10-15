@@ -394,6 +394,7 @@ final class RemoteClient {
     private func authenticated(_ device: RemoteDevice) {
         helloTimer?.invalidate()
         self.device = device
+        streams.deviceName = device.name
         service?.devices.update(id: device.id) { $0.lastSeen = Date() }
         service?.clientsChanged()
     }

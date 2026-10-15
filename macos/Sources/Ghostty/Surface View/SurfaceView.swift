@@ -90,6 +90,15 @@ extension Ghostty {
                     }
                 }
 
+                #if os(macOS)
+                // A device sized this terminal: say so in the room it left, with a way back.
+                if let grid = surfaceView.deviceGrid {
+                    DeviceGridNote(deviceName: grid.deviceName) {
+                        surfaceView.takeBackFromDevice()
+                    }
+                }
+                #endif
+
                 // Show key state indicator for active key tables and/or pending key sequences
                 KeyStateIndicator(
                     keyTables: surfaceView.keyTables,
@@ -977,6 +986,38 @@ extension Ghostty {
 
     /// A badge overlay that indicates a surface is in readonly mode.
     /// Positioned in the top-right corner and styled to be noticeable but unobtrusive.
+    #if os(macOS)
+    /// Shown while a phone or iPad has this terminal sized to its screen: the terminal
+    /// fills only part of the view until the device lets go, or until it's used here.
+    struct DeviceGridNote: View {
+        let deviceName: String
+        let onTakeBack: () -> Void
+
+        var body: some View {
+            VStack {
+                HStack {
+                    Spacer()
+                    HStack(spacing: 8) {
+                        Image(systemName: "ipad.landscape")
+                        Text("Sized for \(deviceName)")
+                            .lineLimit(1)
+                        Button("Use Full Window", action: onTakeBack)
+                            .buttonStyle(.borderless)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.regularMaterial, in: Capsule())
+                    .foregroundStyle(.secondary)
+                    .help("Typing or clicking in this terminal also gives it the full window back.")
+                }
+                .padding(8)
+                Spacer()
+            }
+        }
+    }
+    #endif
+
     struct ReadonlyBadge: View {
         let onDisable: () -> Void
 

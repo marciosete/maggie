@@ -509,11 +509,32 @@ extension Ghostty {
             contentSize = size
         }
 
-        /// A grid a device mirroring this surface asked for (see `RemoteFit`), so lines
+        /// A grid a device mirroring this surface asked for, and which device.
+        struct DeviceGrid: Equatable {
+            var columns: UInt16
+            var rows: UInt16
+            var deviceName: String
+        }
+
+        /// The grid a device mirroring this surface asked for (see `RemoteFit`), so lines
         /// wrap at the device's edge. The surface is kept no larger, drawn at the view's
-        /// top left, until the device lets go.
-        var deviceGridLimit: (columns: UInt16, rows: UInt16)? {
-            didSet { sizeDidChange(contentSize) }
+        /// top left, until the device lets go or this Mac takes the surface back by
+        /// typing or clicking in it.
+        @Published var deviceGrid: DeviceGrid? {
+            didSet {
+                guard deviceGrid?.columns != oldValue?.columns || deviceGrid?.rows != oldValue?.rows else { return }
+                sizeDidChange(contentSize)
+            }
+        }
+
+        /// Posted with a surface that a device sized when it's used here, so the Mac's
+        /// own size wins.
+        static let didTakeBackFromDevice = Foundation.Notification.Name("com.mitchellh.ghostty.surfaceDidTakeBackFromDevice")
+
+        /// Used here while a device holds the size: give it back to the Mac.
+        func takeBackFromDevice() {
+            guard deviceGrid != nil else { return }
+            NotificationCenter.default.post(name: Self.didTakeBackFromDevice, object: self)
         }
 
         private func setSurfaceSize(width: UInt32, height: UInt32) {
@@ -524,7 +545,7 @@ extension Ghostty {
             var width = width
             var height = height
             let current = ghostty_surface_size(surface)
-            if let limit = deviceGridLimit, current.cell_width_px > 0, current.cell_height_px > 0 {
+            if let limit = deviceGrid, current.cell_width_px > 0, current.cell_height_px > 0 {
                 let gridWidth = UInt32(current.columns) * current.cell_width_px
                 let gridHeight = UInt32(current.rows) * current.cell_height_px
                 let paddingX = current.width_px > gridWidth ? current.width_px - gridWidth : 0
@@ -947,6 +968,7 @@ extension Ghostty {
         }
 
         override func mouseDown(with event: NSEvent) {
+            takeBackFromDevice()
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
             ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
@@ -1145,6 +1167,7 @@ extension Ghostty {
         }
 
         override func keyDown(with event: NSEvent) {
+            takeBackFromDevice()
             guard let surface = self.surface else {
                 self.interpretKeyEvents([event])
                 return

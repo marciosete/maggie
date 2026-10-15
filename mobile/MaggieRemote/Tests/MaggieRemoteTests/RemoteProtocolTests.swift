@@ -87,6 +87,7 @@ struct RemoteProtocolTests {
             models: [.init(provider: "claude", model: "opus", costUsd: nil, tokens: 900_000)])),
         .sessionPeek(SessionPeek(id: "s1", lines: ["$ ls", "README.md"])),
         .sessionCreated(SessionCreated(id: "s10", folderID: nil)),
+        .fitReleased(SessionRef(id: "s1")),
         .folders(FolderListing(
             path: "/Users/me/projects",
             displayPath: "~/projects",

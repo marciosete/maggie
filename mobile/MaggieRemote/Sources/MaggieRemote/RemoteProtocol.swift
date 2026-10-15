@@ -109,6 +109,10 @@ public enum HostMessage: Equatable, Sendable {
 
     /// The answer to `listFolders`.
     case folders(FolderListing)
+
+    /// The session was used on the Mac, which took back the size `fitSession` asked
+    /// for. The device shows the Mac's size until it asks again.
+    case fitReleased(SessionRef)
 }
 
 // MARK: - Payloads
@@ -474,6 +478,7 @@ extension HostMessage: Codable {
         case .usage: return "usage"
         case .sessionPeek: return "sessionPeek"
         case .folders: return "folders"
+        case .fitReleased: return "fitReleased"
         }
     }
 
@@ -494,6 +499,7 @@ extension HostMessage: Codable {
         case .usage(let body): try container.encode(body, forKey: .body)
         case .sessionPeek(let body): try container.encode(body, forKey: .body)
         case .folders(let body): try container.encode(body, forKey: .body)
+        case .fitReleased(let body): try container.encode(body, forKey: .body)
         }
     }
 
@@ -513,6 +519,7 @@ extension HostMessage: Codable {
         case "usage": self = .usage(try container.decode(RemoteUsageReport.self, forKey: .body))
         case "sessionPeek": self = .sessionPeek(try container.decode(SessionPeek.self, forKey: .body))
         case "folders": self = .folders(try container.decode(FolderListing.self, forKey: .body))
+        case "fitReleased": self = .fitReleased(try container.decode(SessionRef.self, forKey: .body))
         default: throw RemoteProtocolError.unknownKind(kind)
         }
     }
