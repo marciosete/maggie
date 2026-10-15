@@ -25,17 +25,6 @@ class TerminalWindow: NSWindow {
     /// Update notification UI in titlebar
     private let updateAccessory = NSTitlebarAccessoryViewController()
 
-    /// The timing of the Claude Code session's latest reply, at the right of the titlebar.
-    /// A slot of its own, so it isn't cut off with the title when the title is long.
-    private let replySpeedAccessory = NSTitlebarAccessoryViewController()
-    private lazy var replySpeedLabel: NSTextField = {
-        let label = NSTextField(labelWithString: "")
-        label.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        label.textColor = .secondaryLabelColor
-        label.lineBreakMode = .byClipping
-        return label
-    }()
-
     /// Visual indicator that mirrors the selected tab color.
     private lazy var tabColorIndicator: NSHostingView<TabColorIndicatorView> = {
         let view = NSHostingView(rootView: TabColorIndicatorView(tabColor: shownTabColor, claudeCodeState: claudeCodeState))
@@ -128,23 +117,6 @@ class TerminalWindow: NSWindow {
         guard claudeCodeActivity.finishedUnseen, isLookedAt else { return }
         claudeCodeActivity.markSeen()
         postTabSidebarItemDidChange()
-    }
-
-    /// The timing of the latest reply of the Claude Code session in this tab, shown at the
-    /// end of the window's title.
-    var claudeStreamState: ClaudeStreamState? {
-        didSet {
-            guard claudeStreamState != oldValue else { return }
-            claudeStreamDisplayDidChange()
-        }
-    }
-
-    /// Non-nil while the focused terminal runs Codex, even before timing is known.
-    var codexTurnTiming: CodexTurnTiming? {
-        didSet {
-            guard codexTurnTiming != oldValue else { return }
-            claudeStreamDisplayDidChange()
-        }
     }
 
     /// The color the tab is shown in: the one assigned to it, or for `auto`, the color of
@@ -376,16 +348,6 @@ class TerminalWindow: NSWindow {
                 }))
             addTitlebarAccessoryViewController(resetZoomAccessory)
             resetZoomAccessory.view.translatesAutoresizingMaskIntoConstraints = false
-
-            // AppKit sizes a titlebar accessory by its view's frame, so the container is
-            // frame-based and sized to its text (see `updateReplySpeedAccessory`).
-            let replySpeedView = NSView()
-            replySpeedView.addSubview(replySpeedLabel)
-            replySpeedAccessory.layoutAttribute = .right
-            replySpeedAccessory.view = replySpeedView
-            replySpeedAccessory.isHidden = true
-            addTitlebarAccessoryViewController(replySpeedAccessory)
-            updateReplySpeedAccessory()
 
             // Create update notification accessory
             if supportsUpdateAccessory {
@@ -724,36 +686,6 @@ class TerminalWindow: NSWindow {
         }
         parts.append(sessionTitle)
         title = parts.joined(separator: " › ")
-    }
-
-    /// What the titlebar shows of the latest reply, while replies are shown.
-    var claudeStreamReadout: String? {
-        guard ClaudeStreams.shared.isEnabled else { return nil }
-        if let codexTurnTiming { return codexTurnTiming.label }
-        return claudeStreamState?.label
-    }
-
-    /// Replies were turned on or off, or the timing changed: the titlebar's readout follows.
-    func claudeStreamDisplayDidChange() {
-        updateReplySpeedAccessory()
-        postTabSidebarItemDidChange()
-    }
-
-    private func updateReplySpeedAccessory() {
-        guard replySpeedAccessory.isViewLoaded else { return }
-        let container = replySpeedAccessory.view
-        if let readout = claudeStreamReadout {
-            replySpeedLabel.stringValue = readout
-            replySpeedLabel.toolTip = codexTurnTiming?.help ?? claudeStreamState?.help
-            replySpeedLabel.sizeToFit()
-            let size = replySpeedLabel.frame.size
-            container.frame = NSRect(x: 0, y: 0, width: size.width + 12, height: size.height + 8)
-            replySpeedLabel.frame = NSRect(x: 4, y: 4, width: size.width, height: size.height)
-            replySpeedAccessory.isHidden = false
-        } else {
-            replySpeedLabel.stringValue = ""
-            replySpeedAccessory.isHidden = true
-        }
     }
 
     override var title: String {

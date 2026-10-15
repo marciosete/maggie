@@ -394,11 +394,7 @@ extension Ghostty {
 
             // Setup our surface. This will also initialize all the terminal IO.
             var surface_cfg = baseConfig ?? SurfaceConfiguration()
-            // Claude Code in the new terminal talks to the API through the proxy that times
-            // its replies, behind the capture proxy while requests are captured.
-            surface_cfg.environmentVariables.merge(SystemPromptCapture.shared.environment) { current, _ in current }
-            ClaudeStreams.shared.addEnvironment(to: &surface_cfg)
-            // Claude Code there has the commands Maggie ships.
+            // Claude Code in the new terminal has the commands Maggie ships.
             ClaudePlugin.addEnvironment(to: &surface_cfg)
             // A new session starts the chosen agent; a restored one resumes its own.
             AgentStart.shared.apply(to: &surface_cfg)
@@ -410,7 +406,6 @@ extension Ghostty {
                 return
             }
             self.surfaceModel = Ghostty.Surface(cSurface: surface)
-            CodexContextCapture.shared.track(self)
 
             // Setup our tracking area so we get mouse moved events
             updateTrackingAreas()

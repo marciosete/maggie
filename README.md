@@ -85,15 +85,6 @@ when it is clean.
 session, by day, project and model, priced at current rates, with your Claude
 and Codex plan limits alongside. A custom range for the accountant.
 
-**Reply timing in the titlebar.** The time to first token and the tokens per
-second of the reply streaming in the current tab, live. For a Codex session, the
-time to first token and the length of the turn, once it ends.
-
-**Capture.** Turn it on, and the requests Claude Code sends to the model, system
-prompt and all, are saved per session, exactly as the API receives them. For
-Codex, **Capture Codex Context** saves the session's own record of its context as
-it grows, which is Codex's history rather than the request it sends.
-
 **Keep the Mac awake** from the sidebar, lid closed included, while the flock
 works.
 
@@ -171,12 +162,6 @@ agent's settings.
 The usage panel is computed from those transcripts and rollouts, and the plan
 limits from what `claude` and `codex app-server` report.
 
-For the reply timing, new terminals get `ANTHROPIC_BASE_URL` pointed at a local
-proxy that passes every request through to Anthropic untouched and watches the
-stream go by. It can be turned off from the menu; terminals opened while it is
-off talk to Anthropic directly. Capture uses the same kind of proxy and is off
-until you turn it on.
-
 Session state is kept in Maggie's own preferences, under its bundle ID, never
 in Ghostty's.
 
@@ -185,8 +170,7 @@ in Ghostty's.
 Maggie is a fork of [Ghostty](https://github.com/ghostty-org/ghostty) by
 Mitchell Hashimoto and the Ghostty contributors. It shares Ghostty's terminal
 core, renderer, fonts, input handling, config and shell integration; the
-sidebar, workspace, source control, usage, streaming and capture features are
-Maggie's. The GTK app for Linux is unchanged upstream code and is not built or
+sidebar, workspace, source control and usage features are Maggie's. The GTK app for Linux is unchanged upstream code and is not built or
 tested here.
 
 Upstream changes are merged in after each Ghostty release. Ghostty's own

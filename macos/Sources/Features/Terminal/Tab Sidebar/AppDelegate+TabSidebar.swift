@@ -56,52 +56,8 @@ extension AppDelegate {
         viewMenu.insertItem(toggleUsage, at: 5)
         StatusBarSettings.shared.installMenuItem(in: viewMenu, at: 6)
         MainActor.assumeIsolated {
-            ClaudeStreams.shared.installMenuItem(in: viewMenu, at: 7)
-            AgentStart.shared.installMenuItem(in: viewMenu, at: 8)
+            AgentStart.shared.installMenuItem(in: viewMenu, at: 7)
         }
-        viewMenu.insertItem(.separator(), at: 9)
-
-        let captureSystemPrompts = NSMenuItem(
-            title: "Capture Claude Code Requests",
-            action: #selector(AppDelegate.toggleSystemPromptCapture(_:)),
-            keyEquivalent: "")
-        let showSystemPrompts = NSMenuItem(
-            title: "Show Captured Requests",
-            action: #selector(AppDelegate.showCapturedSystemPrompts(_:)),
-            keyEquivalent: "")
-        let captureCodexContext = NSMenuItem(
-            title: "Capture Codex Context",
-            action: #selector(AppDelegate.toggleCodexContextCapture(_:)),
-            keyEquivalent: "")
-        captureCodexContext.toolTip = "Save local session context for newly opened terminals. This is not an exact API request capture."
-        let showCodexContext = NSMenuItem(
-            title: "Show Captured Codex Context",
-            action: #selector(AppDelegate.showCapturedCodexContext(_:)),
-            keyEquivalent: "")
-
-        viewMenu.insertItem(captureSystemPrompts, at: 10)
-        viewMenu.insertItem(showSystemPrompts, at: 11)
-        viewMenu.insertItem(captureCodexContext, at: 12)
-        viewMenu.insertItem(showCodexContext, at: 13)
-        viewMenu.insertItem(.separator(), at: 14)
-    }
-
-    /// Takes effect in terminals opened afterwards.
-    @IBAction func toggleSystemPromptCapture(_ sender: Any?) {
-        let capture = SystemPromptCapture.shared
-        capture.setEnabled(!capture.isEnabled)
-    }
-
-    @IBAction func showCapturedSystemPrompts(_ sender: Any?) {
-        SystemPromptCapture.shared.revealInFinder()
-    }
-
-    @IBAction func toggleCodexContextCapture(_ sender: Any?) {
-        let capture = CodexContextCapture.shared
-        capture.setEnabled(!capture.isEnabled)
-    }
-
-    @IBAction func showCapturedCodexContext(_ sender: Any?) {
-        CodexContextCapture.shared.revealInFinder()
+        viewMenu.insertItem(.separator(), at: 8)
     }
 }

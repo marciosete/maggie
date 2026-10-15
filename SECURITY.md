@@ -20,12 +20,6 @@ Worth knowing when you assess it:
   `~/.claude`, to show what a session is doing, its cost and its last reply.
   Nothing is sent anywhere; the usage panel prices locally from a rates file it
   downloads.
-- **It runs a local proxy.** With reply timing on, new terminals get
-  `ANTHROPIC_BASE_URL` pointed at `127.0.0.1`, and the proxy forwards every
-  request to Anthropic untouched over TLS, watching the stream for timing.
-  With capture on, it also writes the requests to
-  `~/Library/Application Support/com.marciosete.maggie/`. Both are off from
-  the View menu; capture is off by default.
 - **It types into your shell.** A new session gets `claude -w || claude` (or
   `claude --resume …` when restored) typed as if you had, once the shell is
   up. View › Start Claude Code in New Sessions turns that off.

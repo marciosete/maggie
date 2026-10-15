@@ -232,11 +232,6 @@ class AppDelegate: NSObject,
         // Initial config loading
         ghosttyConfigDidChange(config: ghostty.config)
 
-        // Time the replies of the Claude Code sessions. Started before any terminal opens,
-        // so every terminal gets the proxy's address.
-        ClaudeStreams.shared.start()
-        CodexTurnTimings.shared.start()
-
         // Look up the installed Codex's options before the first session is started.
         CodingAgent.prepare()
 
@@ -1393,14 +1388,6 @@ extension AppDelegate: NSMenuItemValidation {
             // Float on top items only active if the key window is a primary
             // terminal window (not quick terminal).
             return NSApp.keyWindow is TerminalWindow
-
-        case #selector(toggleSystemPromptCapture(_:)):
-            item.state = SystemPromptCapture.shared.isEnabled ? .on : .off
-            return true
-
-        case #selector(toggleCodexContextCapture(_:)):
-            item.state = CodexContextCapture.shared.isEnabled ? .on : .off
-            return true
 
         case #selector(undo(_:)):
             if undoManager.canUndo {
