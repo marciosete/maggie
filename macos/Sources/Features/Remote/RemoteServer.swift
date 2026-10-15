@@ -195,17 +195,26 @@ final class RemoteService: ObservableObject {
     @discardableResult
     func beginPairing() -> RemotePairingOffer? {
         guard case .listening(let port) = status, let fingerprint else { return nil }
+        // The Mac may have moved networks since the addresses were read.
+        refreshAddresses()
         return pairing.begin(host: invitationHost, port: port, fingerprint: fingerprint, name: Host.current().localizedName)
     }
 
+    /// The Mac's Tailscale name, once read. It stays the same on any network.
+    private var tailscaleName: String?
+
     func refreshAddresses() {
         addresses = RemoteAddresses.current()
+        if let tailscaleName {
+            addresses.insert(RemoteAddresses.Address(kind: .tailscale, value: tailscaleName), at: 0)
+        }
         if let best = addresses.first { suggestedHost = best.value }
         DispatchQueue.global(qos: .utility).async {
             let name = RemoteAddresses.tailscaleName()
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let name else { return }
+                    self.tailscaleName = name
                     self.suggestedHost = name
                     if !self.addresses.contains(where: { $0.value == name }) {
                         self.addresses.insert(RemoteAddresses.Address(kind: .tailscale, value: name), at: 0)
@@ -240,10 +249,18 @@ final class RemoteClient {
     func start() {
         socket.onState = { [weak self] state in
             MainActor.assumeIsolated {
-                guard let self, case .closed = state else { return }
-                self.helloTimer?.invalidate()
-                self.streams.closeAll()
-                self.service?.clientClosed(self)
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    // The device has five seconds from here, its handshake done.
+                    self.expectHello(within: RemoteProtocol.helloTimeout)
+                case .closed:
+                    self.helloTimer?.invalidate()
+                    self.streams.closeAll()
+                    self.service?.clientClosed(self)
+                case .connecting:
+                    break
+                }
             }
         }
         socket.onText = { [weak self] data in
@@ -257,7 +274,13 @@ final class RemoteClient {
         }
         socket.start()
 
-        helloTimer = Timer.scheduledTimer(withTimeInterval: RemoteProtocol.helloTimeout, repeats: false) { [weak self] _ in
+        // A handshake that never finishes is let go too.
+        expectHello(within: 30)
+    }
+
+    private func expectHello(within seconds: TimeInterval) {
+        helloTimer?.invalidate()
+        helloTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.device == nil else { return }
                 RemoteService.logger.info("closing a connection that never said hello")

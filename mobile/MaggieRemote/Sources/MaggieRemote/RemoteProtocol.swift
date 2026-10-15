@@ -12,7 +12,8 @@ public enum RemoteProtocol {
 
     public static let defaultPort: UInt16 = 7788
 
-    /// How long a connection has to say `hello` (or `pair`) before the host closes it.
+    /// How long a connection has to say `hello` (or `pair`) once its handshake is done
+    /// before the host closes it.
     public static let helloTimeout: TimeInterval = 5
 }
 

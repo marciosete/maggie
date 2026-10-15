@@ -175,7 +175,11 @@ public enum RemoteTLS {
         sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, trust, complete in
             complete(Self.isPinned(trust, to: fingerprint))
         }, queue)
-        return parameters(tls: tls)
+        let parameters = parameters(tls: tls)
+        // The Mac is reached directly, over Tailscale or the local network. Looking up a
+        // proxy for the wss:// address can take seconds on some networks.
+        parameters.preferNoProxies = true
+        return parameters
     }
 
     /// Whether the certificate a peer presented is the one paired with. Nothing else
