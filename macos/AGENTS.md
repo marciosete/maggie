@@ -26,6 +26,25 @@ and the protocol are here; the app itself is in a separate, private repository.
   are `macos/Tests/Remote/`.
 - A pairing link for a test client, without clicking:
   `osascript -e 'tell application id "<bundle id>" to get mobile pairing link'`.
+- Voice from a device: the Mac keeps the one GPT-Live session, memory and tools
+  (`macos/Sources/Features/Voice/`); the device is a handset. It sends `startVoice`,
+  then streams its microphone as `voiceInput` frames on `RemoteProtocol.voiceStream`
+  (16-bit mono PCM at 24 kHz, about 100 ms a frame, silence included, without stopping:
+  GPT-Live's clock runs on the audio) and plays `voiceOutput` frames as they come.
+  `subscribeVoice` brings `voiceState` on change and each `voiceTurn` (captions).
+  `stopVoice` hands the microphone back to the Mac; with `endsVoice` it stops the voice.
+  The Mac side is `RemoteVoice.swift`; the device needs an audio session that records
+  and plays at once (`.playAndRecord`, voice chat mode for echo cancellation).
+
+## Voice
+
+`macos/Sources/Features/Voice/` is Maggie's voice: OpenAI's GPT-Live (`gpt-live-1`)
+over its WebSocket, with Responses delegation to a backend model that runs Maggie
+through function tools (`VoiceTools`). The key is `~/.config/ghostty/openai-api-key`
+or `OPENAI_API_KEY`. Tests are `macos/Tests/Voice/`. A GPT-Live session expires two
+hours after it starts (`expires_at` in `session.started`); `VoiceAgent` rolls to a new
+one before that, and pauses the session after the quiet time set in Settings › Voice.
+Memory and transcripts live in `~/Library/Application Support/<bundle id>/Voice/`.
 
 ## AppleScript
 

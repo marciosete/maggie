@@ -60,6 +60,10 @@ struct RemoteProtocolTests {
         .fitSession(FitSession(id: "s1", columns: nil, rows: nil)),
         .listFolders(ListFolders()),
         .listFolders(ListFolders(path: "/Users/me/projects")),
+        .startVoice(StartVoice(deviceName: "iPhone")),
+        .stopVoice(StopVoice(endsVoice: true)),
+        .muteVoice(MuteVoice(muted: true)),
+        .subscribeVoice,
     ]
 
     static let hostMessages: [HostMessage] = [
@@ -94,6 +98,11 @@ struct RemoteProtocolTests {
             parent: "/Users/me",
             isRepository: false,
             entries: [.init(name: "orca", path: "/Users/me/projects/orca", isRepository: true)])),
+        .voiceState(VoiceState(
+            phase: .live, muted: false, isHandset: true, handsetName: "iPhone", billedSeconds: 61.5,
+            userSpeaking: true, assistantSpeaking: false, workingOn: "list_sessions", error: nil)),
+        .voiceState(VoiceState(phase: .failed, error: "No OpenAI API key.")),
+        .voiceTurn(VoiceTurnMessage(id: "t1", role: .assistant, text: "Session four is done.", at: Date(timeIntervalSince1970: 1_700_000_000))),
     ]
 
     @Test(arguments: clientMessages)

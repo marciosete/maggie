@@ -17,6 +17,8 @@ struct SettingsView: View {
         TabView {
             agents
                 .tabItem { Label("Agents", systemImage: "terminal") }
+            VoiceSettingsView()
+                .tabItem { Label("Voice", systemImage: "mic") }
             RemoteSettingsView()
                 .tabItem { Label("Mobile", systemImage: "iphone") }
         }

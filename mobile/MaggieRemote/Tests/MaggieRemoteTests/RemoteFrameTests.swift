@@ -3,7 +3,7 @@ import Testing
 @testable import MaggieRemote
 
 struct RemoteFrameTests {
-    @Test(arguments: [RemoteFrame.Kind.output, .input, .resize, .snapshot])
+    @Test(arguments: [RemoteFrame.Kind.output, .input, .resize, .snapshot, .voiceInput, .voiceOutput])
     func frameRoundTrips(_ kind: RemoteFrame.Kind) throws {
         let frame = RemoteFrame(stream: 0xDEAD_BEEF, kind: kind, payload: Data("hello\u{1b}[31m".utf8))
         #expect(try RemoteFrame(decoding: frame.encoded()) == frame)

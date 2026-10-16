@@ -9,6 +9,7 @@ final class StatusBarSettings: NSObject, ObservableObject {
         case claudeUsage
         case codexUsage
         case caffeine
+        case voice
         case resources
 
         var localizedName: String {
@@ -16,6 +17,7 @@ final class StatusBarSettings: NSObject, ObservableObject {
             case .claudeUsage: return "Claude Usage"
             case .codexUsage: return "Codex Usage"
             case .caffeine: return "Keep Awake"
+            case .voice: return "Voice"
             case .resources: return "Resource Manager"
             }
         }

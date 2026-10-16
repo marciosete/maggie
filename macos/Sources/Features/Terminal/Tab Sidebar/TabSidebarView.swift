@@ -262,6 +262,10 @@ struct TabSidebarView: View {
                 if !statusBar.shows(.caffeine) {
                     CaffeineButton()
                 }
+
+                if !statusBar.shows(.voice) {
+                    VoiceButton()
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 9)

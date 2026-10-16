@@ -76,6 +76,22 @@ public enum ClientMessage: Equatable, Sendable {
     /// List the folders inside one under the Mac's home folder for devices. Needs the
     /// `homeFolder` capability.
     case listFolders(ListFolders)
+
+    /// Make this device the voice's handset: its microphone and speaker carry the
+    /// conversation with Maggie's voice, which starts if it is off. Audio then travels in
+    /// `voiceInput` and `voiceOutput` frames on `RemoteProtocol.voiceStream`. Needs the
+    /// `voice` capability.
+    case startVoice(StartVoice)
+
+    /// Stop being the handset: the Mac's own microphone and speaker take over, or the
+    /// voice stops altogether when asked.
+    case stopVoice(StopVoice)
+
+    /// Mute or unmute the handset's microphone, Mac side; the session keeps running.
+    case muteVoice(MuteVoice)
+
+    /// Send the voice's state now, and whenever it changes.
+    case subscribeVoice
 }
 
 /// A message the Mac sends the device.
@@ -113,6 +129,13 @@ public enum HostMessage: Equatable, Sendable {
     /// The session was used on the Mac, which took back the size `fitSession` asked
     /// for. The device shows the Mac's size until it asks again.
     case fitReleased(SessionRef)
+
+    /// What the voice is doing, sent on change while subscribed.
+    case voiceState(VoiceState)
+
+    /// Something said in the voice conversation, as it is settled: by the user, by the
+    /// voice, or by Maggie.
+    case voiceTurn(VoiceTurnMessage)
 }
 
 // MARK: - Payloads
@@ -282,6 +305,130 @@ public enum RemoteCapability {
     public static let push = "push"
     public static let fitSession = "fitSession"
     public static let homeFolder = "homeFolder"
+
+    /// The Mac can talk: `startVoice` and the voice frames.
+    public static let voice = "voice"
+}
+
+// MARK: - Voice
+
+extension RemoteProtocol {
+    /// The stream number voice frames carry. No session's mirror has it.
+    public static let voiceStream: UInt32 = .max
+
+    /// Voice audio is 16-bit little-endian mono PCM at this rate, both ways, in frames
+    /// of about a tenth of a second. The handset keeps sending while it listens, silence
+    /// included: GPT-Live's clock runs on it.
+    public static let voiceSampleRate = 24_000
+}
+
+public struct StartVoice: Codable, Equatable, Sendable {
+    /// The device's name, shown on the Mac while it is the handset.
+    public var deviceName: String
+
+    public init(deviceName: String) {
+        self.deviceName = deviceName
+    }
+}
+
+public struct StopVoice: Codable, Equatable, Sendable {
+    /// Stop the voice altogether rather than hand it back to the Mac.
+    public var endsVoice: Bool
+
+    public init(endsVoice: Bool = false) {
+        self.endsVoice = endsVoice
+    }
+}
+
+public struct MuteVoice: Codable, Equatable, Sendable {
+    public var muted: Bool
+
+    public init(muted: Bool) {
+        self.muted = muted
+    }
+}
+
+/// What Maggie's voice is doing.
+public struct VoiceState: Codable, Equatable, Sendable {
+    public enum Phase: String, Codable, Sendable {
+        case off
+        case connecting
+
+        /// Talking, or ready to.
+        case live
+
+        /// Closed to save money while the user was quiet; speech or a tap starts it again.
+        case paused
+        case failed
+    }
+
+    public var phase: Phase
+    public var muted: Bool
+
+    /// This device is the handset: it should send microphone frames and play output
+    /// frames.
+    public var isHandset: Bool
+
+    /// The handset's name: this device, another device, or the Mac.
+    public var handsetName: String
+
+    /// Seconds billed since the voice was turned on.
+    public var billedSeconds: Double
+    public var userSpeaking: Bool
+    public var assistantSpeaking: Bool
+
+    /// The tool the backend is running, while it runs one.
+    public var workingOn: String?
+
+    /// Why it failed, while `phase` is `failed`.
+    public var error: String?
+
+    public init(
+        phase: Phase,
+        muted: Bool = false,
+        isHandset: Bool = false,
+        handsetName: String = "Mac",
+        billedSeconds: Double = 0,
+        userSpeaking: Bool = false,
+        assistantSpeaking: Bool = false,
+        workingOn: String? = nil,
+        error: String? = nil
+    ) {
+        self.phase = phase
+        self.muted = muted
+        self.isHandset = isHandset
+        self.handsetName = handsetName
+        self.billedSeconds = billedSeconds
+        self.userSpeaking = userSpeaking
+        self.assistantSpeaking = assistantSpeaking
+        self.workingOn = workingOn
+        self.error = error
+    }
+}
+
+public struct VoiceTurnMessage: Codable, Equatable, Sendable, Identifiable {
+    public enum Role: String, Codable, Sendable {
+        case user
+        case assistant
+
+        /// Maggie reporting on a session.
+        case notice
+
+        /// What a tool did.
+        case tool
+    }
+
+    public var id: String
+    public var role: Role
+    public var text: String
+    public var at: Date
+
+    public init(id: String, role: Role, text: String, at: Date) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.at = at
+    }
 }
 
 public struct SessionOpened: Codable, Equatable, Sendable {
@@ -408,6 +555,10 @@ extension ClientMessage: Codable {
         case .peekSession: return "peekSession"
         case .fitSession: return "fitSession"
         case .listFolders: return "listFolders"
+        case .startVoice: return "startVoice"
+        case .stopVoice: return "stopVoice"
+        case .muteVoice: return "muteVoice"
+        case .subscribeVoice: return "subscribeVoice"
         }
     }
 
@@ -433,6 +584,10 @@ extension ClientMessage: Codable {
         case .peekSession(let body): try container.encode(body, forKey: .body)
         case .fitSession(let body): try container.encode(body, forKey: .body)
         case .listFolders(let body): try container.encode(body, forKey: .body)
+        case .startVoice(let body): try container.encode(body, forKey: .body)
+        case .stopVoice(let body): try container.encode(body, forKey: .body)
+        case .muteVoice(let body): try container.encode(body, forKey: .body)
+        case .subscribeVoice: break
         }
     }
 
@@ -458,6 +613,10 @@ extension ClientMessage: Codable {
         case "peekSession": self = .peekSession(try container.decode(SessionRef.self, forKey: .body))
         case "fitSession": self = .fitSession(try container.decode(FitSession.self, forKey: .body))
         case "listFolders": self = .listFolders(try container.decode(ListFolders.self, forKey: .body))
+        case "startVoice": self = .startVoice(try container.decode(StartVoice.self, forKey: .body))
+        case "stopVoice": self = .stopVoice(try container.decode(StopVoice.self, forKey: .body))
+        case "muteVoice": self = .muteVoice(try container.decode(MuteVoice.self, forKey: .body))
+        case "subscribeVoice": self = .subscribeVoice
         default: throw RemoteProtocolError.unknownKind(kind)
         }
     }
@@ -479,6 +638,8 @@ extension HostMessage: Codable {
         case .sessionPeek: return "sessionPeek"
         case .folders: return "folders"
         case .fitReleased: return "fitReleased"
+        case .voiceState: return "voiceState"
+        case .voiceTurn: return "voiceTurn"
         }
     }
 
@@ -500,6 +661,8 @@ extension HostMessage: Codable {
         case .sessionPeek(let body): try container.encode(body, forKey: .body)
         case .folders(let body): try container.encode(body, forKey: .body)
         case .fitReleased(let body): try container.encode(body, forKey: .body)
+        case .voiceState(let body): try container.encode(body, forKey: .body)
+        case .voiceTurn(let body): try container.encode(body, forKey: .body)
         }
     }
 
@@ -520,6 +683,8 @@ extension HostMessage: Codable {
         case "sessionPeek": self = .sessionPeek(try container.decode(SessionPeek.self, forKey: .body))
         case "folders": self = .folders(try container.decode(FolderListing.self, forKey: .body))
         case "fitReleased": self = .fitReleased(try container.decode(SessionRef.self, forKey: .body))
+        case "voiceState": self = .voiceState(try container.decode(VoiceState.self, forKey: .body))
+        case "voiceTurn": self = .voiceTurn(try container.decode(VoiceTurnMessage.self, forKey: .body))
         default: throw RemoteProtocolError.unknownKind(kind)
         }
     }

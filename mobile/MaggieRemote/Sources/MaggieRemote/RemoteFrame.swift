@@ -19,6 +19,14 @@ public struct RemoteFrame: Equatable, Sendable {
         /// rows, then the sequences. The mirror is rebuilt by writing them into a fresh
         /// terminal of that size; output frames after it apply on top.
         case snapshot = 4
+
+        /// Device to Mac, on `RemoteProtocol.voiceStream`: the handset's microphone, as
+        /// `RemoteProtocol.voiceSampleRate` PCM.
+        case voiceInput = 5
+
+        /// Mac to device, on `RemoteProtocol.voiceStream`: the voice's speech, as the
+        /// same PCM, to play as it arrives.
+        case voiceOutput = 6
     }
 
     public static let headerLength = 5

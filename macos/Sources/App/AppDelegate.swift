@@ -240,6 +240,8 @@ class AppDelegate: NSObject,
         installSettingsMenuItem()
         // The commands of Maggie's Claude Code plugin, in the View menu after Show Usage.
         MainActor.assumeIsolated { ClaudePluginMenu.shared.install() }
+        // Talk to Maggie, in the View menu after the plugin commands.
+        MainActor.assumeIsolated { VoiceMenu.shared.install() }
 
         // Keep the open windows and tabs saved so they can be opened again, and offer the
         // kept versions in the File menu, after the close items.

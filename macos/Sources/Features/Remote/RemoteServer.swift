@@ -261,10 +261,14 @@ final class RemoteClient {
     /// The sessions this device mirrors.
     private let streams: RemoteTerminalStreams
 
+    /// The voice, as this device sees and carries it.
+    private let voice: RemoteVoiceBridge
+
     init(socket: RemoteSocket, service: RemoteService) {
         self.socket = socket
         self.service = service
         streams = RemoteTerminalStreams(socket: socket, feed: service.feed)
+        voice = RemoteVoiceBridge(socket: socket)
         streams.onClosed = { [weak self] closed in self?.send(.sessionClosed(closed)) }
     }
 
@@ -279,6 +283,7 @@ final class RemoteClient {
                 case .closed:
                     self.helloTimer?.invalidate()
                     self.streams.closeAll()
+                    self.voice.closed()
                     self.service?.clientClosed(self)
                 case .connecting:
                     break
@@ -291,6 +296,7 @@ final class RemoteClient {
         socket.onBinary = { [weak self] data in
             MainActor.assumeIsolated {
                 guard let self, self.device != nil, let frame = try? RemoteFrame(decoding: data) else { return }
+                if self.voice.received(frame) { return }
                 self.streams.input(frame)
             }
         }
@@ -379,7 +385,7 @@ final class RemoteClient {
 
     static let capabilities = [
         "sidebar", "newSession", "terminal", "board", "usage",
-        RemoteCapability.fitSession, RemoteCapability.homeFolder,
+        RemoteCapability.fitSession, RemoteCapability.homeFolder, RemoteCapability.voice,
     ]
 
     private func sendBoard() {
@@ -493,6 +499,9 @@ final class RemoteClient {
             } else {
                 send(.sessionClosed(SessionClosed(id: ref.id, reason: .notFound)))
             }
+
+        case .startVoice, .stopVoice, .muteVoice, .subscribeVoice:
+            _ = voice.handle(message)
         }
     }
 }

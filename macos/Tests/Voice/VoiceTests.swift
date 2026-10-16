@@ -1,0 +1,320 @@
+import Foundation
+import Testing
+@testable import Ghostty
+
+// MARK: - GPT-Live events
+
+@Suite
+struct OpenAILiveEventTests {
+    private func parse(_ json: String) -> OpenAILiveEvent? {
+        let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        return object.flatMap(OpenAILiveEvent.parse)
+    }
+
+    @Test func aStartedSessionCarriesItsExpiry() {
+        let event = parse(#"{"type":"session.started","session":{"id":"live_1","expires_at":1792120858}}"#)
+        #expect(event == .started(sessionID: "live_1", expiresAt: Date(timeIntervalSince1970: 1_792_120_858)))
+    }
+
+    @Test func aFinishedFunctionCallIsUnwrappedFromTheBackendEnvelope() {
+        let event = parse(#"""
+        {"type":"response.event","delegation_id":"item_1","event":{"type":"response.output_item.done",
+         "item":{"type":"function_call","call_id":"call_9","name":"tell_session","arguments":"{\"session\":\"4\"}"}}}
+        """#)
+        #expect(event == .functionCall(delegationID: "item_1", callID: "call_9", name: "tell_session", arguments: #"{"session":"4"}"#))
+    }
+
+    @Test func aFinishedMessageAndACompletedResponseAreUnwrapped() {
+        let message = parse(#"""
+        {"type":"response.event","delegation_id":"item_1","event":{"type":"response.output_item.done",
+         "item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"One session is open."}]}}}
+        """#)
+        #expect(message == .backendMessage(delegationID: "item_1", text: "One session is open."))
+        let done = parse(#"{"type":"response.event","delegation_id":"item_1","event":{"type":"response.completed","response":{"id":"resp_1"}}}"#)
+        #expect(done == .backendCompleted(delegationID: "item_1", responseID: "resp_1"))
+    }
+
+    @Test func usageClosedAndErrorsAreRead() {
+        #expect(parse(#"{"type":"session.usage.updated","usage":{"seconds":14},"context_window":{"usage_ratio":0.01}}"#)
+            == .usage(seconds: 14, contextRatio: 0.01))
+        #expect(parse(#"{"type":"session.closed","reason":"expired","usage":{"seconds":7200}}"#)
+            == .closed(reason: "expired", seconds: 7200))
+        #expect(parse(#"{"type":"error","error":{"code":"tool_outputs_required","message":"Return results first.","client_event_id":"x"}}"#)
+            == .error(code: "tool_outputs_required", message: "Return results first.", clientEventID: "x"))
+    }
+
+    @Test func audioIsDecodedAndUnknownTypesKeepTheirName() {
+        let pcm = Data([1, 0, 2, 0])
+        #expect(parse(#"{"type":"session.output_audio.delta","delta":"\#(pcm.base64EncodedString())"}"#) == .outputAudio(pcm))
+        #expect(parse(#"{"type":"session.something.new"}"#) == .other("session.something.new"))
+        #expect(parse(#"{"delta":"x"}"#) == nil)
+    }
+}
+
+// MARK: - Transcript
+
+@Suite
+struct VoiceLedgerTests {
+    @Test func fragmentsBecomeTurnsWhenFlushed() {
+        var ledger = VoiceLedger()
+        ledger.input(" what is")
+        ledger.input(" session four doing?")
+        ledger.output(" On")
+        ledger.output(" it.")
+        #expect(ledger.flushUser() == "what is session four doing?")
+        #expect(ledger.flushUser() == "")
+        #expect(ledger.flushAssistant() == "On it.")
+    }
+
+    @Test func billedSecondsOnlyGrow() {
+        var ledger = VoiceLedger()
+        ledger.usage(seconds: 30)
+        ledger.usage(seconds: 12)
+        ledger.usage(seconds: .nan)
+        #expect(ledger.billedSeconds == 30)
+    }
+
+    @Test func markdownIsMadeSayable() {
+        let text = VoiceSpeech.speakable("## Done\n- Ran `zig build` in **session 4**\n```swift\nlet x = 1\n```\nSee [the docs](https://x.y).")
+        #expect(text == "Done\nRan zig build in session 4\n(there is code here)\nSee the docs.")
+    }
+
+    @Test func longAnswersAreCutAtSentencesAndCapped() {
+        let sentence = String(repeating: "a", count: 300) + ". "
+        let chunks = VoiceSpeech.chunks(String(repeating: sentence, count: 20))
+        #expect(chunks.count == VoiceSpeech.maxAppends)
+        #expect(chunks.allSatisfy { $0.count <= VoiceSpeech.appendCharacters + VoiceSpeech.truncatedNote.count + 1 })
+        #expect(chunks[0].hasSuffix("."))
+        #expect(chunks.last?.hasSuffix(VoiceSpeech.truncatedNote) == true)
+        #expect(VoiceSpeech.chunks("short") == ["short"])
+    }
+
+    @Test func theLogKeepsSpokenTurnsByDay() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-log-\(UUID().uuidString)")
+        let log = VoiceTranscriptLog(directory: directory)
+        let now = Date()
+        log.append(VoiceTurn(role: .user, text: "hello", at: now.addingTimeInterval(-10)))
+        log.append(VoiceTurn(role: .tool, text: "list_sessions", at: now.addingTimeInterval(-9)))
+        log.append(VoiceTurn(role: .assistant, text: "hi", at: now.addingTimeInterval(-8)))
+        let recent = log.recent(limit: 10, now: now)
+        #expect(recent.map(\.text) == ["hello", "hi"])
+        #expect(log.recent(limit: 1, now: now).map(\.text) == ["hi"])
+        try FileManager.default.removeItem(at: directory)
+    }
+}
+
+// MARK: - Memory
+
+@Suite
+@MainActor
+struct VoiceMemoryTests {
+    @Test func notesAreKeptAndRenderedByKind() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("voice-memory-\(UUID().uuidString)/memory.json")
+        let store = VoiceMemoryStore(file: file)
+        let alias = store.remember(.alias, "\"the board\" means ~/projects/board")
+        store.remember(.preference, "Open sessions in a worktree")
+        store.remember(.preference, "open sessions in a worktree")
+        store.recordFolderUse("/Users/x/projects/board")
+        store.recordFolderUse("/Users/x/projects/board")
+        store.recordFolderUse("/Users/x/projects/app")
+        #expect(store.state.notes.count == 2)
+
+        // Dates come back at second precision, so the notes are compared by what matters.
+        let again = VoiceMemoryStore(file: file)
+        #expect(again.state.notes.map(\.id) == store.state.notes.map(\.id))
+        #expect(again.state.notes.map(\.text) == store.state.notes.map(\.text))
+        #expect(again.state.folderUse == store.state.folderUse)
+        let prompt = again.prompt()
+        #expect(prompt.contains("Terms the user uses:\n- [\(alias.id)] \"the board\" means ~/projects/board"))
+        #expect(prompt.contains("Preferences:"))
+        #expect(prompt.range(of: "projects/board (2)")! .lowerBound < prompt.range(of: "projects/app (1)")!.lowerBound)
+
+        #expect(again.forget(id: alias.id))
+        #expect(!again.forget(id: alias.id))
+        #expect(VoiceMemoryStore(file: file).state.notes.count == 1)
+        try FileManager.default.removeItem(at: file.deletingLastPathComponent())
+    }
+
+    @Test func anEmptyMemorySaysSo() {
+        #expect(VoiceMemoryStore.prompt(for: VoiceMemoryState(), notes: []).hasPrefix("Nothing yet."))
+    }
+}
+
+// MARK: - Session references
+
+@Suite
+struct VoiceSessionReferenceTests {
+    private func candidate(_ number: Int, _ title: String, folder: String? = nil, branch: String? = nil, selected: Bool = false) -> VoiceSessionReference.Candidate {
+        VoiceSessionReference.Candidate(
+            number: number,
+            session: SidebarSession(id: "id-\(number)", title: title, branch: branch, isSelected: selected),
+            folder: folder)
+    }
+
+    private var candidates: [VoiceSessionReference.Candidate] {
+        [
+            candidate(1, "Fix login page", folder: "maggie"),
+            candidate(2, "Mobile companion", folder: "maggie-pro", branch: "feature/pairing", selected: true),
+            candidate(4, "Login tests", folder: "maggie"),
+            candidate(8, "Docs", folder: "board"),
+        ]
+    }
+
+    @Test func numbersInEveryForm() {
+        for text in ["4", "#4", "session 4", "Session four", "number four", "tab 4"] {
+            #expect(VoiceSessionReference.resolve(text, among: candidates)?.number == 4, "\(text)")
+        }
+        #expect(VoiceSessionReference.resolve("9", among: candidates) == nil)
+    }
+
+    @Test func wordsPickTheOneTitleTheyFit() {
+        #expect(VoiceSessionReference.resolve("the mobile one", among: candidates)?.number == 2)
+        #expect(VoiceSessionReference.resolve("docs", among: candidates)?.number == 8)
+        #expect(VoiceSessionReference.resolve("pairing", among: candidates)?.number == 2)
+        #expect(VoiceSessionReference.resolve("login tests", among: candidates)?.number == 4)
+        // Two sessions mention login equally: nobody's guess to make.
+        #expect(VoiceSessionReference.resolve("login", among: candidates) == nil)
+        #expect(VoiceSessionReference.resolve("the board session", among: candidates)?.number == 8)
+    }
+
+    @Test func thisMeansTheSelectedSession() {
+        #expect(VoiceSessionReference.resolve("this", among: candidates)?.number == 2)
+        #expect(VoiceSessionReference.resolve("the current session", among: candidates)?.number == 2)
+        #expect(VoiceSessionReference.resolve("", among: candidates) == nil)
+    }
+}
+
+// MARK: - Watching
+
+@Suite
+struct VoiceWatchRulesTests {
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    @Test func waitingAndFinishingAreNews() {
+        var rules = VoiceWatchRules()
+        #expect(rules.notice(from: .working, to: .waiting, session: "a", at: now)?.kind == .needsYou)
+        #expect(rules.notice(from: .working, to: .clean, session: "b", at: now)?.kind == .finished)
+        #expect(rules.notice(from: .working, to: .pending, session: "c", at: now)?.kind == .finished)
+        #expect(rules.notice(from: .clean, to: .waiting, session: "d", at: now)?.kind == .needsYou)
+        #expect(rules.notice(from: .waiting, to: .working, session: "e", at: now) == nil)
+        #expect(rules.notice(from: nil, to: .waiting, session: "f", at: now) == nil)
+        #expect(rules.notice(from: .pending, to: .clean, session: "g", at: now) == nil)
+    }
+
+    @Test func oneNoticeASessionEveryHalfMinute() {
+        var rules = VoiceWatchRules()
+        #expect(rules.notice(from: .working, to: .waiting, session: "a", at: now) != nil)
+        #expect(rules.notice(from: .working, to: .clean, session: "a", at: now.addingTimeInterval(10)) == nil)
+        #expect(rules.notice(from: .working, to: .clean, session: "a", at: now.addingTimeInterval(31)) != nil)
+    }
+
+    @Test func onlyWatchedSessionsAreAnnouncedUnlessAllAre() {
+        var rules = VoiceWatchRules()
+        let before = SidebarSnapshot(rows: [
+            .session(SidebarSession(id: "a", title: "A", light: .working)),
+            .session(SidebarSession(id: "b", title: "B", light: .working)),
+        ])
+        let after = SidebarSnapshot(rows: [
+            .session(SidebarSession(id: "a", title: "A", light: .clean)),
+            .session(SidebarSession(id: "b", title: "B", light: .waiting)),
+            .session(SidebarSession(id: "c", title: "C", light: .waiting)),
+        ])
+        let some = rules.notices(from: before, to: after, watched: ["a"], all: false, at: now)
+        #expect(some == [VoiceWatchRules.Notice(sessionID: "a", kind: .finished)])
+        var everyone = VoiceWatchRules()
+        let all = everyone.notices(from: before, to: after, watched: [], all: true, at: now)
+        #expect(all.map(\.sessionID) == ["a", "b"])
+    }
+}
+
+// MARK: - Tools and prompts
+
+@Suite
+@MainActor
+struct VoiceToolsTests {
+    @Test func spokenKeyNamesMapToKeys() {
+        #expect(VoiceTools.key(named: "Enter")?.0 == .enter)
+        #expect(VoiceTools.key(named: "esc")?.0 == .escape)
+        #expect(VoiceTools.key(named: "down")?.0 == .arrowDown)
+        #expect(VoiceTools.key(named: "3")?.0 == .digit3)
+        #expect(VoiceTools.key(named: "yes")?.0 == .y)
+        let control = VoiceTools.key(named: "ctrl-c")
+        #expect(control?.0 == .c)
+        #expect(control?.1 == [.ctrl])
+        #expect(VoiceTools.key(named: "f13") == nil)
+    }
+
+    @Test func sidebarFoldersAreFoundByNameOrPath() {
+        let snapshot = SidebarSnapshot(rows: [
+            .folder(SidebarFolder(id: "1", name: "Maggie", path: "/Users/x/projects/maggie", abbreviatedPath: "~/projects/maggie", hasGit: true, rows: [])),
+            .folder(SidebarFolder(id: "2", name: "Maggie Pro", path: "/Users/x/projects/maggie-pro", abbreviatedPath: "~/projects/maggie-pro", hasGit: true, rows: [])),
+        ])
+        #expect(VoiceTools.sidebarFolder(named: "maggie", in: snapshot)?.id == "1")
+        #expect(VoiceTools.sidebarFolder(named: "~/projects/maggie-pro", in: snapshot)?.id == "2")
+        #expect(VoiceTools.sidebarFolder(named: "pro", in: snapshot)?.id == "2")
+        #expect(VoiceTools.sidebarFolder(named: "mag", in: snapshot) == nil)
+    }
+
+    @Test func everyToolHasAnObjectSchemaAndIsNamedToTheVoice() {
+        for definition in VoiceTools.definitions {
+            #expect(definition.parameters["type"] as? String == "object", Comment(rawValue: definition.name))
+            #expect(JSONSerialization.isValidJSONObject(definition.json), Comment(rawValue: definition.name))
+        }
+        let live = VoicePrompt.liveInstructions(capabilities: VoiceTools.capabilities, userName: "Marcio")
+        for heading in ["Backchannel policy:", "Interruption policy:", "Delegation policy:", "Backend tools:", "Delegate to the backend when:", "Do not delegate to the backend when:"] {
+            #expect(live.contains(heading), Comment(rawValue: heading))
+        }
+        #expect(live.contains("- tell_session: Types an instruction into a session's agent and submits it, as the user would."))
+        #expect(live.contains("The user's name is Marcio."))
+        #expect(live.utf8.count < 42_000)
+    }
+
+    @Test func theBackendHearsMemoryAndSessions() {
+        let text = VoicePrompt.backendInstructions(memory: "Facts:\n- [ab12] likes worktrees", sessionsNow: "- 1: Login, working")
+        #expect(text.contains("# What you know about this user\nFacts:\n- [ab12] likes worktrees"))
+        #expect(text.contains("# Sessions right now\n- 1: Login, working"))
+        #expect(VoicePrompt.notice("Session 4 finished.") == "[Maggie notice] Session 4 finished.")
+    }
+}
+
+// MARK: - Audio
+
+@Suite
+struct VoiceAudioFormatTests {
+    @Test func floatsBecomeLittleEndianPCM16() {
+        let data = VoiceAudioFormat.pcm16(from: [0, 1, -1, 0.5, 2, -2])
+        let samples = data.withUnsafeBytes { raw in
+            (0..<6).map { Int16(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 2, as: Int16.self)) }
+        }
+        #expect(samples == [0, 0x7FFF, -0x8000, 0x3FFF, 0x7FFF, -0x8000])
+        #expect(VoiceAudioFormat.chunkBytes == 4800)
+    }
+}
+
+// MARK: - Devices
+
+@Suite
+struct VoiceDevicesTests {
+    @Test func theMacsDevicesAreListedWithNames() {
+        let devices = VoiceDevices.all()
+        #expect(devices.allSatisfy { !$0.name.isEmpty && !$0.uid.isEmpty && ($0.hasInput || $0.hasOutput) })
+        if let output = VoiceDevices.defaultDevice(input: false) {
+            #expect(devices.contains { $0.id == output })
+        }
+        #expect(VoiceDevices.device(uid: "") == nil)
+        #expect(VoiceDevices.device(uid: "no-such-device") == nil)
+    }
+}
+
+// MARK: - Wake phrases
+
+@Suite
+struct VoiceWakeTests {
+    @Test func wakePhrasesAreHeardThroughPunctuationAndCase() {
+        #expect(VoiceWakeListener.matches("Hey, Maggie!") == "hey maggie")
+        #expect(VoiceWakeListener.matches("could you un-mute please") == "un mute")
+        #expect(VoiceWakeListener.matches("UNMUTE") == "unmute")
+        #expect(VoiceWakeListener.matches("the magpie flew") == nil)
+        #expect(VoiceWakeListener.matches("") == nil)
+    }
+}

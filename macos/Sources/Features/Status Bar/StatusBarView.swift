@@ -48,6 +48,10 @@ struct StatusBarView: View {
                 CaffeineButton(showsState: true)
             }
 
+            if settings.shows(.voice) {
+                VoiceButton(showsState: true)
+            }
+
             if settings.shows(.resources) {
                 StatusBarResourcesButton()
             }
