@@ -407,3 +407,73 @@ struct VoiceWakeTests {
         #expect(VoiceWakeListener.matches("") == nil)
     }
 }
+
+// MARK: - Mute and unmute by voice
+
+@Suite
+struct VoiceCommandTests {
+    /// What the user said on 2026-10-16 when asking to mute; GPT-Live answered "muting
+    /// now" to the first three without muting.
+    @Test func politeRequestsToMuteMute() {
+        for text in [
+            "Yeah. Can you mute yourself, please",
+            "Mute yourself, please",
+            "Can you mute yourself",
+            "mute",
+            "Mute.",
+            "Maggie, mute the microphone",
+            "Could you please mute for a second?",
+            "okay, stop listening",
+            "Can you mute yourself?",
+        ] {
+            #expect(VoiceCommand.parse(text) == .mute, Comment(rawValue: text))
+        }
+    }
+
+    @Test func talkAboutMutingIsNotACommand() {
+        for text in [
+            "It doesn't seem that it is muted",
+            "Still not muted",
+            "the mute didn't work",
+            "Yeah, okay. It took like you a few tries uh, to be able to mute, and then finally worked, but the unmute didn't work",
+            "can you mute session four",
+            "Can you hear",
+            ", un",
+            "",
+            "please",
+        ] {
+            #expect(VoiceCommand.parse(text) == nil, Comment(rawValue: text))
+        }
+    }
+
+    @Test func unmuteIsHeardInItsForms() {
+        #expect(VoiceCommand.parse("Unmute") == .unmute)
+        #expect(VoiceCommand.parse("un-mute yourself please") == .unmute)
+        #expect(VoiceCommand.parse("Hey Maggie, unmute") == .unmute)
+        #expect(VoiceCommand.parse("unmute the mic") == .unmute)
+    }
+}
+
+@Suite
+@MainActor
+struct VoiceWakeSourceTests {
+    @Test func mutedListensToTheVoicesOwnMicrophone() {
+        // Under voice processing a second engine on the microphone hears silence, so
+        // muted, the listener is fed by the voice's engine, on the Mac or a handset.
+        #expect(VoiceAgent.wakeSource(phase: .live, muted: true, local: true) == .fed)
+        #expect(VoiceAgent.wakeSource(phase: .live, muted: true, local: false) == .fed)
+    }
+
+    @Test func pausedOpensTheMacsMicrophone() {
+        #expect(VoiceAgent.wakeSource(phase: .paused, muted: false, local: true) == .microphone)
+        #expect(VoiceAgent.wakeSource(phase: .paused, muted: true, local: true) == .microphone)
+        #expect(VoiceAgent.wakeSource(phase: .paused, muted: false, local: false) == nil)
+    }
+
+    @Test func listeningOrOffNeedsNoWakeListener() {
+        #expect(VoiceAgent.wakeSource(phase: .live, muted: false, local: true) == nil)
+        #expect(VoiceAgent.wakeSource(phase: .connecting, muted: true, local: true) == nil)
+        #expect(VoiceAgent.wakeSource(phase: .off, muted: true, local: true) == nil)
+        #expect(VoiceAgent.wakeSource(phase: .failed("x"), muted: true, local: true) == nil)
+    }
+}

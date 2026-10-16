@@ -6,11 +6,24 @@ import Speech
 /// Listens, on the Mac alone, for the few words that bring the voice back while it is
 /// muted or paused: "unmute", "hey Maggie". Apple's on-device recognition hears them, so
 /// nothing leaves the Mac and nothing is billed while the user is quiet.
+///
+/// Muted, the voice's own engine is still running the microphone, with Apple's voice
+/// processing on it; a second engine on the same microphone hears silence, so the
+/// listener is fed the voice's microphone instead (`Source.fed`). Paused, nothing else is
+/// listening, and the listener runs the microphone itself (`Source.microphone`).
 final class VoiceWakeListener: @unchecked Sendable {
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier!,
         category: String(describing: VoiceWakeListener.self)
     )
+
+    enum Source: Equatable {
+        /// Buffers come in through `append(_:)`.
+        case fed
+
+        /// The listener opens the microphone on an engine of its own.
+        case microphone
+    }
 
     /// What wakes the voice, as recognised; matched ignoring case and punctuation.
     static let phrases = ["unmute", "un mute", "hey maggie", "hi maggie", "okay maggie", "ok maggie", "maggie wake up", "wake up"]
@@ -19,13 +32,19 @@ final class VoiceWakeListener: @unchecked Sendable {
     /// run one request forever.
     private static let restartInterval: TimeInterval = 50
 
-    private let engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
     private var recognizer: SFSpeechRecognizer?
-    private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var restartTimer: Timer?
-    private var heard = ""
-    private var running = false
+    private var generation = 0
+
+    /// Under `lock`: the request buffers go to, from whichever thread they arrive on.
+    private let lock = NSLock()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+
+    /// Main thread only.
+    private(set) var source: Source?
+    var isRunning: Bool { source != nil }
 
     /// Called on the main thread with the phrase heard.
     var onWake: (@MainActor (String) -> Void)?
@@ -51,82 +70,124 @@ final class VoiceWakeListener: @unchecked Sendable {
         return phrases.first { flat.contains($0) }
     }
 
-    func start() {
-        guard !running else { return }
+    /// Starts listening from `source`; a listener already running from another source
+    /// switches. Main thread only.
+    func start(from source: Source) {
+        guard self.source != source else { return }
+        if isRunning { stop() }
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")) ?? SFSpeechRecognizer(),
               recognizer.isAvailable else {
             Self.logger.warning("speech recognition unavailable")
             return
         }
         self.recognizer = recognizer
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { return }
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
-        }
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            Self.logger.warning("wake engine couldn't start: \(String(describing: error), privacy: .public)")
-            input.removeTap(onBus: 0)
-            return
-        }
-        running = true
-        beginRequest()
-        DispatchQueue.main.async {
-            self.restartTimer = Timer.scheduledTimer(withTimeInterval: Self.restartInterval, repeats: true) { [weak self] _ in
-                self?.beginRequest()
+        if source == .microphone {
+            let engine = AVAudioEngine()
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0 else {
+                Self.logger.warning("wake engine has no microphone input")
+                return
             }
+            input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+                self?.feed(buffer)
+            }
+            engine.prepare()
+            do {
+                try engine.start()
+            } catch {
+                Self.logger.warning("wake engine couldn't start: \(String(describing: error), privacy: .public)")
+                input.removeTap(onBus: 0)
+                return
+            }
+            self.engine = engine
         }
-        Self.logger.info("listening for a wake phrase")
+        self.source = source
+        beginRequest()
+        restartTimer = Timer.scheduledTimer(withTimeInterval: Self.restartInterval, repeats: true) { [weak self] _ in
+            self?.beginRequest()
+        }
+        Self.logger.info("listening for a wake phrase (\(source == .fed ? "fed" : "microphone", privacy: .public))")
     }
 
+    /// Microphone audio from the voice's engine, on any thread. Ignored unless the
+    /// listener is running.
+    func append(_ buffer: AVAudioPCMBuffer) {
+        feed(buffer)
+    }
+
+    /// Forgets what has been heard so far, so speech before now can't match: the voice's
+    /// own words, say, when it tells the user to say "unmute". Main thread only.
+    func reset() {
+        guard isRunning else { return }
+        beginRequest()
+    }
+
+    /// Main thread only.
     func stop() {
-        guard running else { return }
-        running = false
-        DispatchQueue.main.async {
-            self.restartTimer?.invalidate()
-            self.restartTimer = nil
-        }
+        guard isRunning else { return }
+        source = nil
+        generation += 1
+        restartTimer?.invalidate()
+        restartTimer = nil
         task?.cancel()
         task = nil
+        lock.lock()
         request?.endAudio()
         request = nil
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        lock.unlock()
+        if let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            self.engine = nil
+        }
     }
 
+    private func feed(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        let request = self.request
+        lock.unlock()
+        request?.append(buffer)
+    }
+
+    /// A fresh recognition request. Main thread only.
     private func beginRequest() {
-        guard running, let recognizer else { return }
+        guard isRunning, let recognizer else { return }
+        generation += 1
+        let current = generation
         task?.cancel()
-        request?.endAudio()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }
         request.taskHint = .search
+        lock.lock()
+        self.request?.endAudio()
         self.request = request
-        heard = ""
+        lock.unlock()
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self, self.running else { return }
-            if let result {
-                let text = result.bestTranscription.formattedString
-                if let phrase = Self.matches(text), self.heard != text {
-                    self.heard = text
+            // Off the main thread; state is only touched back on it.
+            let text = result?.bestTranscription.formattedString ?? ""
+            let phrase = Self.matches(text)
+            let ended = result?.isFinal == true || error != nil
+            let code = (error as NSError?)?.code
+            DispatchQueue.main.async {
+                guard let self, self.generation == current, self.isRunning else { return }
+                if let phrase {
                     Self.logger.info("heard \(phrase, privacy: .public)")
-                    DispatchQueue.main.async {
-                        MainActor.assumeIsolated { self.onWake?(phrase) }
-                    }
+                    MainActor.assumeIsolated { self.onWake?(phrase) }
                 }
-            }
-            if let error {
-                let code = (error as NSError).code
+                guard ended, self.generation == current, self.isRunning else { return }
+                // A request ends after a final result, a long pause, or an error. Without
+                // a new one nothing more would be heard until the restart timer fired.
                 // 216 and 1110 are the task being cancelled or ended by us.
-                if code != 216, code != 1110 {
-                    Self.logger.info("recognition ended: \(String(describing: error), privacy: .public)")
+                if let code, code != 216, code != 1110 {
+                    Self.logger.info("recognition ended (\(code)); starting again")
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + (code == nil ? 0 : 0.5)) {
+                    guard self.generation == current, self.isRunning else { return }
+                    self.beginRequest()
                 }
             }
         }

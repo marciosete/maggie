@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 
@@ -11,6 +12,9 @@ final class RemoteVoiceEndpoint: VoiceAudioEndpoint {
     private let socket: RemoteSocket
     private var onChunk: (@Sendable (Data) -> Void)?
     private var muted = false
+    var onMutedAudio: (@Sendable (AVAudioPCMBuffer) -> Void)?
+    private let listenFormat = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32, sampleRate: Double(VoiceAudioFormat.sampleRate), channels: 1, interleaved: false)!
 
     init(deviceName: String, socket: RemoteSocket) {
         endpointName = deviceName
@@ -34,6 +38,9 @@ final class RemoteVoiceEndpoint: VoiceAudioEndpoint {
     /// so GPT-Live's clock keeps running.
     func received(_ pcm: Data) {
         guard let onChunk else { return }
+        if muted, let onMutedAudio, let buffer = VoiceAudioFormat.buffer(from: pcm, format: listenFormat) {
+            onMutedAudio(buffer)
+        }
         onChunk(muted ? Data(count: pcm.count) : pcm)
     }
 

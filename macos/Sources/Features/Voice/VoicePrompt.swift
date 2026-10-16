@@ -46,6 +46,8 @@ enum VoicePrompt {
 
         Delegate before giving an answer that depends on backend work.
         Do not guess the result while waiting. Never say a session was told, opened or closed until the backend reports it.
+        You cannot mute or unmute yourself: Maggie does it when the user says "mute" or "unmute". \
+        Never say you are muted or unmuted, or that you heard "unmute", on your own; when asked, delegate and say a word or two.
         While the backend works, say one short thing like "On it" or "Checking", not more.
         When Maggie reports that a session finished or needs the user, tell them straight away, briefly.
         Keep listening through pauses; ignore coughs, typing, and talk not addressed to you.

@@ -82,8 +82,23 @@ final class VoiceAudioEngine: @unchecked Sendable {
     private(set) var chunksCaptured = 0
     private(set) var bytesPlayed = 0
 
-    /// Muted, the microphone sends silence, so the session's clock keeps running.
-    var isMuted = false
+    /// Muted, the microphone sends silence, so the session's clock keeps running. Set on
+    /// the main thread, read on the audio thread.
+    var isMuted: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return muted }
+        set { lock.lock(); muted = newValue; lock.unlock() }
+    }
+
+    /// Called on the audio thread with what the microphone hears while muted, at 24 kHz
+    /// mono, for the Mac's own listening for "unmute".
+    var onMutedAudio: (@Sendable (AVAudioPCMBuffer) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return mutedAudio }
+        set { lock.lock(); mutedAudio = newValue; lock.unlock() }
+    }
+
+    /// Only under `lock`.
+    private var muted = false
+    private var mutedAudio: (@Sendable (AVAudioPCMBuffer) -> Void)?
 
     /// Speech has been scheduled that hasn't finished playing. Set on any thread.
     private(set) var isPlaying = false
@@ -237,7 +252,12 @@ final class VoiceAudioEngine: @unchecked Sendable {
         }
         guard output.frameLength > 0, let channel = output.floatChannelData?[0] else { return }
         let samples = UnsafeBufferPointer(start: channel, count: Int(output.frameLength))
-        let pcm = isMuted ? Data(count: samples.count * 2) : VoiceAudioFormat.pcm16(from: samples)
+        lock.lock()
+        let muted = self.muted
+        let listener = muted ? mutedAudio : nil
+        lock.unlock()
+        let pcm = muted ? Data(count: samples.count * 2) : VoiceAudioFormat.pcm16(from: samples)
+        listener?(output)
 
         lock.lock()
         pending.append(pcm)

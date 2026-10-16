@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import OSLog
@@ -15,6 +16,10 @@ protocol VoiceAudioEndpoint: AnyObject {
 
     func setMuted(_ muted: Bool)
     func stopCapture()
+
+    /// Given what the microphone hears while muted, on any thread, so the Mac can listen
+    /// for "unmute" in it. GPT-Live is sent silence meanwhile.
+    var onMutedAudio: (@Sendable (AVAudioPCMBuffer) -> Void)? { get set }
 
     /// Plays speech as it arrives.
     func play(_ pcm: Data)
@@ -54,6 +59,11 @@ final class LocalVoiceEndpoint: VoiceAudioEndpoint {
             inputDevice: VoiceDevices.device(uid: inputDeviceUID),
             outputDevice: VoiceDevices.device(uid: outputDeviceUID),
             onChunk: onChunk)
+    }
+
+    var onMutedAudio: (@Sendable (AVAudioPCMBuffer) -> Void)? {
+        get { audio.onMutedAudio }
+        set { audio.onMutedAudio = newValue }
     }
 
     func setMuted(_ muted: Bool) { audio.isMuted = muted }
@@ -145,6 +155,9 @@ final class VoiceAgent: ObservableObject {
         var isFailed: Bool { if case .failed = self { return true } else { return false } }
     }
 
+    /// The user's words are checked for "mute" once no more have come for this long.
+    static let commandSettle: TimeInterval = 0.35
+
     /// A pause this long ends the user's spoken turn in the transcript.
     static let userPause: TimeInterval = 2.0
     static let assistantPause: TimeInterval = 0.9
@@ -227,8 +240,11 @@ final class VoiceAgent: ObservableObject {
 
     private init() {
         endpoint = localEndpoint
+        localEndpoint.onMutedAudio = { [wake] buffer in wake.append(buffer) }
         localEndpoint.onPlayingChanged = { [weak self] playing in
             self?.assistantSpeaking = playing
+            // What the voice just said, echoing back, can't count as the user's "unmute".
+            if !playing { self?.wake.reset() }
             if !playing, self?.afterSpeaking != nil {
                 self?.schedule("after-speaking", after: 0.4) { [weak self] in self?.speakingEnded() }
             }
@@ -287,23 +303,54 @@ final class VoiceAgent: ObservableObject {
         updateWakeListening()
     }
 
+    /// The user said "mute" or "unmute", to GPT-Live or to the Mac. Unmuted by voice, the
+    /// voice says it's listening, since nothing else tells the user it worked.
+    private func spoken(_ command: VoiceCommand, heard: String) {
+        switch command {
+        case .mute:
+            guard phase == .live, !isMuted else { return }
+            record(.notice, "Heard \"\(heard)\"; muted.")
+            setMuted(true)
+        case .unmute:
+            guard phase == .live, isMuted else { return }
+            record(.notice, "Heard \"\(heard)\"; unmuted.")
+            setMuted(false)
+            append(instruction: "The user just unmuted the microphone by voice. Say only that you're listening, in a few words. Then listen.")
+        }
+    }
+
     private func woken(by phrase: String) {
+        // The voice's own speech, echoing back, isn't the user.
+        guard !assistantSpeaking else { return }
         switch phase {
         case .paused:
             record(.notice, "Heard \"\(phrase)\".")
             resume()
         case .live where isMuted:
-            record(.notice, "Heard \"\(phrase)\"; unmuted.")
-            setMuted(false)
+            spoken(.unmute, heard: phrase)
         default:
             break
         }
     }
 
-    /// The Mac listens for a wake phrase while the voice can't hear: muted, or paused.
+    /// Where the Mac listens for a wake phrase, if it does: only while the voice can't
+    /// hear. Muted, it listens to the voice's own microphone, which keeps running (a second
+    /// engine on that microphone hears silence under voice processing). Paused, it opens
+    /// the Mac's microphone itself; a paused handset has no microphone here.
+    nonisolated static func wakeSource(phase: Phase, muted: Bool, local: Bool) -> VoiceWakeListener.Source? {
+        switch phase {
+        case .live where muted: return .fed
+        case .paused where local: return .microphone
+        default: return nil
+        }
+    }
+
+    private var wakeSource: VoiceWakeListener.Source? {
+        Self.wakeSource(phase: phase, muted: isMuted, local: endpoint === localEndpoint)
+    }
+
     private func updateWakeListening() {
-        let wanted = endpoint === localEndpoint && (phase == .paused || (phase == .live && isMuted))
-        guard wanted else {
+        guard let source = wakeSource else {
             wake.stop()
             return
         }
@@ -312,8 +359,8 @@ final class VoiceAgent: ObservableObject {
                 record(.notice, "Speech recognition isn't allowed, so \"unmute\" by voice won't work; click the microphone instead.")
                 return
             }
-            guard endpoint === localEndpoint, phase == .paused || (phase == .live && isMuted) else { return }
-            wake.start()
+            guard wakeSource == source else { return }
+            wake.start(from: source)
         }
     }
 
@@ -389,8 +436,10 @@ final class VoiceAgent: ObservableObject {
         if wasCapturing { self.endpoint.stopCapture() }
         self.endpoint.stopPlayback()
         self.endpoint = next
+        next.onMutedAudio = { [wake] buffer in wake.append(buffer) }
         endpointName = next.endpointName
         if wasCapturing { startCapture() }
+        updateWakeListening()
     }
 
     // MARK: The GPT-Live session
@@ -461,6 +510,8 @@ final class VoiceAgent: ObservableObject {
             phase = .live
             lastUserSpeech = Date()
             startCapture()
+            // A fresh session after a rollover or a reconnect is muted too.
+            if isMuted { socket?.send(["type": "session.input_audio.mute"]) }
             startMaintenance()
             switch greeting {
             case .fresh:
@@ -477,6 +528,9 @@ final class VoiceAgent: ObservableObject {
             userSpeaking = true
             lastUserSpeech = Date()
             schedule("user", after: Self.userPause) { [weak self] in self?.flush(.user) }
+            // "Mute" is acted on here, once the words settle, rather than waiting on
+            // GPT-Live to delegate it, which it often doesn't.
+            schedule("command", after: Self.commandSettle) { [weak self] in self?.heardUser() }
 
         case .outputTranscript(let delta):
             ledger.output(delta)
@@ -700,10 +754,20 @@ final class VoiceAgent: ObservableObject {
 
     // MARK: Transcript
 
+    /// What the user has said so far this turn, checked for a command.
+    private func heardUser() {
+        cancel("command")
+        let text = ledger.pendingUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let command = VoiceCommand.parse(text) else { return }
+        flush(.user)
+        spoken(command, heard: text)
+    }
+
     private func flush(_ role: VoiceTurn.Role) {
         switch role {
         case .user:
             cancel("user")
+            cancel("command")
             userSpeaking = false
             let text = ledger.flushUser()
             if !text.isEmpty { record(.user, text) }
@@ -761,7 +825,7 @@ final class VoiceAgent: ObservableObject {
         if calls.contains(where: { $0.name == "remember" }) {
             socket.send([
                 "type": "session.update",
-                "session": ["delegation": ["responses": [
+                "session": ["delegation": ["type": "responses", "responses": [
                     "instructions": VoicePrompt.backendInstructions(memory: memory.prompt(), sessionsNow: tools.sessionsSummary()),
                 ]]],
             ])
