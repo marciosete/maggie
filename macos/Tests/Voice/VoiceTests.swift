@@ -291,6 +291,95 @@ struct VoiceAudioFormatTests {
     }
 }
 
+// MARK: - Previews
+
+@Suite
+struct VoicePreviewTests {
+    @Test func aVoiceIntroducesItself() {
+        #expect(VoicePreview.sample(for: "marin") == "Hi, I'm Marin, this is how I sound.")
+        #expect(VoicePreview.sample(for: "quartz") == "Hi, I'm Quartz, this is how I sound.")
+        #expect(VoicePreview.instructions(for: "marin").contains("word for word"))
+    }
+
+    @Test func theLineIsAskedForOnceAndIsOverWhenTheSpeechGoesQuiet() {
+        var collector = VoicePreviewCollector()
+        #expect(collector.take(.other("session.updated")) == .nothing)
+        #expect(collector.take(.started(sessionID: "s", expiresAt: nil)) == .ask)
+        #expect(collector.take(.started(sessionID: "s", expiresAt: nil)) == .nothing)
+        #expect(collector.take(.outputTranscript("Hi")) == .nothing)
+        // A tenth of a second of quiet, and of speech.
+        let quiet = Data(count: 4800)
+        let loud = Data(repeating: 0x10, count: 4800)
+        #expect(!VoicePreviewCollector.isLoud(quiet) && VoicePreviewCollector.isLoud(loud))
+        for _ in 0..<3 { #expect(collector.take(.outputAudio(quiet)) == .heard) }
+        for _ in 0..<5 { #expect(collector.take(.outputAudio(loud)) == .heard) }
+        for _ in 0..<7 { #expect(collector.take(.outputAudio(quiet)) == .heard) }
+        // The eighth quiet tenth makes 0.8 s: the line is over, kept with 0.2 s either side.
+        let step = collector.take(.outputAudio(quiet))
+        guard case .done(let sample) = step else {
+            Issue.record("expected the sample, got \(step)")
+            return
+        }
+        #expect(sample.count == (2 + 5 + 2) * 4800)
+        #expect(sample == Data(count: 2 * 4800) + loud + loud + loud + loud + loud + Data(count: 2 * 4800))
+        #expect(collector.take(.closed(reason: "client_closed", seconds: 2)) == .nothing)
+    }
+
+    @Test func aStreamThatStopsShortGivesWhatWasHeard() {
+        var collector = VoicePreviewCollector()
+        _ = collector.take(.started(sessionID: "s", expiresAt: nil))
+        let loud = Data(repeating: 0x10, count: 4800)
+        _ = collector.take(.outputAudio(loud))
+        _ = collector.take(.outputAudio(Data(count: 4800)))
+        #expect(collector.sample.count == 2 * 4800)
+        #expect(collector.sample.prefix(4800) == loud)
+        // Nothing loud yet: everything so far.
+        var silent = VoicePreviewCollector()
+        _ = silent.take(.outputAudio(Data(count: 100)))
+        #expect(silent.sample.count == 100)
+    }
+
+    @Test func aSessionThatFailsOrClosesSilentIsAFailure() {
+        var collector = VoicePreviewCollector()
+        #expect(collector.take(.error(code: "invalid_value", message: "bad voice", clientEventID: nil)) == .failed("bad voice"))
+        #expect(collector.take(.closed(reason: "server_error", seconds: nil)) == .failed("GPT-Live closed the session: server_error"))
+    }
+
+    @MainActor
+    @Test func samplesAreKeptPerVoiceApartFromOtherFiles() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-previews-\(UUID().uuidString)")
+        let preview = VoicePreview(directory: directory)
+        #expect(preview.file(for: "marin").lastPathComponent == "marin.pcm")
+        #expect(preview.file(for: "marin").path.hasPrefix(directory.path + "/"))
+        #expect(preview.phase == .idle)
+    }
+
+    /// Fetches a real sample and plays it; run with TEST_RUNNER_VOICE_PREVIEW_LIVE=1.
+    @MainActor
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["VOICE_PREVIEW_LIVE"] == "1"))
+    func aRealVoiceSaysItsLine() async throws {
+        let apiKey = try #require(OpenAI.apiKey())
+        let voice = ProcessInfo.processInfo.environment["VOICE_PREVIEW_VOICE"] ?? "quartz"
+        let fetch = VoicePreviewFetch(apiKey: apiKey, voice: voice, line: VoicePreview.sample(for: voice), instructions: VoicePreview.instructions(for: voice))
+        let pcm: Data = try await withCheckedThrowingContinuation { continuation in
+            fetch.start { continuation.resume(with: $0) }
+        }
+        let seconds = Double(pcm.count) / 2 / Double(VoiceAudioFormat.sampleRate)
+        print("sample for \(voice): \(pcm.count) bytes, \(seconds) s")
+        try pcm.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("voice-preview-\(voice).pcm"))
+        #expect(seconds > 1 && seconds < 15)
+        let player = VoicePreviewPlayer()
+        let played: Bool = try await withCheckedThrowingContinuation { continuation in
+            do {
+                try player.play(pcm, outputDevice: nil) { continuation.resume(returning: true) }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+        #expect(played)
+    }
+}
+
 // MARK: - Devices
 
 @Suite

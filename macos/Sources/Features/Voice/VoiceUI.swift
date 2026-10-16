@@ -215,10 +215,53 @@ private struct VoiceTurnView: View {
     }
 }
 
+/// One voice to choose, with Play to hear it.
+struct VoiceChoiceRow: View {
+    let voice: String
+    let selected: Bool
+    @ObservedObject var preview: VoicePreview
+    var choose: () -> Void
+
+    var body: some View {
+        HStack {
+            Button(action: choose) {
+                HStack(spacing: 8) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    Text(voice.capitalized)
+                        .fontWeight(selected ? .semibold : .regular)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(voice.capitalized)
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+            Spacer()
+            Button {
+                preview.play(voice)
+            } label: {
+                switch preview.phase {
+                case .fetching(let fetching) where fetching == voice:
+                    ProgressView().controlSize(.small)
+                case .playing(let playing) where playing == voice:
+                    Image(systemName: "stop.circle.fill")
+                default:
+                    Image(systemName: "play.circle")
+                }
+            }
+            .buttonStyle(.borderless)
+            .frame(width: 20)
+            .accessibilityLabel(preview.phase == .playing(voice) ? "Stop \(voice.capitalized)" : "Play \(voice.capitalized)")
+            .help(preview.phase == .playing(voice) ? "Stop" : "Hear \(voice.capitalized)")
+        }
+    }
+}
+
 /// Settings → Voice: the key, the voices and models, and when to pause.
 struct VoiceSettingsView: View {
     @ObservedObject private var settings = VoiceSettings.shared
     @ObservedObject private var agent = VoiceAgent.shared
+    @ObservedObject private var preview = VoicePreview.shared
     @State private var apiKey = OpenAI.apiKey() ?? ""
     @State private var keySaved = OpenAI.apiKey() != nil
     @State private var inputs: [VoiceDevices.Device] = []
@@ -267,10 +310,21 @@ struct VoiceSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Voice") {
-                Picker("Voice", selection: $settings.voice) {
-                    ForEach(VoiceSettings.voices, id: \.self) { Text($0.capitalized).tag($0) }
+            Section {
+                ForEach(VoiceSettings.voices, id: \.self) { voice in
+                    VoiceChoiceRow(voice: voice, selected: settings.voice == voice, preview: preview) {
+                        settings.voice = voice
+                    }
                 }
+            } header: {
+                Text("Voice")
+            } footer: {
+                Text(voiceFooter)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Backend") {
                 Picker("Backend model", selection: $settings.backendModel) {
                     ForEach(VoiceSettings.backendModels, id: \.self) { Text($0).tag($0) }
                 }
@@ -310,6 +364,12 @@ struct VoiceSettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear(perform: refreshDevices)
+        .onDisappear { preview.stop() }
+    }
+
+    private var voiceFooter: String {
+        if case .failed(_, let message) = preview.phase { return message }
+        return "Play hears a voice say a line of its own; the first play of each costs a few seconds of GPT-Live. A change of voice takes effect when the voice next starts."
     }
 
     /// A chosen device that isn't connected is kept, and said to be missing.

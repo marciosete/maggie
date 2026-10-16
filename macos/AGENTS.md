@@ -45,6 +45,10 @@ or `OPENAI_API_KEY`. Tests are `macos/Tests/Voice/`. A GPT-Live session expires 
 hours after it starts (`expires_at` in `session.started`); `VoiceAgent` rolls to a new
 one before that, and pauses the session after the quiet time set in Settings › Voice.
 Memory and transcripts live in `~/Library/Application Support/<bundle id>/Voice/`.
+Settings › Voice plays a sample of each voice (`VoicePreview`): OpenAI's speech endpoint
+knows only two of GPT-Live's voices, so a sample is a brief GPT-Live session in that voice
+told to say its line, ended when its audio goes quiet after speaking (the stream itself
+never stops while silence goes in), and kept under `Voice/previews/`.
 
 ## AppleScript
 
