@@ -874,53 +874,37 @@ private struct SessionBoardCompactLabel: LabelStyle {
 
 /// The board's filters, on the header's line next to the search: a menu each for
 /// folders, groups, status and color, offering only what some session has, and a ✕
-/// that clears them all.
+/// that clears them all. The sidebar shares them, in a menu of its own.
 private struct SessionBoardFilterBar: View {
     @ObservedObject var model: TabSidebarModel
     let tabs: [TabSidebarModel.Tab]
     let items: [WorkItem]
     let mode: SessionBoardMode
 
-    /// Folders and groups are the sessions'; work items alone have a status and a color.
-    private var showsSessionFilters: Bool { mode != .workItems }
-
     @ObservedObject private var board = SessionBoardSettings.shared
 
-    /// The colors of the cards shown: the sessions', the work items', or both, by
-    /// their labels where they have them.
-    private var colorOptions: [SessionBoardFilterMenu<TerminalTabColor>.Option] {
-        let used = Set((mode == .workItems ? [] : tabs.map(\.color)) + (mode == .sessions ? [] : items.map(\.color)))
-        return TerminalTabColor.allCases
-            .filter(used.contains)
-            .map { .init(value: $0, label: board.name(of: $0), image: $0.swatchImage(selected: false)) }
-    }
-
     var body: some View {
+        let options = SessionBoardFilterOptions(model: model, tabs: tabs, items: items, mode: mode, board: board)
         HStack(spacing: 6) {
-            if showsSessionFilters {
-                SessionBoardFilterMenu(
-                    title: "Folder", plural: "Folders",
-                    options: folderOptions,
-                    selection: $model.boardFilter.folders)
+            SessionBoardFilterMenu(
+                title: "Folder", plural: "Folders",
+                options: options.folders,
+                selection: $model.boardFilter.folders)
 
-                SessionBoardFilterMenu(
-                    title: "Group", plural: "Groups",
-                    options: groupOptions,
-                    selection: $model.boardFilter.groups)
-            }
+            SessionBoardFilterMenu(
+                title: "Group", plural: "Groups",
+                options: options.groups,
+                selection: $model.boardFilter.groups)
 
             SessionBoardFilterMenu(
                 title: "Status", plural: "Statuses",
-                options: board.columns.map { .init(value: $0.id, label: $0.label, image: $0.menuImage) },
+                options: options.columns,
                 selection: $model.boardFilter.columns)
 
-            // With one color there is nothing to choose between.
-            if colorOptions.count > 1 {
-                SessionBoardFilterMenu(
-                    title: "Color", plural: "Colors",
-                    options: colorOptions,
-                    selection: $model.boardFilter.colors)
-            }
+            SessionBoardFilterMenu(
+                title: "Color", plural: "Colors",
+                options: options.colors,
+                selection: $model.boardFilter.colors)
 
             if model.boardFilter.isActive {
                 Button {
@@ -936,74 +920,20 @@ private struct SessionBoardFilterBar: View {
             }
         }
     }
-
-    /// Every folder open in the sidebar, as it lists them, even one with no sessions,
-    /// and any other folder a session is in; then the sessions in none.
-    private var folderOptions: [SessionBoardFilterMenu<UUID?>.Option] {
-        let folderImage = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        var folders = model.foldersInWindow
-        for tab in tabs {
-            guard let id = tab.folderID, !folders.contains(where: { $0.id == id }),
-                  let folder = UserTabFolderStore.shared[id] else { continue }
-            folders.append(folder)
-        }
-        var options: [SessionBoardFilterMenu<UUID?>.Option] = folders.map {
-            .init(value: $0.id, label: $0.name, image: folderImage)
-        }
-        if tabs.contains(where: { $0.folderID == nil }), !options.isEmpty {
-            options.append(.init(value: nil, label: "No Folder", image: NSImage(systemSymbolName: "tray", accessibilityDescription: nil)))
-        }
-        return options
-    }
-
-    /// The groups the sessions are in, in sidebar order, then the sessions in none.
-    private var groupOptions: [SessionBoardFilterMenu<UUID?>.Option] {
-        var seen = Set<UUID?>()
-        var options: [SessionBoardFilterMenu<UUID?>.Option] = []
-        for tab in tabs where seen.insert(tab.groupID).inserted {
-            guard let id = tab.groupID, let group = UserTabGroupStore.shared[id] else { continue }
-            options.append(.init(value: id, label: group.name, image: group.color.swatchImage(selected: false)))
-        }
-        if seen.contains(nil), !options.isEmpty {
-            options.append(.init(
-                value: nil, label: "No Group", image: NSImage(systemSymbolName: "square.dashed", accessibilityDescription: nil)))
-        }
-        return options
-    }
 }
 
 /// One filter: a pill that names what it picks, opening a menu of choices that each
 /// toggle. With nothing to choose between, it is left out.
 private struct SessionBoardFilterMenu<Value: Hashable>: View {
-    struct Option {
-        let value: Value
-        let label: String
-        let image: NSImage?
-    }
-
     let title: String
     let plural: String
-    let options: [Option]
+    let options: [SessionBoardFilterOption<Value>]
     @Binding var selection: Set<Value>
 
     var body: some View {
         if !options.isEmpty {
             Menu {
-                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                    Toggle(isOn: Binding(
-                        get: { selection.contains(option.value) },
-                        set: { _ in SessionBoardFilter.toggle(option.value, in: &selection) })) {
-                        Label {
-                            Text(option.label)
-                        } icon: {
-                            if let image = option.image { Image(nsImage: image) }
-                        }
-                    }
-                }
-                if !selection.isEmpty {
-                    Divider()
-                    Button("Show All") { selection = [] }
-                }
+                SessionBoardFilterToggles(options: options, selection: $selection)
             } label: {
                 HStack(spacing: 4) {
                     Text(label)
@@ -1029,12 +959,7 @@ private struct SessionBoardFilterMenu<Value: Hashable>: View {
 
     /// `Folder`, the one picked, or how many.
     private var label: String {
-        let picked = options.filter { selection.contains($0.value) }
-        switch picked.count {
-        case 0: return title
-        case 1: return picked[0].label
-        default: return "\(picked.count) \(plural)"
-        }
+        SessionBoardFilterOptions.label(title, plural: plural, options: options, selection: selection)
     }
 }
 

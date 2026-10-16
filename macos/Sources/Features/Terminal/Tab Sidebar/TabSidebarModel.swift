@@ -196,8 +196,12 @@ final class TabSidebarModel: ObservableObject {
         }
     }
 
-    /// What the board shows. Kept while it is closed, so it opens as it was left.
+    /// What the sidebar and the board show: one filter, so the board opens on what the
+    /// sidebar lists, and what is picked on the board narrows the sidebar when it closes.
     @Published var boardFilter = SessionBoardFilter()
+
+    /// Whether the filter leaves some sessions out.
+    var isFiltering: Bool { boardFilter.isActive }
 
     /// Goes up each time the selected session is to be scrolled into view.
     @Published private(set) var revealRequest = 0
@@ -208,11 +212,15 @@ final class TabSidebarModel: ObservableObject {
     }
 
     /// Unfolds whatever holds the selected session and scrolls the sidebar to it. A
-    /// search that hides it is cleared.
+    /// search, and then a filter, that hides it is cleared.
     func revealSelected() {
         guard let tab = rows.lazy.flatMap(\.allTabs).first(where: \.isSelected) else { return }
-        if isSearching, !shownRows.flatMap(\.allTabs).contains(where: { $0.id == tab.id }) {
+        func isHidden() -> Bool { !shownRows.flatMap(\.allTabs).contains(where: { $0.id == tab.id }) }
+        if isSearching, isHidden() {
             searchQuery = ""
+        }
+        if isFiltering, isHidden() {
+            boardFilter = SessionBoardFilter()
         }
         if let groupID = tab.groupID {
             UserTabGroupStore.shared.update(groupID) { $0.isCollapsed = false }
@@ -510,10 +518,13 @@ final class TabSidebarModel: ObservableObject {
 
     var isSearching: Bool { !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    /// The rows to show: all of them, or those matching the search.
+    /// The rows to show: all of them, or those the filter shows that match the search.
     var shownRows: [Row] {
-        TabSidebarSearch.filter(rows, query: searchQuery, infos: infos)
+        TabSidebarSearch.filter(TabSidebarFilter.filter(rows, by: boardFilter), query: searchQuery, infos: infos)
     }
+
+    /// Whether a search or a filter leaves sessions out.
+    var isNarrowed: Bool { isSearching || isFiltering }
 
     /// The session Return opens while searching.
     var highlightedTab: Tab? {

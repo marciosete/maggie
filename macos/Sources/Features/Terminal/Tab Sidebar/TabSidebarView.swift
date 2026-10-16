@@ -158,16 +158,19 @@ struct TabSidebarView: View {
             // Leave room for the traffic lights and the titlebar.
             Color.clear.frame(height: max(topInset, 8))
 
-            TabSidebarSearchField(model: model)
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
+            HStack(spacing: 4) {
+                TabSidebarSearchField(model: model)
+                TabSidebarFilterButton(model: model)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 4)
 
             TabSidebarLostSessionsBanner()
 
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: TabSidebarStyle.rowSpacing(settings.rowStyle)) {
-                        if model.isSearching && model.shownRows.isEmpty {
+                        if model.isNarrowed && model.shownRows.isEmpty {
                             Text("No sessions match")
                                 .font(TabSidebarStyle.titleFont)
                                 .foregroundStyle(.secondary)
@@ -373,6 +376,84 @@ private struct TabSidebarSearchField: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(focused ? 0.1 : 0.06)))
         .help("Search Sessions (⇧⌘O)")
         .onChange(of: model.searchFocusRequest) { _ in focused = true }
+    }
+}
+
+// MARK: - Filter
+
+/// Narrows the sidebar to the sessions in the picked folders and groups, with the picked
+/// colors, in the picked statuses: the board's filters, shared with it, in one menu with
+/// a submenu each since the sidebar is narrow. While any is picked the button fills,
+/// counts the picks, and the menu offers to clear them.
+private struct TabSidebarFilterButton: View {
+    @ObservedObject var model: TabSidebarModel
+    @ObservedObject private var board = SessionBoardSettings.shared
+
+    private static let titles = ["Folder", "Group", "Status", "Color"]
+
+    var body: some View {
+        let options = SessionBoardFilterOptions(model: model, tabs: model.boardTabs, board: board)
+        let filter = model.boardFilter
+        let labels = [
+            SessionBoardFilterOptions.label("Folder", plural: "Folders", options: options.folders, selection: filter.folders),
+            SessionBoardFilterOptions.label("Group", plural: "Groups", options: options.groups, selection: filter.groups),
+            SessionBoardFilterOptions.label("Status", plural: "Statuses", options: options.columns, selection: filter.columns),
+            SessionBoardFilterOptions.label("Color", plural: "Colors", options: options.colors, selection: filter.colors),
+        ]
+        Menu {
+            submenu("Folder", picked: labels[0], options: options.folders, selection: $model.boardFilter.folders)
+            submenu("Group", picked: labels[1], options: options.groups, selection: $model.boardFilter.groups)
+            submenu("Status", picked: labels[2], options: options.columns, selection: $model.boardFilter.columns)
+            submenu("Color", picked: labels[3], options: options.colors, selection: $model.boardFilter.colors)
+            if filter.isActive {
+                Divider()
+                Button("Clear Filters") { model.boardFilter = SessionBoardFilter() }
+            }
+        } label: {
+            Image(systemName: filter.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                .font(.system(size: 13))
+                .foregroundStyle(filter.isActive ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+                .overlay(alignment: .topTrailing) {
+                    if filter.isActive {
+                        Text("\(filter.count)")
+                            .font(.system(size: 8, weight: .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 3)
+                            .frame(minWidth: 12, minHeight: 12)
+                            .background(Capsule().fill(Color.accentColor))
+                            .offset(x: 3, y: -3)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(filter.isActive ? "Showing \(Self.summary(of: labels))" : "Filter Sessions")
+    }
+
+    /// `Folder`, or `Folder: Ghostty` with something picked. Left out with nothing to
+    /// choose between.
+    @ViewBuilder
+    private func submenu<Value: Hashable>(
+        _ title: String,
+        picked: String,
+        options: [SessionBoardFilterOption<Value>],
+        selection: Binding<Set<Value>>
+    ) -> some View {
+        if !options.isEmpty {
+            Menu(picked == title ? title : "\(title): \(picked)") {
+                SessionBoardFilterToggles(options: options, selection: selection)
+            }
+        }
+    }
+
+    /// What is picked, such as `Ghostty, 2 Colors`.
+    private static func summary(of labels: [String]) -> String {
+        zip(labels, titles).filter { $0 != $1 }.map(\.0).joined(separator: ", ")
     }
 }
 
