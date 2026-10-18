@@ -4,7 +4,11 @@
   <br>Maggie
 </h1>
   <p align="center">
-    The Agent Development Environment for parallel coding agents. Built on Ghostty.
+    The Agent Development Environment for Mac. Built on Ghostty.
+    <br />
+    <a href="https://getmaggie.dev"><strong>getmaggie.dev</strong></a>
+    ·
+    <a href="https://getmaggie.dev/download">Download</a>
     <br />
     <a href="#what-it-does">What it does</a>
     ·
@@ -27,8 +31,20 @@ which are waiting on you and which are done, and watch the cost and the token
 rate as they go. It is a real terminal underneath, [Ghostty](https://ghostty.org):
 Ghostty's renderer, Ghostty's config, Ghostty's shell integration.
 
+Software engineering has become orchestration: several coding agents working in
+parallel, each needing you at a different moment. An IDE gives you one project,
+one tree, one cursor, and a terminal gives you tabs that all look alike. Neither
+tells you which of your eight sessions is waiting on you, which one just
+finished, or what the morning cost. Maggie is built around that job, so control
+stays with you and the load on your attention does not grow with the number of
+agents.
+
 Maggie is macOS only. It is an independent project and is not affiliated with
 Ghostty, Anthropic or OpenAI.
+
+```sh
+curl -fsSL https://getmaggie.dev/install.sh | sh
+```
 
 ## What it does
 
@@ -58,13 +74,13 @@ again, as often as you like. The old session stays until you close it.
 **A sidebar of sessions.** Tabs are vertical, named, grouped and searchable. A
 session's tab takes the colour of what its agent is doing:
 
-| Colour | Meaning                                                              |
-| ------ | -------------------------------------------------------------------- |
-| blue   | working on a request                                                 |
-| red    | needs you: a permission, a question or a dialog                      |
-| yellow | finished, with edits that aren't committed yet                       |
-| teal   | committed in its worktree, not yet landed on the main checkout       |
-| none   | finished, everything committed and landed                            |
+| Colour | Meaning                                                        |
+| ------ | -------------------------------------------------------------- |
+| blue   | working on a request                                           |
+| red    | needs you: a permission, a question or a dialog                |
+| yellow | finished, with edits that aren't committed yet                 |
+| teal   | committed in its worktree, not yet landed on the main checkout |
+| none   | finished, everything committed and landed                      |
 
 Pick **Auto** to follow the agent, **Attention** to only light up when a
 session needs you, or any fixed colour. Hover a session for its models, tokens
@@ -99,10 +115,18 @@ feed.
 
 ### Download
 
-Get `Maggie.dmg` from the
-[latest release](https://github.com/marciosete/maggie/releases/latest) and drag
-Maggie to Applications. Every feature or fix pushed to `main` becomes a
-release, so the latest one is always current.
+The quickest way is the one-liner, which downloads the latest signed and
+notarized build and puts `Maggie.app` in `/Applications` (set `DEST` to
+install elsewhere):
+
+```sh
+curl -fsSL https://getmaggie.dev/install.sh | sh
+```
+
+Or get `Maggie.dmg` from [getmaggie.dev/download](https://getmaggie.dev/download)
+or the [latest release](https://github.com/marciosete/maggie/releases/latest)
+and drag Maggie to Applications. Every feature or fix pushed to `main` becomes
+a release, so the latest one is always current.
 
 Once installed, **Maggie › Check for Updates…** gets the next release from
 GitHub, and Maggie can check on its own if you let it.
