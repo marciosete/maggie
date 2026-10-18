@@ -213,28 +213,29 @@ jobs:
             Maggie.dmg
             appcast.xml
 
-  # The Homebrew cask in marciosete/homebrew-maggie follows each release. Skipped,
-  # like signing without its certificate, when the tap token isn't set.
+  # The Homebrew cask in marciosete/homebrew-maggie follows each release. It pushes
+  # with a deploy key that can write to that one repository and nothing else.
+  # Skipped, like signing without its certificate, when the key isn't set.
   homebrew:
     needs: [version, release]
     if: needs.version.outputs.bump != 'none'
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      HAS_TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY != '' }}
     steps:
-      - name: Skip without a tap token
-        if: env.TAP_TOKEN == ''
-        run: echo "HOMEBREW_TAP_TOKEN isn't set; the cask isn't updated."
+      - name: Skip without a tap key
+        if: env.HAS_TAP_KEY != 'true'
+        run: echo "HOMEBREW_TAP_KEY isn't set; the cask isn't updated."
 
       - uses: actions/checkout@v5
-        if: env.TAP_TOKEN != ''
+        if: env.HAS_TAP_KEY == 'true'
         with:
           repository: marciosete/homebrew-maggie
-          token: ${{ env.TAP_TOKEN }}
+          ssh-key: ${{ secrets.HOMEBREW_TAP_KEY }}
 
       - name: Update the cask
-        if: env.TAP_TOKEN != ''
+        if: env.HAS_TAP_KEY == 'true'
         run: |
           curl -sSL -o Maggie.dmg \
             "https://github.com/${{ github.repository }}/releases/download/v$VERSION/Maggie.dmg"
