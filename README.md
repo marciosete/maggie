@@ -129,6 +129,12 @@ install elsewhere):
 curl -fsSL https://getmaggie.dev/install.sh | sh
 ```
 
+With Homebrew:
+
+```sh
+brew install --cask marciosete/maggie/maggie
+```
+
 Or get `Maggie.dmg` from [getmaggie.dev/download](https://getmaggie.dev/download)
 or the [latest release](https://github.com/marciosete/maggie/releases/latest)
 and drag Maggie to Applications. Every feature or fix pushed to `main` becomes

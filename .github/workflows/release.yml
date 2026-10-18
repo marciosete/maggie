@@ -212,3 +212,36 @@ jobs:
             dist/Maggie-macos-universal.zip
             Maggie.dmg
             appcast.xml
+
+  # The Homebrew cask in marciosete/homebrew-maggie follows each release. Skipped,
+  # like signing without its certificate, when the tap token isn't set.
+  homebrew:
+    needs: [version, release]
+    if: needs.version.outputs.bump != 'none'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Skip without a tap token
+        if: env.TAP_TOKEN == ''
+        run: echo "HOMEBREW_TAP_TOKEN isn't set; the cask isn't updated."
+
+      - uses: actions/checkout@v5
+        if: env.TAP_TOKEN != ''
+        with:
+          repository: marciosete/homebrew-maggie
+          token: ${{ env.TAP_TOKEN }}
+
+      - name: Update the cask
+        if: env.TAP_TOKEN != ''
+        run: |
+          curl -sSL -o Maggie.dmg \
+            "https://github.com/${{ github.repository }}/releases/download/v$VERSION/Maggie.dmg"
+          sha="$(sha256sum Maggie.dmg | cut -d' ' -f1)"
+          sed -i -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$sha\"/" Casks/maggie.rb
+          git config user.name "maggie-release"
+          git config user.email "release@getmaggie.dev"
+          git add Casks/maggie.rb
+          git commit -m "maggie $VERSION" || echo "cask already at $VERSION"
+          git push
