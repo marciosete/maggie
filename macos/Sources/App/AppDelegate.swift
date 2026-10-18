@@ -154,6 +154,9 @@ class AppDelegate: NSObject,
         updateController.viewModel
     }
 
+    /// Holds Maggie closed until an update the feed marks critical is installed.
+    private(set) lazy var mandatoryUpdate = MandatoryUpdate(controller: updateController)
+
     /// The elapsed time since the process was started
     var timeSinceLaunch: TimeInterval {
         return ProcessInfo.processInfo.systemUptime - applicationLaunchTime
@@ -265,6 +268,10 @@ class AppDelegate: NSObject,
             updateController.startUpdater()
         } else {
             menuCheckForUpdates?.isHidden = true
+        }
+        // A Maggie the feed says is too old is held closed until it updates.
+        if Maggie.isMaggie {
+            mandatoryUpdate.checkAtLaunch()
         }
         // A Maggie installed from a checkout can also rebuild itself from there.
         if let menu = menuCheckForUpdates?.menu {
@@ -424,14 +431,24 @@ class AppDelegate: NSObject,
             //   - if we're restoring from persisted state
             //   - if we reopened the saved workspace
             if derivedConfig.initialWindow {
-                undoManager.disableUndoRegistration()
-                TerminalWorkspace.shared.restoreAtLaunch()
-                if TerminalController.all.isEmpty {
-                    _ = TerminalController.newWindow(ghostty)
+                // Held for a mandatory update, the windows wait until it is lifted.
+                if mandatoryUpdate.isHolding {
+                    mandatoryUpdate.onLift = { [weak self] in self?.openInitialWindows() }
+                } else {
+                    openInitialWindows()
                 }
-                undoManager.enableUndoRegistration()
             }
         }
+    }
+
+    /// The windows the app starts with: the saved workspace, or one new window.
+    private func openInitialWindows() {
+        undoManager.disableUndoRegistration()
+        TerminalWorkspace.shared.restoreAtLaunch()
+        if TerminalController.all.isEmpty {
+            _ = TerminalController.newWindow(ghostty)
+        }
+        undoManager.enableUndoRegistration()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -498,6 +515,9 @@ class AppDelegate: NSObject,
         // window is still initializing and is not visible but the user clicked
         // the dock icon.
         guard TerminalController.all.isEmpty else { return true }
+
+        // Held for a mandatory update, nothing opens but its window.
+        guard !mandatoryUpdate.isHolding else { return true }
 
         // If the application isn't active yet then we don't want to process
         // this because we're not ready. This happens sometimes in Xcode runs

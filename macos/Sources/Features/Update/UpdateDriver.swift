@@ -199,9 +199,11 @@ class UpdateDriver: NSObject, SPUUserDriver {
     // MARK: No-Window Fallback
 
     /// True if there is a target that can render our unobtrusive update checker.
+    /// The window Maggie is held behind for a mandatory update is one: it shows the
+    /// update's progress itself, and Sparkle's dialogs would offer to skip it.
     var hasUnobtrusiveTarget: Bool {
         NSApp.windows.contains { window in
-            (window is TerminalWindow || window is QuickTerminalWindow) &&
+            (window is TerminalWindow || window is QuickTerminalWindow || window is MandatoryUpdateWindow) &&
             window.isVisible
         }
     }

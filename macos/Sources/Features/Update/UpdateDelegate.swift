@@ -19,6 +19,18 @@ extension UpdateDriver: SPUUpdaterDelegate {
         }
     }
 
+    /// The feed's answer, from the launch probe or a real check. Maggie holds itself
+    /// closed when the update is critical (see MandatoryUpdate).
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        guard Maggie.isMaggie, let appDelegate = NSApp.delegate as? AppDelegate else { return }
+        appDelegate.mandatoryUpdate.found(item)
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: any Error) {
+        guard Maggie.isMaggie, let appDelegate = NSApp.delegate as? AppDelegate else { return }
+        appDelegate.mandatoryUpdate.notFound()
+    }
+
     /// Called when an update is scheduled to install silently,
     /// which occurs when `auto-update = download`.
     ///

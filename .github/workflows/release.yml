@@ -7,6 +7,10 @@
 # feat → minor, fix/perf → patch, a breaking change → major. Tags are the only
 # record; see fork/next-version.sh.
 #
+# fork/minimum-version names the oldest version that may keep running; the
+# appcast carries it, and an older Maggie holds itself closed until it updates.
+# See fork/minimum-build.sh.
+#
 # Secrets, all optional:
 #   MACOS_CERTIFICATE        Developer ID Application certificate, .p12 as base64
 #   MACOS_CERTIFICATE_PWD    its password
@@ -45,6 +49,7 @@ jobs:
       version: ${{ steps.next.outputs.version }}
       build: ${{ steps.next.outputs.build }}
       commit: ${{ steps.next.outputs.commit }}
+      minimum_build: ${{ steps.next.outputs.minimum_build }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,11 +59,17 @@ jobs:
       - name: Next version
         id: next
         run: |
-          fork/next-version.sh --notes notes.md | tee -a "$GITHUB_OUTPUT"
+          next="$(fork/next-version.sh --notes notes.md)"
+          version="$(sed -n 's/^version=//p' <<<"$next")"
+          build="$(git rev-list --count HEAD)"
           {
-            echo "build=$(git rev-list --count HEAD)"
+            echo "$next"
+            echo "build=$build"
             echo "commit=$(git rev-parse --short HEAD)"
-          } >> "$GITHUB_OUTPUT"
+            # The oldest build that may keep running, resolved here where the
+            # tags are; the release job's checkout has none.
+            fork/minimum-build.sh --version "$version" --build "$build"
+          } | tee -a "$GITHUB_OUTPUT"
           cat notes.md
 
       - uses: actions/upload-artifact@v4
@@ -78,6 +89,8 @@ jobs:
       BUILD: ${{ needs.version.outputs.build }}
       COMMIT: ${{ needs.version.outputs.commit }}
       TAG: v${{ needs.version.outputs.version }}
+      # The oldest build that may keep running; empty when every build may.
+      MINIMUM_BUILD: ${{ needs.version.outputs.minimum_build }}
       # Which optional secrets are set; a step's `if` can't read secrets directly.
       # Each step needs its whole set, so a half-configured one is skipped, not failed.
       HAS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.MACOS_CERTIFICATE_PWD != '' && secrets.MACOS_CERTIFICATE_NAME != '' }}
@@ -96,7 +109,7 @@ jobs:
 
       - name: Toolchain
         run: |
-          echo "Maggie $VERSION (build $BUILD, $COMMIT)"
+          echo "Maggie $VERSION (build $BUILD, $COMMIT), minimum build: ${MINIMUM_BUILD:-none}"
           xcodebuild -version
 
       - name: Build GhosttyKit
@@ -193,8 +206,13 @@ jobs:
             "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-for-Swift-Package-Manager.zip"
           mkdir sparkle && unzip -q sparkle.zip -d sparkle
           echo -n "$SPARKLE_PRIVATE_KEY" > sparkle.key
+          # Builds below the minimum see this update as critical: Sparkle won't let
+          # it be skipped, and Maggie holds itself closed until it is installed.
+          critical=""
+          [ -z "$MINIMUM_BUILD" ] || critical="--critical-update-version $MINIMUM_BUILD"
           sparkle/bin/generate_appcast \
             --ed-key-file sparkle.key \
+            $critical \
             --download-url-prefix "$REPO_URL/releases/download/$TAG/" \
             --link "$REPO_URL/releases" \
             -o appcast.xml dist

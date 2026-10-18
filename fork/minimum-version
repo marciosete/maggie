@@ -1,0 +1,8 @@
+# The oldest Maggie that may keep running. Anything older is held closed at launch
+# until it updates (macos/Sources/Features/Update/MandatoryUpdate.swift).
+#
+# Name a released version, or the one the next push will release
+# (fork/next-version.sh says which). fork/minimum-build.sh turns it into the
+# build number the release's appcast carries. Empty means every version may
+# keep running. Only a release that has the hold can be held, so the first one
+# that shipped it is the oldest that can ever be named here.
