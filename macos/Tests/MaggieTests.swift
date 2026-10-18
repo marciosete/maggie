@@ -9,6 +9,13 @@ struct MaggieTests {
             == "https://github.com/marciosete/maggie/releases/tag/v0.7.0")
     }
 
+    @Test func updatesAreCheckedThroughTheWebsite() {
+        // The site redirects to the appcast GitHub publishes with each release; going
+        // through it is how update checks are counted, with nothing added to the request.
+        #expect(Maggie.feedURL == "https://getmaggie.dev/appcast.xml")
+        #expect(Maggie.feedURL.hasPrefix(Maggie.websiteURL))
+    }
+
     @Test func ghosttysReleaseNotesStayOnItsSite() {
         #expect(Maggie.releaseNotesURL(version: "1.2.3", maggie: false)?.absoluteString
             == "https://ghostty.org/docs/install/release-notes/1-2-3")

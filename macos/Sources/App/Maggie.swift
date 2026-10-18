@@ -9,10 +9,17 @@ import AppKit
 enum Maggie {
     static let bundleID = "com.marciosete.maggie"
 
-    /// Where releases are published, and the update feed with them.
+    /// Where releases are published.
     static let repositoryURL = "https://github.com/marciosete/maggie"
     static let releasesURL = "\(repositoryURL)/releases"
-    static let feedURL = "\(releasesURL)/latest/download/appcast.xml"
+
+    /// The website, and the update feed, which it redirects to the appcast
+    /// published with each GitHub release. Going through the site lets the
+    /// daily update checks be counted as active Macs, with nothing added to
+    /// the request; Sparkle still verifies the feed against
+    /// `fork/sparkle-public.key` after the redirect.
+    static let websiteURL = "https://getmaggie.dev"
+    static let feedURL = "\(websiteURL)/appcast.xml"
 
     /// Ghostty's own documentation, which covers everything Maggie inherits.
     static let ghosttyDocsURL = "https://ghostty.org/docs"
