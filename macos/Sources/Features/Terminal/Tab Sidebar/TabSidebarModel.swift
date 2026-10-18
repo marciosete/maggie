@@ -53,6 +53,21 @@ final class TabSidebarModel: ObservableObject {
         /// What the tab is in at each nesting level, outermost first.
         var nestingKeys: [UUID?] { [folderGroupID, folderID, groupID] }
 
+        /// The color the row is filled with, which is what the color filter goes by:
+        /// `color`, except that a tab colored `attention` is filled only while its
+        /// session needs something, and shows none otherwise.
+        var fillColor: TerminalTabColor {
+            guard assignedColor == .attention else { return color }
+            switch claudeCodeState?.light {
+            case .waiting, .pending, .unlanded: return color
+            case .working, .clean, nil: return .none
+            }
+        }
+
+        /// Whether the row's color is a pastel tint of what its session is doing, as
+        /// against a color picked by hand, which fills it.
+        var isTinted: Bool { assignedColor.followsClaudeCode }
+
         static func == (lhs: Tab, rhs: Tab) -> Bool {
             lhs.id == rhs.id &&
                 lhs.index == rhs.index &&

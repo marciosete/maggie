@@ -1808,18 +1808,39 @@ struct TabSidebarRowColors {
     }
 
     var fill: Fill {
-        guard let tabColor else { return .none }
-        switch tab.assignedColor {
-        case .auto:
-            return .pastel(tabColor)
-        case .attention:
-            // Only a session that needs something is filled.
-            switch tab.claudeCodeState?.light {
-            case .waiting, .pending, .unlanded: return .pastel(tabColor)
-            case .working, .clean, nil: return .none
+        guard let color = tab.fillColor.displayColor else { return .none }
+        return tab.isTinted ? .pastel(color) : .solid(color)
+    }
+
+    /// The tint a row following its session is filled with: the light's color, softened.
+    static func pastel(_ color: NSColor) -> NSColor {
+        color.blended(withFraction: 0.35, of: .white) ?? color
+    }
+
+    /// A row's colors in small, for the color filter's menu: a solid color as the row
+    /// picked by hand shows it, a light's color as the pastel tint and outline of a
+    /// session's row, and none as an empty row.
+    static func swatchImage(for color: TerminalTabColor, tinted: Bool) -> NSImage {
+        let size = NSSize(width: 22, height: 16)
+        return NSImage(size: size, flipped: false) { rect in
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
+            guard let fill = color.displayColor else {
+                NSColor.quaternaryLabelColor.setStroke()
+                path.lineWidth = 1
+                path.stroke()
+                return true
             }
-        default:
-            return .solid(tabColor)
+            if tinted {
+                pastel(fill).withAlphaComponent(0.3).setFill()
+                path.fill()
+                fill.withAlphaComponent(0.6).setStroke()
+                path.lineWidth = 1
+                path.stroke()
+            } else {
+                fill.setFill()
+                path.fill()
+            }
+            return true
         }
     }
 
@@ -1831,9 +1852,8 @@ struct TabSidebarRowColors {
             return Color(nsColor: color).opacity(opacity)
 
         case .pastel(let color):
-            let pastel = color.blended(withFraction: 0.35, of: .white) ?? color
             let opacity = tab.isSelected ? 0.3 : (isHovering ? 0.22 : 0.14)
-            return Color(nsColor: pastel).opacity(opacity)
+            return Color(nsColor: Self.pastel(color)).opacity(opacity)
 
         case .none:
             if tab.isSelected { return Color.primary.opacity(0.14) }

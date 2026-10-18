@@ -103,12 +103,35 @@ struct TabSidebarFilterTests {
         let plain = [tab("a", shown: .none, assigned: .none), tab("b", shown: .none, assigned: .none)]
         #expect(SessionBoardFilterOptions(model: model, tabs: plain, board: settings).colors.isEmpty)
 
-        // One follows Claude Code, idle: every light is offered by what it means, and
-        // None for the idle one. A label given to a color comes first.
+        // One follows Claude Code, idle: every light's color is offered, named as the
+        // board names colors, and None for the idle one.
         settings.setLabel("Urgent", of: .red)
         let following = [tab("a", shown: .none, assigned: .auto), tab("b", shown: .purple, assigned: .purple)]
         let colors = SessionBoardFilterOptions(model: model, tabs: following, board: settings).colors
-        #expect(colors.map(\.label) == ["None", "Working", "Purple", "Urgent", "Changes not committed", "Done", "Commits not landed"])
+        #expect(colors.map(\.label) == ["None", "Blue", "Purple", "Urgent", "Yellow", "Green", "Teal"])
         #expect(colors.map(\.value) == [.none, .blue, .purple, .red, .yellow, .green, .teal])
+        #expect(colors.allSatisfy { $0.image != nil })
+    }
+
+    @Test func theColorFilteredByIsTheRowsFill() {
+        func tab(_ shown: TerminalTabColor, _ assigned: TerminalTabColor, light: ClaudeCodeLight?) -> TabSidebarModel.Tab {
+            let window = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+            let state = light.map { ClaudeCodeTabState(light: $0, pendingFiles: 0, editedFiles: 0) }
+            return TabSidebarModel.Tab(
+                id: ObjectIdentifier(window), window: nil, index: 0, title: "t",
+                color: shown, assignedColor: assigned, claudeCodeState: state, claudeCodeActivity: ClaudeCodeActivity(),
+                canSpeak: false, isSpeaking: false, speechVoiceID: nil,
+                keyEquivalent: nil, isSelected: false, isZoomed: false, groupID: nil, folderID: nil, folderGroupID: nil)
+        }
+
+        // A hand-picked color, and a session following its state, fill the row with it.
+        #expect(tab(.purple, .purple, light: nil).fillColor == .purple)
+        #expect(tab(.blue, .auto, light: .working).fillColor == .blue)
+
+        // Attention fills the row only while the session needs something.
+        #expect(tab(.blue, .attention, light: .working).fillColor == .none)
+        #expect(tab(.green, .attention, light: .clean).fillColor == .none)
+        #expect(tab(.red, .attention, light: .waiting).fillColor == .red)
+        #expect(tab(.yellow, .attention, light: .pending).fillColor == .yellow)
     }
 }

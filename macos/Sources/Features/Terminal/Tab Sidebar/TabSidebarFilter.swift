@@ -3,10 +3,10 @@ import Foundation
 /// Narrows the sidebar to the sessions the board's filter shows: those in the picked
 /// folders and groups, with the picked colors, in the picked statuses.
 enum TabSidebarFilter {
-    /// Whether `filter` shows `tab`: by its folder, group and color, and by its column
-    /// on the board.
+    /// Whether `filter` shows `tab`: by its folder, group and the color its row is
+    /// filled with, and by its column on the board.
     static func shows(_ tab: TabSidebarModel.Tab, filter: SessionBoardFilter, settings: SessionBoardSettings) -> Bool {
-        filter.shows(folder: tab.folderID, group: tab.groupID, color: tab.color)
+        filter.shows(folder: tab.folderID, group: tab.groupID, color: tab.fillColor)
             && filter.shows(column: settings.column(for: tab.boardPlace?.column))
     }
 

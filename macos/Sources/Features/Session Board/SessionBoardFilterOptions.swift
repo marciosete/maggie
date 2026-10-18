@@ -86,28 +86,28 @@ struct SessionBoardFilterOptions {
         return options
     }
 
-    /// The colors of the cards shown, by their labels where they have them. A session
-    /// following Claude Code shows the light's color, which changes as it works, so
-    /// while any does every light is offered, named for what it means, such as Waiting
-    /// for you: picked, it keeps showing the sessions in that state as they come and go.
-    /// With one color there is nothing to choose between, so none are offered.
+    /// The colors the cards show, each named as the board names it and drawn as the
+    /// sidebar draws a row in it: a light's color as the pastel tint of a session
+    /// following its state, a color picked by hand solid. A session following its
+    /// state changes color as it works, so while any does every light's color is
+    /// offered: picked, it keeps showing the sessions in that state as they come and
+    /// go. With one color there is nothing to choose between, so none are offered.
     private static func colors(
         of tabs: [TabSidebarModel.Tab],
         items: [WorkItem],
         board: SessionBoardSettings
     ) -> [SessionBoardFilterOption<TerminalTabColor>] {
-        var used = Set(tabs.map(\.color) + items.map(\.color))
-        let followsClaudeCode = tabs.contains { $0.assignedColor.followsClaudeCode }
-        if followsClaudeCode {
+        var used = Set(tabs.map(\.fillColor) + items.map(\.color))
+        let tinted = tabs.contains(where: \.isTinted)
+        if tinted {
             used.formUnion(ClaudeCodeLight.allCases.map(\.tabColor))
         }
         guard used.count > 1 else { return [] }
         return TerminalTabColor.allCases
             .filter(used.contains)
             .map { color in
-                let light = followsClaudeCode ? ClaudeCodeLight.allCases.first { $0.tabColor == color } : nil
-                let label = board.label(of: color) ?? light?.label ?? color.localizedName
-                return .init(value: color, label: label, image: color.swatchImage(selected: false))
+                let image = TabSidebarRowColors.swatchImage(for: color, tinted: tinted && color.isTrafficLight)
+                return .init(value: color, label: board.name(of: color), image: image)
             }
     }
 }
