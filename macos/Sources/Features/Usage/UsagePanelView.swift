@@ -625,6 +625,9 @@ struct UsagePanelView: View {
 
     private func pricingNote(_ pricing: UsagePricingStatus) -> String {
         let estimate = "Costs are API list price estimates, not your subscription bill."
+        if pricing.source == .bundled {
+            return "\(estimate) Prices from the table that shipped with this version of Maggie (\(UsageBundledRates.generatedOn)); a fresh one is downloaded when it can be."
+        }
         guard pricing.source != .unavailable, let fetchedAt = pricing.fetchedAt else {
             return "Model prices couldn't be downloaded from LiteLLM, so costs are missing. " + estimate
         }

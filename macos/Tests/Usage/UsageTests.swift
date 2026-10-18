@@ -402,6 +402,17 @@ struct UsagePricingTests {
 // MARK: - Aggregation
 
 struct UsageAggregationTests {
+    @Test func theBundledRatesPriceTheModelsTheAgentsRun() throws {
+        // Shipped inside the app by fork/update-rates.py, so a first launch or an offline
+        // Mac prices sessions, and an upstream file that moves or changes shape can't
+        // blank the panel.
+        let table = try #require(UsageScanner.bundledRates())
+        #expect(table.count >= UsageBundledRates.modelCount)
+        #expect(table.rate(for: "claude-fable-5-1") != nil)
+        #expect(table.rate(for: "claude-opus-5-5") != nil)
+        #expect(table.rate(for: "gpt-5.6-terra") != nil || table.rate(for: "gpt-5") != nil)
+    }
+
     private let rates = UsageRateTable(liteLLM: [
         "claude-fable-5": [
             "input_cost_per_token": 1e-5,

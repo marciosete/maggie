@@ -22,6 +22,11 @@ struct UsagePricingStatus: Equatable {
         /// A saved copy, because a download failed or wasn't due.
         case cached
 
+        /// The table that shipped inside this build (`UsageBundledRates`), used until a
+        /// download has succeeded: on a first launch, offline, or when the upstream
+        /// file has moved or changed shape.
+        case bundled
+
         /// No rates at all, so every model is unpriced.
         case unavailable
     }
@@ -309,17 +314,33 @@ final class UsageScanner {
             }
         }
 
+        // Nothing saved yet: price from the table that shipped with the app while the
+        // download runs, so the panel is never blank, offline or on a first launch.
+        if rates.count == 0, let table = Self.bundledRates(), table.count > 0 {
+            rates = table
+            ratesSource = .bundled
+        }
+
         return RatesDownload(url: Self.ratesURL)
+    }
+
+    /// The rates compiled into the app by `fork/update-rates.py`.
+    static func bundledRates() -> UsageRateTable? {
+        guard let document = try? JSONSerialization.jsonObject(with: Data(UsageBundledRates.json.utf8)) else { return nil }
+        return UsageRateTable(liteLLM: document)
     }
 
     private func finishRatesLoad(_ download: RatesDownload) {
         guard let data = download.wait(),
               let document = try? JSONSerialization.jsonObject(with: data) else {
             // What's being served is past its age now and must not claim to be fresh.
-            if rates.count > 0 { ratesSource = .cached }
+            // The bundled table stays bundled: it was never downloaded.
+            if rates.count > 0, ratesSource != .bundled { ratesSource = .cached }
             return
         }
 
+        // A file that changed shape upstream parses to nothing; keep what is being
+        // served rather than blank the panel.
         let table = UsageRateTable(liteLLM: document)
         guard table.count > 0 else { return }
         rates = table
