@@ -17,11 +17,20 @@ so a few things up front.
 
 ## Issues
 
-Say what you did, what you expected and what happened, with the Maggie version
-(**Maggie › About**) and macOS version. For anything about a session's colour or
-status, say what Claude Code was doing at the time.
+Issues are welcome, and the templates ask for what makes one actionable: the
+Maggie, macOS, Claude Code and Codex versions, and a screenshot with session
+names redacted. For anything about a session's colour or status, say what the
+agent was doing at the time. Questions and ideas that aren't ready to be issues
+go in [Discussions](https://github.com/marciosete/maggie/discussions).
 
 ## Pull requests
+
+Pull requests are by invitation, after a discussion. Maggie is moving quickly
+and its design lives in one head for now; a change agreed in an issue or a
+discussion first lands smoothly, and one that arrives unannounced usually
+can't be taken however good it is, which wastes your weekend. Open the issue,
+and if the answer is "yes, please", the invitation follows. When you do send
+one:
 
 - Keep each pull request to one change. Small is good.
 - Match the surrounding code: Swift in `macos/`, Zig in `src/`. Run
@@ -43,6 +52,18 @@ Maggie is built with Claude Code, and you are welcome to use AI tools too. Two
 rules: you must understand and be able to explain every line you submit, and
 you must say in the pull request what was AI-assisted. See
 [AI_POLICY.md](AI_POLICY.md).
+
+## Model prices
+
+The usage panel prices sessions from LiteLLM's rate table. A trimmed copy is
+compiled into the app (`macos/Sources/Features/Usage/UsageBundledRates.swift`)
+so a first launch, an offline Mac or an upstream change never leaves the panel
+blank; the app downloads a fresher table when it can. Refresh the bundled copy
+when prices change or a new model ships, and commit it as `feat(usage)`:
+
+```sh
+python3 fork/update-rates.py
+```
 
 ## Merging from upstream
 

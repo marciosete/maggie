@@ -1,0 +1,40 @@
+name: An idea
+description: Something Maggie could do, or do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome. Start with the problem rather than the feature:
+        what gets in your way today, running your agents in Maggie?
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you were trying to do, and what made it slow, unclear or impossible.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like Maggie to do
+      description: The behaviour you have in mind. Sketches and comparisons to other tools welcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Which agent does it concern
+      options:
+        - Both
+        - Claude Code
+        - Codex
+        - Neither, it's about Maggie itself
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        Maggie is Mac only and supports Claude Code and Codex, deliberately.
+        Requests for Linux, Windows or other agents are read, but the answer
+        for now is in the README.

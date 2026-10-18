@@ -1,0 +1,62 @@
+name: Something is wrong
+description: Maggie did something it shouldn't, or didn't do something it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The versions below are what make a report
+        actionable: Maggie reads Claude Code's and Codex's own files, so a
+        change in either of them is the most common cause.
+  - type: input
+    id: maggie
+    attributes:
+      label: Maggie version
+      description: Maggie › About Maggie, or Maggie › Check for Updates… shows it.
+      placeholder: "0.20.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu › About This Mac.
+      placeholder: "macOS 27.0 (Apple silicon)"
+    validations:
+      required: true
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      description: "`claude --version` in any terminal. Leave empty if you don't use it."
+      placeholder: "2.1.278"
+  - type: input
+    id: codex
+    attributes:
+      label: Codex version
+      description: "`codex --version` in any terminal. Leave empty if you don't use it."
+      placeholder: "0.112.0"
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: What you did, what Maggie did, and what you expected instead. Steps that reproduce it are gold.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: |
+        A screenshot of the sidebar or panel involved helps a lot. Please
+        redact session names, paths and anything else you'd rather not
+        publish before attaching it.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything in the logs
+      description: |
+        Console.app, filter on "Maggie". Lines that start with "Maggie:" are
+        the app's own, including the one it logs when it can't read an
+        agent's session files.
+      render: text

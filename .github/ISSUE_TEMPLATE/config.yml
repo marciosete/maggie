@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A question, or something to discuss
+    url: https://github.com/marciosete/maggie/discussions
+    about: How to do something, whether something is expected, or an idea that isn't ready to be an issue yet.
+  - name: A security problem
+    url: https://github.com/marciosete/maggie/security/policy
+    about: Please don't open a public issue for a vulnerability. The policy says where to send it.
+  - name: Something about the terminal itself
+    url: https://github.com/ghostty-org/ghostty/issues
+    about: Rendering, escape sequences, fonts, shell integration and the config file are Ghostty's. Fixes there reach Maggie with the next merge.

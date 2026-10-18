@@ -39,12 +39,18 @@ finished, or what the morning cost. Maggie is built around that job, so control
 stays with you and the load on your attention does not grow with the number of
 agents.
 
-Maggie is macOS only. It is an independent project and is not affiliated with
-Ghostty, Anthropic or OpenAI.
+Maggie is macOS only, by design. It is an independent project and is not
+affiliated with Ghostty, Anthropic or OpenAI. Your transcripts never leave the
+Mac: [getmaggie.dev/privacy](https://getmaggie.dev/privacy) lists every
+network call the app makes and how to turn each one off.
 
 ```sh
 curl -fsSL https://getmaggie.dev/install.sh | sh
 ```
+
+Maggie is free and open source, and paid for by the people who use it: if it
+earns its place on your Mac, [sponsor it on GitHub](https://github.com/sponsors/marciosete)
+or [buy a coffee](https://buymeacoffee.com/marciosete).
 
 ## What it does
 
