@@ -1,4 +1,6 @@
+import AVFoundation
 import Foundation
+import Speech
 import Testing
 @testable import Ghostty
 
@@ -408,6 +410,74 @@ struct VoiceWakeTests {
     }
 }
 
+@Suite
+struct VoiceWakeRecognitionTests {
+    /// "Hey Maggie, unmute", spoken by `say` and fed in tenth-of-a-second buffers the way
+    /// the voice's engine feeds a muted microphone. On 2026-10-18 the old recogniser
+    /// failed every request with error 201 on a Mac with Dictation off; this is heard.
+    /// SpeechAnalyzer hears nothing in an app without the speech permission, which a test
+    /// can't grant, so this runs where the test host has been allowed it.
+    @available(macOS 26.0, *)
+    @Test(
+        .timeLimit(.minutes(1)),
+        .enabled(if: SFSpeechRecognizer.authorizationStatus() == .authorized, "needs the speech recognition permission"))
+    func spokenUnmuteIsHeardWithoutDictation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wake-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("unmute.aiff")
+        let say = Process()
+        say.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        say.arguments = ["-o", file.path, "Hey Maggie. Unmute."]
+        try say.run()
+        say.waitUntilExit()
+        let audio = try AVAudioFile(forReading: file)
+        let format = audio.processingFormat
+        let frames = AVAudioFrameCount(format.sampleRate / 10)
+
+        let recognizer = AnalyzerWakeRecognizer()
+        let heard = HeardText()
+        recognizer.onText = { heard.add($0) }
+        recognizer.onFailure = { heard.add("failure: \($0)") }
+        recognizer.begin()
+        defer { recognizer.end() }
+        for _ in 0..<200 where !recognizer.isReady {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(recognizer.isReady)
+
+        // A second of silence after the words lets the transcriber finish them.
+        while audio.framePosition < audio.length {
+            let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+            try audio.read(into: buffer, frameCount: frames)
+            recognizer.append(buffer)
+        }
+        for _ in 0..<10 {
+            let silence = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+            silence.frameLength = frames
+            recognizer.append(silence)
+        }
+        for _ in 0..<300 where VoiceWakeListener.matches(heard.text) == nil {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(VoiceWakeListener.matches(heard.text) != nil, Comment(rawValue: "heard: \(heard.text)"))
+    }
+
+    @Test func theOldRecognizerBacksOffInsteadOfSpinning() {
+        #expect(LegacyWakeRecognizer.retryDelay(afterFailures: 0) == 0)
+        #expect(LegacyWakeRecognizer.retryDelay(afterFailures: 1) == 0.5)
+        #expect(LegacyWakeRecognizer.retryDelay(afterFailures: 3) == 2)
+        #expect(LegacyWakeRecognizer.retryDelay(afterFailures: 20) == 30)
+    }
+
+    private final class HeardText: @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [String] = []
+        func add(_ text: String) { lock.lock(); all.append(text); lock.unlock() }
+        var text: String { lock.lock(); defer { lock.unlock() }; return all.joined(separator: " | ") }
+    }
+}
+
 // MARK: - Mute and unmute by voice
 
 @Suite
@@ -425,6 +495,8 @@ struct VoiceCommandTests {
             "Could you please mute for a second?",
             "okay, stop listening",
             "Can you mute yourself?",
+            // 2026-10-17: missed by the first parser; the backend's tool caught it.
+            "That’s okay. Can you please mute yourself",
         ] {
             #expect(VoiceCommand.parse(text) == .mute, Comment(rawValue: text))
         }
@@ -437,6 +509,7 @@ struct VoiceCommandTests {
             "the mute didn't work",
             "Yeah, okay. It took like you a few tries uh, to be able to mute, and then finally worked, but the unmute didn't work",
             "can you mute session four",
+            "Mute. Then tell session four to stop",
             "Can you hear",
             ", un",
             "",

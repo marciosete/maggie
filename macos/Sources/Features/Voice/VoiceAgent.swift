@@ -235,6 +235,9 @@ final class VoiceAgent: ObservableObject {
     /// Hears "unmute" and "hey Maggie" on the Mac while muted or paused.
     private let wake = VoiceWakeListener()
 
+    /// The last reason the wake listener gave for not working, said once, not every time.
+    private var wakeFailure: String?
+
     /// What to do once the voice finishes saying its goodbye.
     private var afterSpeaking: (() -> Void)?
 
@@ -263,6 +266,11 @@ final class VoiceAgent: ObservableObject {
         tools.watchAll = { [weak self] all in self?.watchAll(all) }
         tools.control = { [weak self] control in self?.control(control) }
         wake.onWake = { [weak self] phrase in self?.woken(by: phrase) }
+        wake.onFailure = { [weak self] message in
+            guard let self, self.wakeFailure != message else { return }
+            self.wakeFailure = message
+            self.record(.notice, message)
+        }
     }
 
     /// A spoken control, from the backend's tool.

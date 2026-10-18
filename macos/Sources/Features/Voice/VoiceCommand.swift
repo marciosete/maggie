@@ -11,8 +11,18 @@ enum VoiceCommand: Equatable {
     case mute
     case unmute
 
-    /// The command `text` is, or nil when it is anything else.
+    /// The command `text` is, or nil when it is anything else. The last sentence alone
+    /// counts too: "That's okay. Can you please mute yourself" mutes.
     static func parse(_ text: String) -> VoiceCommand? {
+        if let command = parseSentence(text) { return command }
+        let sentences = text.split(whereSeparator: { ".?!;".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard sentences.count > 1, let last = sentences.last else { return nil }
+        return parseSentence(last)
+    }
+
+    private static func parseSentence(_ text: String) -> VoiceCommand? {
         var words = normalized(text)
         strip(&words)
         guard !words.isEmpty else { return nil }
