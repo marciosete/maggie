@@ -109,6 +109,28 @@ struct CodexSessionTests {
 
     // MARK: Reading
 
+    @Test func anUnreadableRolloutIsRememberedUntilOneReads() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("maggie-codex-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let pid = 987_654
+
+        // An empty rollout is a session that hasn't written its header yet, not a new shape.
+        let empty = folder.appendingPathComponent("empty.jsonl")
+        try Data().write(to: empty)
+        CodexSession.noteUnreadableRollout(empty, pid: pid)
+        #expect(!CodexSession.hasUnreadableRollout(pid: pid))
+
+        let strange = folder.appendingPathComponent("strange.jsonl")
+        try Data("{\"type\":\"session_meta_v2\",\"payload\":{}}\n".utf8).write(to: strange)
+        CodexSession.noteUnreadableRollout(strange, pid: pid)
+        #expect(CodexSession.hasUnreadableRollout(pid: pid))
+        #expect(!CodexSession.hasUnreadableRollout(pid: pid + 1))
+
+        CodexSession.clearUnreadableRollout(pid: pid)
+        #expect(!CodexSession.hasUnreadableRollout(pid: pid))
+    }
+
     @Test func readsTheHeader() {
         let header = CodexSession.Rollout.header(line: Data(Self.meta.utf8))
         #expect(header?.id == Self.threadID)

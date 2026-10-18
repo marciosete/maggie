@@ -109,8 +109,15 @@ struct CodexSession: Codable, Equatable {
                 rollouts += files.compactMap { threadID(ofWriterLock: $0, in: home) }
                     .compactMap { findRollout(of: $0, in: home) }
                 for rollout in rollouts {
-                    guard let header = Rollout.header(of: rollout), header.isInteractive,
+                    // An open rollout whose first line this version can't read means Codex
+                    // changed the file's shape; the sidebar says so rather than going blank.
+                    guard let header = Rollout.header(of: rollout) else {
+                        noteUnreadableRollout(rollout, pid: foregroundPID)
+                        continue
+                    }
+                    guard header.isInteractive,
                           title == nil || title?.matches(header.id) == true else { continue }
+                    clearUnreadableRollout(pid: foregroundPID)
                     remember(rollout: rollout, of: header.id, in: home)
                     let cwd = State.cwd(of: header.id, in: home) ?? header.cwd
                     sessions[header.id] = CodexSession(id: header.id, cwd: cwd, codexHome: home, pid: foregroundPID)
@@ -214,6 +221,39 @@ struct CodexSession: Codable, Equatable {
         defer { knownRolloutsLock.unlock() }
         return knownRolloutsStorage
     }
+
+    // MARK: Unreadable rollouts
+
+    /// Process `pid` is Codex with a rollout open whose header this version can't read.
+    static func hasUnreadableRollout(pid: Int) -> Bool {
+        unreadableLock.lock()
+        defer { unreadableLock.unlock() }
+        return unreadablePIDs.contains(pid)
+    }
+
+    /// Records that `pid` has an unreadable rollout, logging the file's first bytes the
+    /// first time so a report carries the shape. An empty file is a session that hasn't
+    /// written its header yet, not an unreadable one.
+    static func noteUnreadableRollout(_ rollout: URL, pid: Int) {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: rollout.path))?[.size] as? Int, size > 0 else { return }
+        unreadableLock.lock()
+        let firstTime = unreadablePIDs.insert(pid).inserted
+        unreadableLock.unlock()
+        if firstTime, let handle = try? FileHandle(forReadingFrom: rollout) {
+            defer { try? handle.close() }
+            let shape = String(decoding: (try? handle.read(upToCount: 400)) ?? Data(), as: UTF8.self)
+            NSLog("Maggie: Codex's rollout for pid %d can't be read; an update is needed. It begins: %@", pid, shape)
+        }
+    }
+
+    static func clearUnreadableRollout(pid: Int) {
+        unreadableLock.lock()
+        unreadablePIDs.remove(pid)
+        unreadableLock.unlock()
+    }
+
+    private static var unreadablePIDs: Set<Int> = []
+    private static let unreadableLock = NSLock()
 
     private static func remember(rollout: URL, of id: UUID, in codexHome: URL) {
         knownRolloutsLock.lock()

@@ -1583,7 +1583,13 @@ private struct TabSidebarTabRow: View {
         }
     }
 
+    /// What an unreadable session's row says in place of its location.
+    static let unreadableText = "Session details unreadable. An update is coming."
+
     static func location(of info: TabSidebarSessionInfo) -> (symbol: String, text: String)? {
+        if info.unreadable {
+            return ("exclamationmark.triangle", unreadableText)
+        }
         if let checkout = info.checkout {
             if checkout.isLinkedWorktree {
                 return ("square.stack.3d.up", "\(checkout.project) · worktree")

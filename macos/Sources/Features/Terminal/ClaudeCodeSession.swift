@@ -121,6 +121,37 @@ struct ClaudeCodeSession: Codable, Equatable {
         return registered(registry: data, pid: pid, processStarted: started)
     }
 
+    // MARK: Unreadable registries
+
+    /// Process `pid` has a registry entry that this version can't read: Claude Code has
+    /// changed the file's shape. The sidebar says so instead of showing a plain terminal,
+    /// and the first time each entry is seen it is logged, so a report carries the shape.
+    static func hasUnreadableRegistry(pid: Int) -> Bool {
+        hasUnreadableRegistry(pid: pid, configDirectory: configDirectory)
+    }
+
+    static func hasUnreadableRegistry(pid: Int, configDirectory: URL) -> Bool {
+        let file = configDirectory.appendingPathComponent("sessions/\(pid).json")
+        guard let data = try? Data(contentsOf: file), isUnreadable(registry: data) else { return false }
+        unreadableLock.lock()
+        let firstTime = unreadableLogged.insert(pid).inserted
+        unreadableLock.unlock()
+        if firstTime {
+            let shape = String(decoding: data.prefix(400), as: UTF8.self)
+            NSLog("Maggie: Claude Code's registry entry for pid %d can't be read; an update is needed. It begins: %@", pid, shape)
+        }
+        return true
+    }
+
+    /// `data` is a registry entry whose shape this version doesn't know. A well formed entry
+    /// for another process, kind or time is readable; only a decode failure counts.
+    static func isUnreadable(registry data: Data) -> Bool {
+        (try? JSONDecoder().decode(RegistryEntry.self, from: data)) == nil
+    }
+
+    private static var unreadableLogged: Set<Int> = []
+    private static let unreadableLock = NSLock()
+
     /// The transcript of the session. Claude Code writes it with the session's first message,
     /// and can't resume a session without one. Transcripts are in a folder named after the
     /// directory Claude Code runs in, except that the names of long paths are shortened.

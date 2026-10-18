@@ -29,6 +29,10 @@ struct TabSidebarSessionInfo: Equatable {
     /// is using.
     var model: String?
 
+    /// A terminal runs an agent whose session files this version can't read, because the
+    /// agent changed their shape. The row says so instead of looking like a plain shell.
+    var unreadable = false
+
     /// `directory` with the home directory as `~`.
     var abbreviatedDirectory: String? {
         directory.map { ($0 as NSString).abbreviatingWithTildeInPath }
@@ -71,6 +75,11 @@ final class TabSidebarSessionInfoReader {
     private func info(for request: Request) -> TabSidebarSessionInfo {
         var info = TabSidebarSessionInfo()
         info.sessions = request.pids.compactMap(AgentSession.running(pid:))
+        if info.sessions.isEmpty {
+            info.unreadable = request.pids.contains {
+                ClaudeCodeSession.hasUnreadableRegistry(pid: $0) || CodexSession.hasUnreadableRollout(pid: $0)
+            }
+        }
         // A session has no transcript until its first turn, and isn't one of `sessions`
         // until then, but it is already in its worktree if it was started in one.
         info.directory = info.sessions.first?.cwd

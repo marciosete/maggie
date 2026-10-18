@@ -4,6 +4,27 @@ import Testing
 
 @Suite
 struct ClaudeCodeSessionTests {
+    @Test func aRegistryEntryOfAnUnknownShapeIsUnreadable() throws {
+        // Only a shape this version can't decode counts; an entry for another process or
+        // time is well formed and simply not ours.
+        #expect(ClaudeCodeSession.isUnreadable(registry: Data("not json".utf8)))
+        #expect(ClaudeCodeSession.isUnreadable(registry: try JSONSerialization.data(withJSONObject: ["pid": Self.pid, "session": "renamed"])))
+        #expect(!ClaudeCodeSession.isUnreadable(registry: try Self.registry()))
+        #expect(!ClaudeCodeSession.isUnreadable(registry: try Self.registry(pid: Self.pid + 1)))
+    }
+
+    @Test func anUnreadableEntryIsReportedForItsProcessOnly() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("maggie-claude-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home.appendingPathComponent("sessions"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        try Data("{\"pid\": 1, \"shape\": \"new\"}".utf8).write(to: home.appendingPathComponent("sessions/1.json"))
+        try Self.registry(pid: 2).write(to: home.appendingPathComponent("sessions/2.json"))
+        #expect(ClaudeCodeSession.hasUnreadableRegistry(pid: 1, configDirectory: home))
+        #expect(!ClaudeCodeSession.hasUnreadableRegistry(pid: 2, configDirectory: home))
+        #expect(!ClaudeCodeSession.hasUnreadableRegistry(pid: 3, configDirectory: home))
+    }
+
     private static let sessionID = "2f19b620-e06f-43d9-9cfe-fc93924c3c2d"
     private static let pid = 44848
 
