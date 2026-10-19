@@ -233,6 +233,9 @@ final class VoiceAgent: ObservableObject {
     /// Speech chunks received from GPT-Live, for the log.
     private var outputChunks = 0
 
+    /// Of those, dropped because the user muted mid-reply.
+    private var silencedChunks = 0
+
     private var settingsObservers: Set<AnyCancellable> = []
 
     /// Hears "unmute" and "hey Maggie" on the Mac while muted or paused.
@@ -572,6 +575,7 @@ final class VoiceAgent: ObservableObject {
         case .outputAudio(let pcm):
             outputChunks += 1
             if silencingReply {
+                silencedChunks += 1
                 schedule("reply-silenced", after: Self.replyGap) { [weak self] in self?.silencingReply = false }
                 return
             }
@@ -761,7 +765,7 @@ final class VoiceAgent: ObservableObject {
         guard phase == .live, !closing else { return }
         if endpoint === localEndpoint {
             let stats = localEndpoint.stats
-            Self.logger.info("audio: \(stats.captured) chunks captured, \(stats.played) bytes played, \(self.outputChunks) received")
+            Self.logger.info("audio: \(stats.captured) chunks captured, \(stats.played) bytes played, \(self.outputChunks) received, \(self.silencedChunks) silenced by a mute")
         }
         let idle = runningTools == 0 && pendingCalls.isEmpty && !assistantSpeaking && !userSpeaking
         if let expiresAt, Date() > expiresAt.addingTimeInterval(-Self.rolloverMargin), idle {
