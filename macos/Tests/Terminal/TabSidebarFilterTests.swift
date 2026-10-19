@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Testing
 @testable import Ghostty
 
@@ -84,6 +85,33 @@ struct TabSidebarFilterTests {
 
         filter = SessionBoardFilter(colors: [.red])
         #expect(TabSidebarFilter.filter(rows, by: filter, settings: settings).isEmpty)
+    }
+
+    @Test func theFilterIsOneForEveryWindow() {
+        let store = SessionBoardFilterStore()
+        var hosts: [TerminalWindow] = []
+        func model() -> TabSidebarModel {
+            let host = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+            hosts.append(host)
+            return TabSidebarModel(hostWindow: host, filterStore: store)
+        }
+        let first = model()
+        let second = model()
+        var secondChanges = 0
+        let watching = second.objectWillChange.sink { _ in secondChanges += 1 }
+        defer { watching.cancel() }
+
+        // Picked in one tab's sidebar, the filter holds in the next tab's: that
+        // sidebar is told it changed and narrows by the same filter.
+        first.boardFilter.colors = [.purple]
+        #expect(second.boardFilter == SessionBoardFilter(colors: [.purple]))
+        #expect(second.isFiltering)
+        #expect(secondChanges == 1)
+
+        // Cleared in one, it is cleared in all.
+        second.boardFilter = SessionBoardFilter()
+        #expect(!first.isFiltering)
+        #expect(secondChanges == 2)
     }
 
     @Test func theLightsAreOfferedWhileASessionFollowsClaudeCode() {

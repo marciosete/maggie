@@ -194,6 +194,15 @@ struct SessionBoardFilter: Equatable {
     }
 }
 
+/// The one filter in force, for the whole app. Each tab is a window with a sidebar of
+/// its own, so a filter kept per sidebar would hold for the tab it was picked in and
+/// drop away on the next: this is where every sidebar and the board read it from.
+final class SessionBoardFilterStore: ObservableObject {
+    static let shared = SessionBoardFilterStore()
+
+    @Published var filter = SessionBoardFilter()
+}
+
 /// How sessions lay out on the board, apart from the views so it can be tested.
 enum SessionBoardLayout {
     struct Item<ID: Hashable> {

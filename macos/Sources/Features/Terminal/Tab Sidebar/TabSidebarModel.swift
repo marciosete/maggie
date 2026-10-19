@@ -211,9 +211,17 @@ final class TabSidebarModel: ObservableObject {
         }
     }
 
-    /// What the sidebar and the board show: one filter, so the board opens on what the
-    /// sidebar lists, and what is picked on the board narrows the sidebar when it closes.
-    @Published var boardFilter = SessionBoardFilter()
+    /// What the sidebar and the board show: the app's one filter, so it holds from tab
+    /// to tab, the board opens on what the sidebar lists, and what is picked on the
+    /// board narrows the sidebar when it closes. A session that stops matching goes
+    /// from the sidebar as it changes, and one that comes to match appears, since the
+    /// rows are refreshed on each change and narrowed by the filter as they are read.
+    var boardFilter: SessionBoardFilter {
+        get { filterStore.filter }
+        set { filterStore.filter = newValue }
+    }
+
+    private let filterStore: SessionBoardFilterStore
 
     /// Whether the filter leaves some sessions out.
     var isFiltering: Bool { boardFilter.isActive }
@@ -294,8 +302,15 @@ final class TabSidebarModel: ObservableObject {
     /// switched in the shell.
     private static let infoInterval: TimeInterval = 10
 
-    init(hostWindow: TerminalWindow) {
+    /// `filterStore` is the app's, but for a test's.
+    init(hostWindow: TerminalWindow, filterStore: SessionBoardFilterStore = .shared) {
         self.hostWindow = hostWindow
+        self.filterStore = filterStore
+
+        // The filter is read through this model, so a change to it is a change to this.
+        filterStore.$filter
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
         let center = NotificationCenter.default
         Publishers.MergeMany(
