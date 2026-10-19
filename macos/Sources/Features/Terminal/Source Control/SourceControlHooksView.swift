@@ -146,7 +146,8 @@ private struct SourceControlHookView: View {
             }
         }()
         if let text {
-            Text(text)
+            // A run from another worktree of the repository says so.
+            Text(run.worktree.map { "\(text) · in \($0)" } ?? text)
                 .font(.system(size: 11))
                 .foregroundStyle(run.outcome == .failed ? Color(nsColor: .systemRed) : .secondary)
                 .lineLimit(1)

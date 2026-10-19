@@ -46,6 +46,11 @@ struct GitHookRun: Equatable {
     /// through the commands it runs.
     let followsSteps: Bool
 
+    /// The name of the worktree the hook ran in, when it isn't the one the tracker
+    /// follows: another checkout of the same repository, such as the main one a push is
+    /// made from.
+    var worktree: String?
+
     var duration: TimeInterval? { endedAt.map { $0.timeIntervalSince(startedAt) } }
 }
 
@@ -53,6 +58,10 @@ struct GitHookRun: Equatable {
 /// them: the processes running as the user are scanned for the hook's script, and the
 /// file its output goes to, when it goes to one, such as Claude Code's, is read for the
 /// markers of its steps.
+///
+/// A hook run from another worktree of the same repository counts too, since a team
+/// often commits in a worktree and pushes from the main checkout. Its script is that
+/// checkout's, read for its own steps, and the run says which worktree it came from.
 ///
 /// Output that goes through a pipe, such as `git commit 2>&1 | tail`, can't be read. The
 /// commands the script runs say which step it is on then, and whether git went on to
@@ -97,10 +106,30 @@ final class GitHookTracker: ObservableObject {
     private var knownScripts: [GitHookScript] = []
     private var outputs: [String: Output] = [:]
 
+    /// The checkouts hook scripts were seen running in, by the directory they ran from, and
+    /// the hooks of the other worktrees of the repository, by their root. Looked up again as
+    /// often as the scripts are. Only touched on `queue`.
+    private var checkouts: [String: Git.Repository?] = [:]
+    private var worktreeScripts: [URL: [GitHookScript]] = [:]
+
+    /// A hook's script found running: in the tracker's own checkout, or another worktree of
+    /// the repository.
+    private struct Running {
+        let pid: pid_t
+        let startedAt: Date
+        let script: GitHookScript
+        let repository: Git.Repository
+    }
+
     /// A run whose output is being read. Only touched on `queue`.
     private struct Output {
         let pid: pid_t
         let startedAt: Date
+
+        /// The script that ran, and the checkout it ran in.
+        let script: GitHookScript
+        let repository: Git.Repository
+
         let file: URL?
         var offset: UInt64 = 0
         var parser: GitHookOutputParser
@@ -136,6 +165,7 @@ final class GitHookTracker: ObservableObject {
         let startedAt: Date
         let reached: [Int]
         let followsSteps: Bool
+        let worktree: String?
         var endedAt: Date?
         var outcome: GitHookRun.Outcome = .running
     }
@@ -192,6 +222,8 @@ final class GitHookTracker: ObservableObject {
     private func scan() {
         if scans % Self.scriptsEvery == 0 {
             knownScripts = GitHookScript.scripts(of: repository)
+            checkouts = [:]
+            worktreeScripts = [:]
         }
         scans += 1
 
@@ -200,7 +232,7 @@ final class GitHookTracker: ObservableObject {
         if !scripts.isEmpty {
             let running = runningScripts(scripts)
             for script in scripts {
-                if let scan = follow(script, running: running[script.name]) {
+                if let scan = follow(script.name, running: running[script.name]) {
                     found.append(scan)
                 }
             }
@@ -221,20 +253,28 @@ final class GitHookTracker: ObservableObject {
         let ended = outputs.filter { $0.value.isFinished }
         guard !ended.isEmpty else { return [] }
 
-        let head = Git.head(of: repository)
+        // HEAD of each checkout a run came from, looked up once.
+        var heads: [Git.Repository: String?] = [:]
+        func head(of repository: Git.Repository) -> String? {
+            if let known = heads[repository] { return known }
+            let head = Git.head(of: repository)
+            heads[repository] = .some(head)
+            return head
+        }
+
         var stale: [(hook: String, pid: pid_t)] = []
         for (hook, var output) in ended {
             // The commit or the push isn't done until git is.
             if let git = output.git, RunningProcess.isRunning(git) { continue }
-            if output.git != nil, Git.state(changedBy: hook, in: repository) != output.stateBefore {
+            if output.git != nil, Git.state(changedBy: hook, in: output.repository) != output.stateBefore {
                 // Git made the commit or the push the hook stood guard for.
                 stale.append((hook, output.pid))
                 outputs[hook] = nil
             } else if !output.headKnown {
-                output.headAfter = head
+                output.headAfter = head(of: output.repository)
                 output.headKnown = true
                 outputs[hook] = output
-            } else if head != output.headAfter {
+            } else if head(of: output.repository) != output.headAfter {
                 stale.append((hook, output.pid))
                 outputs[hook] = nil
             }
@@ -242,46 +282,97 @@ final class GitHookTracker: ObservableObject {
         return stale
     }
 
-    /// The process running each hook's script, by the hook's name. A script's subshells
-    /// run with the same arguments, so it is the one that started first.
-    private func runningScripts(_ scripts: [GitHookScript]) -> [String: (pid: pid_t, startedAt: Date)] {
+    /// The process running each hook's script, by the hook's name: the tracker's own
+    /// checkout's, or else another worktree's. A script's subshells run with the same
+    /// arguments, so it is the one that started first.
+    private func runningScripts(_ scripts: [GitHookScript]) -> [String: Running] {
         let names = Set(scripts.map(\.name))
-        var running: [String: (pid: pid_t, startedAt: Date)] = [:]
+        var running: [String: Running] = [:]
         for pid in RunningProcess.all() {
             guard let name = RunningProcess.name(pid), Self.shells.contains(name),
                   let arguments = RunningProcess.arguments(pid) else { continue }
             for argument in arguments.dropFirst() where names.contains((argument as NSString).lastPathComponent) {
+                let directory = RunningProcess.directory(pid)
                 let path: String
                 if argument.hasPrefix("/") {
                     path = argument
-                } else if let directory = RunningProcess.directory(pid) {
+                } else if let directory {
                     path = (directory as NSString).appendingPathComponent(argument)
                 } else {
                     continue
                 }
-                guard let script = scripts.first(where: { $0.path == Git.realPath(path) }),
-                      let startedAt = RunningProcess.startTime(pid) else { continue }
-                if let known = running[script.name], known.startedAt <= startedAt { continue }
-                running[script.name] = (pid, startedAt)
+                let realPath = Git.realPath(path)
+                let found: Running
+                if let script = scripts.first(where: { $0.path == realPath }),
+                   let startedAt = RunningProcess.startTime(pid) {
+                    found = Running(pid: pid, startedAt: startedAt, script: script, repository: repository)
+                } else if let other = worktreeScript(at: realPath, runningIn: directory),
+                          let startedAt = RunningProcess.startTime(pid) {
+                    found = Running(pid: pid, startedAt: startedAt, script: other.script, repository: other.checkout)
+                } else {
+                    continue
+                }
+                if let known = running[found.script.name] {
+                    // The tracker's own checkout comes first, then the earliest started.
+                    let knownIsOwn = known.repository == repository
+                    let foundIsOwn = found.repository == repository
+                    if knownIsOwn, !foundIsOwn { continue }
+                    if knownIsOwn == foundIsOwn, known.startedAt <= found.startedAt { continue }
+                }
+                running[found.script.name] = found
             }
         }
         return running
     }
 
-    /// Reads on in the output of the run of `script`, if one runs or has just ended.
-    private func follow(_ script: GitHookScript, running: (pid: pid_t, startedAt: Date)?) -> Scan? {
-        if let running, outputs[script.name]?.pid != running.pid {
+    /// The hook script at `path` of another worktree of the repository, and that worktree,
+    /// when it is one. Git runs a hook from the top of the working tree, so that is where
+    /// the checkout is looked for first, then by the script.
+    private func worktreeScript(at path: URL, runningIn directory: String?) -> (script: GitHookScript, checkout: Git.Repository)? {
+        let candidates = [directory, path.deletingLastPathComponent().path].compactMap { $0 }
+        for candidate in candidates {
+            guard let checkout = checkout(at: candidate) else { continue }
+            guard checkout.commonDir == repository.commonDir, checkout.root != repository.root else { return nil }
+            let scripts: [GitHookScript]
+            if let known = worktreeScripts[checkout.root] {
+                scripts = known
+            } else {
+                scripts = GitHookScript.scripts(of: checkout)
+                worktreeScripts[checkout.root] = scripts
+            }
+            guard let script = scripts.first(where: { $0.path == path }) else { return nil }
+            return (script, checkout)
+        }
+        return nil
+    }
+
+    /// The checkout `directory` is in, looked up once per round of scripts.
+    private func checkout(at directory: String) -> Git.Repository? {
+        if let known = checkouts[directory] { return known }
+        let checkout = Git.repository(containing: URL(fileURLWithPath: directory))
+        // A nil is kept, so a directory outside any repository is looked up once too.
+        checkouts[directory] = .some(checkout)
+        return checkout
+    }
+
+    /// Reads on in the output of the run of the hook named `name`, if one runs or has just
+    /// ended.
+    private func follow(_ name: String, running: Running?) -> Scan? {
+        if let running, outputs[name]?.pid != running.pid {
             let file = RunningProcess.outputFile(running.pid)
-            outputs[script.name] = Output(
+            outputs[name] = Output(
                 pid: running.pid,
                 startedAt: running.startedAt,
+                script: running.script,
+                repository: running.repository,
                 file: file,
-                parser: GitHookOutputParser(script: script),
+                parser: GitHookOutputParser(script: running.script),
                 git: Self.git(running: running.pid),
-                stateBefore: Git.state(changedBy: script.name, in: repository))
+                stateBefore: Git.state(changedBy: name, in: running.repository))
         }
-        guard var output = outputs[script.name], !output.isFinished else { return nil }
-        defer { outputs[script.name] = output }
+        guard var output = outputs[name], !output.isFinished else { return nil }
+        defer { outputs[name] = output }
+        let script = output.script
 
         if let file = output.file, let handle = try? FileHandle(forReadingFrom: file) {
             defer { try? handle.close() }
@@ -302,7 +393,8 @@ final class GitHookTracker: ObservableObject {
             pid: output.pid,
             startedAt: output.startedAt,
             reached: output.reached,
-            followsSteps: followsSteps)
+            followsSteps: followsSteps,
+            worktree: output.repository == repository ? nil : output.repository.root.lastPathComponent)
         guard running == nil else { return scan }
 
         guard let endedAt = output.endedAt else {
@@ -331,7 +423,7 @@ final class GitHookTracker: ObservableObject {
         if parser.passed { return .passed }
         guard output.file != nil else {
             // Git commits or pushes once the hook passes, and gives up when it fails.
-            if Git.state(changedBy: script.name, in: repository) != output.stateBefore { return .passed }
+            if Git.state(changedBy: script.name, in: output.repository) != output.stateBefore { return .passed }
             if let git = output.git, RunningProcess.isRunning(git),
                let endedAt = output.endedAt, Date().timeIntervalSince(endedAt) < Self.gitWait {
                 return nil
@@ -396,7 +488,8 @@ final class GitHookTracker: ObservableObject {
                     pid: scan.pid,
                     startedAt: scan.startedAt,
                     steps: scan.script.steps.map { GitHookRun.Step(title: $0) },
-                    followsSteps: scan.followsSteps)
+                    followsSteps: scan.followsSteps,
+                    worktree: scan.worktree)
             }
 
             Self.reach(scan.reached, in: &run, isNew: isNew, at: now)
@@ -414,10 +507,11 @@ final class GitHookTracker: ObservableObject {
             runs[hook] = nil
         }
         // Hooks that are gone take their runs with them, and a run that ended goes when
-        // its script's steps change.
+        // its script's steps change. A run from another worktree ran that worktree's
+        // script, so it stays until git is done with it or its HEAD moves on.
         runs = runs.filter { name, run in
             guard let script = scripts.first(where: { $0.name == name }) else { return false }
-            return run.outcome == .running || run.steps.map(\.title) == script.steps
+            return run.outcome == .running || run.worktree != nil || run.steps.map(\.title) == script.steps
         }
         if runs != self.runs { self.runs = runs }
     }

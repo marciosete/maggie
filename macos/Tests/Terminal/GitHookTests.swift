@@ -336,6 +336,48 @@ struct GitHookTests {
         #expect(tracker.scripts.first?.steps == ["One", "Two"])
     }
 
+    /// A team commits in worktrees and pushes from the main checkout: the panel on the
+    /// worktree shows the push's hook all the same, with the main checkout's own steps.
+    @Test @MainActor func seesAHookRunFromAnotherWorktreeOfTheRepository() async throws {
+        let root = try Self.huskyRepository(prePush: """
+            echo "[1/2] Main one…"
+            sleep 1
+            echo "[2/2] Main two…"
+            sleep 0.5
+            """)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Self.git(["add", "-A", "."], in: root)
+        try Self.git(["commit", "-q", "--no-verify", "-m", "hooks"], in: root)
+        let worktree = root.appendingPathComponent("wt")
+        try Self.git(["worktree", "add", "-q", worktree.path], in: root)
+        // The worktree's branch has a different script.
+        try Self.write("#!/bin/bash\necho \"[1/1] Worktree one…\"\n", to: worktree.appendingPathComponent(".husky/pre-push"))
+
+        let repository = try #require(Git.repository(containing: worktree))
+        #expect(repository.isLinkedWorktree)
+        let tracker = GitHookTracker.tracker(for: repository)
+        let watch = tracker.watch()
+        defer { watch.cancel() }
+        try await Self.wait { tracker.scripts.first?.steps == ["Worktree one"] }
+
+        let process = try Self.runHook(in: root, output: root.appendingPathComponent("output.txt"))
+        defer { if process.isRunning { process.terminate() } }
+        try await Self.wait { tracker.runs["pre-push"] != nil }
+        let running = try #require(tracker.runs["pre-push"])
+        #expect(running.worktree == root.lastPathComponent)
+        #expect(running.steps.map(\.title) == ["Main one", "Main two"])
+
+        try await Self.wait { tracker.runs["pre-push"]?.outcome != .running }
+        let run = try #require(tracker.runs["pre-push"])
+        #expect(run.outcome == .passed)
+        #expect(run.current == 1)
+        #expect(run.worktree == root.lastPathComponent)
+
+        // It stays although the worktree's own script has other steps.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        #expect(tracker.runs["pre-push"]?.outcome == .passed)
+    }
+
     @Test @MainActor func timesTheStepsOfAHookThatPasses() async throws {
         let root = try Self.huskyRepository(prePush: """
             echo "[1/3] One…"
