@@ -158,6 +158,9 @@ final class VoiceAgent: ObservableObject {
     /// The user's words are checked for "mute" once no more have come for this long.
     static let commandSettle: TimeInterval = 0.35
 
+    /// A pause in arriving speech this long ends the reply being silenced by a mute.
+    static let replyGap: TimeInterval = 1.5
+
     /// A pause this long ends the user's spoken turn in the transcript.
     static let userPause: TimeInterval = 2.0
     static let assistantPause: TimeInterval = 0.9
@@ -238,6 +241,12 @@ final class VoiceAgent: ObservableObject {
     /// The last reason the wake listener gave for not working, said once, not every time.
     private var wakeFailure: String?
 
+    /// The reply under way when the user muted is dropped as it arrives, until it ends.
+    private var silencingReply = false
+
+    /// What the voice said last, so its own words, echoing back, can't wake it.
+    private var lastAssistantText = ""
+
     /// What to do once the voice finishes saying its goodbye.
     private var afterSpeaking: (() -> Void)?
 
@@ -307,6 +316,15 @@ final class VoiceAgent: ObservableObject {
         guard isMuted != muted else { return }
         isMuted = muted
         endpoint.setMuted(muted)
+        // Muted means quiet too: the reply under way stops, so it can't drown out "unmute".
+        // Notices that come later while muted are still spoken.
+        silencingReply = muted
+        if muted {
+            endpoint.stopPlayback()
+            schedule("reply-silenced", after: Self.replyGap) { [weak self] in self?.silencingReply = false }
+        } else {
+            cancel("reply-silenced")
+        }
         if muted { socket?.send(["type": "session.input_audio.mute"]) } else { socket?.send(["type": "session.input_audio.unmute"]) }
         updateWakeListening()
     }
@@ -328,8 +346,9 @@ final class VoiceAgent: ObservableObject {
     }
 
     private func woken(by phrase: String) {
-        // The voice's own speech, echoing back, isn't the user.
-        guard !assistantSpeaking else { return }
+        // The voice's own speech, echoing back, isn't the user. Voice processing removes
+        // most of it, so the user is heard over the voice unless it said the phrase itself.
+        guard !Self.isEcho(phrase, assistantSaid: lastAssistantText + " " + ledger.pendingAssistant) else { return }
         switch phase {
         case .paused:
             record(.notice, "Heard \"\(phrase)\".")
@@ -339,6 +358,11 @@ final class VoiceAgent: ObservableObject {
         default:
             break
         }
+    }
+
+    /// Whether `phrase`, heard while muted, is the voice's own words echoing back.
+    nonisolated static func isEcho(_ phrase: String, assistantSaid: String) -> Bool {
+        VoiceWakeListener.matches(assistantSaid) == phrase
     }
 
     /// Where the Mac listens for a wake phrase, if it does: only while the voice can't
@@ -547,6 +571,10 @@ final class VoiceAgent: ObservableObject {
 
         case .outputAudio(let pcm):
             outputChunks += 1
+            if silencingReply {
+                schedule("reply-silenced", after: Self.replyGap) { [weak self] in self?.silencingReply = false }
+                return
+            }
             endpoint.play(pcm)
             schedule("flush-audio", after: 0.5) { [weak self] in self?.endpoint.flushPlayback() }
 
@@ -782,7 +810,10 @@ final class VoiceAgent: ObservableObject {
         case .assistant:
             cancel("assistant")
             let text = ledger.flushAssistant()
-            if !text.isEmpty { record(.assistant, text) }
+            if !text.isEmpty {
+                lastAssistantText = text
+                record(.assistant, text)
+            }
         default:
             break
         }

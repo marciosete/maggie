@@ -549,4 +549,15 @@ struct VoiceWakeSourceTests {
         #expect(VoiceAgent.wakeSource(phase: .off, muted: true, local: true) == nil)
         #expect(VoiceAgent.wakeSource(phase: .failed("x"), muted: true, local: true) == nil)
     }
+
+    @Test func theUserIsHeardOverTheVoice() {
+        // Muted mid-reply, "hey Maggie" said over the voice wakes it (v0.22 dropped it).
+        #expect(!VoiceAgent.isEcho("hey maggie", assistantSaid: "Session four finished its build and the tests pass."))
+        #expect(!VoiceAgent.isEcho("unmute", assistantSaid: " "))
+    }
+
+    @Test func theVoicesOwnWordsDontWakeIt() {
+        #expect(VoiceAgent.isEcho("unmute", assistantSaid: "Say unmute when you want me back."))
+        #expect(VoiceAgent.isEcho("hey maggie", assistantSaid: "You can say \"Hey, Maggie\" any time."))
+    }
 }
