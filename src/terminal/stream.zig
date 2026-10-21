@@ -10,6 +10,7 @@ const Parser = @import("Parser.zig");
 const ansi = @import("ansi.zig");
 const charsets = @import("charsets.zig");
 const device_attributes = @import("device_attributes.zig");
+const xt_checksum = @import("xt_checksum.zig");
 const device_status = @import("device_status.zig");
 const csi = @import("csi.zig");
 const kitty = @import("kitty.zig");
@@ -133,6 +134,10 @@ pub const Action = union(Key) {
     resize_window: ResizeWindow,
     osc_unknown: osc.Command.Unknown,
     mouse_shape_reset,
+    request_xt_checksum: xt_checksum.Request,
+    xt_checksum_extension: XtChecksumExtension,
+    program_status: ProgramStatus,
+    soft_reset,
 
     pub const Key = lib.Enum(
         lib.target,
@@ -237,6 +242,10 @@ pub const Action = union(Key) {
             "resize_window",
             "osc_unknown",
             "mouse_shape_reset",
+            "request_xt_checksum",
+            "xt_checksum_extension",
+            "program_status",
+            "soft_reset",
         },
     );
 
@@ -364,6 +373,16 @@ pub const Action = union(Key) {
         columns: u16,
     };
 
+    pub const XtChecksumExtension = struct {
+        flags: xt_checksum.Flags,
+
+        pub const C = u8;
+
+        pub fn cval(self: XtChecksumExtension) XtChecksumExtension.C {
+            return @as(u5, @bitCast(self.flags));
+        }
+    };
+
     pub const KittyKeyboardFlags = struct {
         flags: kitty.KeyFlags,
 
@@ -468,6 +487,8 @@ pub const Action = union(Key) {
     pub const KittyClipboard = osc.Command.KittyClipboardProtocol;
 
     pub const KittyDnd = osc.Command.KittyDndProtocol;
+
+    pub const ProgramStatus = osc.Command.ProgramStatus;
 };
 
 /// Returns a type that can process a stream of tty control characters.
@@ -787,7 +808,7 @@ pub fn Stream(comptime H: type) type {
                                 const v: V = cps[end..][0..lanes].*;
                                 const stop = (v & mask) == zero;
                                 if (@reduce(.Or, stop)) {
-                                    const bits: std.meta.Int(.unsigned, lanes) = @bitCast(stop);
+                                    const bits: @Int(.unsigned, lanes) = @bitCast(stop);
                                     end += @ctz(bits);
                                     break :scan;
                                 }
@@ -1404,7 +1425,7 @@ pub fn Stream(comptime H: type) type {
                 return;
             }
 
-            const c0: ansi.C0 = @enumFromInt(c);
+            const c0: ansi.C0 = @fromBackingInt(@truncate(c));
             if (comptime debug) log.info("execute: {f}", .{c0});
             switch (c0) {
                 // We ignore SOH/STX: https://github.com/microsoft/terminal/issues/10786
@@ -1695,7 +1716,7 @@ pub fn Stream(comptime H: type) type {
 
                     const mode_: ?csi.EraseLine = switch (input.params.len) {
                         0 => .right,
-                        1 => if (input.params[0] < 3) @enumFromInt(input.params[0]) else null,
+                        1 => if (input.params[0] < 3) @fromBackingInt(@truncate(input.params[0])) else null,
                         else => null,
                     };
 
@@ -1989,6 +2010,7 @@ pub fn Stream(comptime H: type) type {
                 'g' => switch (input.intermediates.len) {
                     0 => {
                         const mode: csi.TabClear = switch (input.params.len) {
+                            0 => .current,
                             1 => std.enums.fromInt(csi.TabClear, input.params[0]) orelse {
                                 log.warn("invalid tab clear mode: {}", .{input.params[0]});
                                 return;
@@ -2192,9 +2214,22 @@ pub fn Stream(comptime H: type) type {
                     }
                 },
 
-                // DECRQM - Request Mode
+                // DECRQM - Request Mode, DECSTR - Soft Terminal Reset
                 'p' => switch (input.intermediates.len) {
                     1, 2 => decrqm: {
+                        // DECSTR - Soft Terminal Reset
+                        if (input.intermediates.len == 1 and
+                            input.intermediates[0] == '!')
+                        {
+                            if (input.params.len != 0) {
+                                log.warn("invalid DECSTR command: {f}", .{input});
+                                break :decrqm;
+                            }
+
+                            self.handler.vt(.soft_reset, {});
+                            break :decrqm;
+                        }
+
                         const ansi_mode = ansi: {
                             switch (input.intermediates.len) {
                                 1 => if (input.intermediates[0] == '$') break :ansi true,
@@ -2433,10 +2468,17 @@ pub fn Stream(comptime H: type) type {
                                     .{input},
                                 ),
                                 18 => if (input.params.len == 1) {
-                                    // report screen size in characters
+                                    // report text area size in characters
                                     self.handler.vt(.size_report, .csi_18_t);
                                 } else log.warn(
                                     "ignoring CSI 18 t with extra parameters: {f}",
+                                    .{input},
+                                ),
+                                19 => if (input.params.len == 1) {
+                                    // report screen size in characters
+                                    self.handler.vt(.size_report, .csi_19_t);
+                                } else log.warn(
+                                    "ignoring CSI 19 t with extra parameters: {f}",
                                     .{input},
                                 ),
                                 21 => if (input.params.len == 1) {
@@ -2571,6 +2613,53 @@ pub fn Stream(comptime H: type) type {
 
                     else => log.warn(
                         "ignoring unimplemented CSI @: {f}",
+                        .{input},
+                    ),
+                },
+
+                'y' => switch (input.intermediates.len) {
+                    1 => switch (input.intermediates[0]) {
+                        // DECRQCRA - Request Checksum of Rectangular Area.
+                        // The page number (the second parameter) is ignored.
+                        '*' => {
+                            if (input.params.len > 6) {
+                                log.warn("invalid DECRQCRA command: {f}", .{input});
+                                return;
+                            }
+
+                            var params: [6]u16 = @splat(0);
+                            @memcpy(params[0..input.params.len], input.params);
+                            self.handler.vt(.request_xt_checksum, xt_checksum.Request{
+                                .id = params[0],
+                                .top = params[2],
+                                .left = params[3],
+                                .bottom = params[4],
+                                .right = params[5],
+                            });
+                        },
+
+                        // XTCHECKSUM - Select checksum extension. Bits
+                        // beyond the ones we know are ignored, as in xterm.
+                        '#' => {
+                            if (input.params.len > 1) {
+                                log.warn("invalid XTCHECKSUM command: {f}", .{input});
+                                return;
+                            }
+
+                            const bits: u16 = if (input.params.len == 1) input.params[0] else 0;
+                            self.handler.vt(.xt_checksum_extension, .{
+                                .flags = @as(xt_checksum.Flags, @bitCast(@as(u5, @truncate(bits)))),
+                            });
+                        },
+
+                        else => log.warn(
+                            "ignoring unimplemented CSI y: {f}",
+                            .{input},
+                        ),
+                    },
+
+                    else => log.warn(
+                        "ignoring unimplemented CSI y: {f}",
                         .{input},
                     ),
                 },
@@ -2725,6 +2814,10 @@ pub fn Stream(comptime H: type) type {
                     self.handler.vt(.kitty_dnd, v);
                 },
 
+                .program_status => |v| {
+                    self.handler.vt(.program_status, v);
+                },
+
                 .unknown => |v| {
                     @branchHint(.unlikely);
                     self.handler.vt(.osc_unknown, v);
@@ -2741,7 +2834,7 @@ pub fn Stream(comptime H: type) type {
                 .conemu_run_process,
                 .kitty_text_sizing,
                 .kitty_desktop_notification,
-                .context_signal,
+                .hierarchical_context,
                 => {
                     log.debug("unimplemented OSC callback: {}", .{cmd});
                 },
@@ -3392,7 +3485,7 @@ test "stream: cursor right (CUF)" {
 
 test "stream: dec set mode (SM) and reset mode (RM)" {
     const H = struct {
-        mode: modes.Mode = @as(modes.Mode, @enumFromInt(1)),
+        mode: modes.Mode = @as(modes.Mode, @fromBackingInt(1)),
 
         pub fn vt(
             self: *@This(),
@@ -3401,7 +3494,7 @@ test "stream: dec set mode (SM) and reset mode (RM)" {
         ) void {
             switch (action) {
                 .set_mode => self.mode = value.mode,
-                .reset_mode => self.mode = @as(modes.Mode, @enumFromInt(1)),
+                .reset_mode => self.mode = @as(modes.Mode, @fromBackingInt(1)),
                 else => {},
             }
         }
@@ -3412,11 +3505,11 @@ test "stream: dec set mode (SM) and reset mode (RM)" {
     try testing.expectEqual(@as(modes.Mode, .origin), s.handler.mode);
 
     s.nextSlice("\x1B[?6l");
-    try testing.expectEqual(@as(modes.Mode, @enumFromInt(1)), s.handler.mode);
+    try testing.expectEqual(@as(modes.Mode, @fromBackingInt(1)), s.handler.mode);
 
-    s.handler.mode = @as(modes.Mode, @enumFromInt(1));
+    s.handler.mode = @as(modes.Mode, @fromBackingInt(1));
     s.nextSlice("\x1B[6 h");
-    try testing.expectEqual(@as(modes.Mode, @enumFromInt(1)), s.handler.mode);
+    try testing.expectEqual(@as(modes.Mode, @fromBackingInt(1)), s.handler.mode);
 }
 
 test "stream: ansi set mode (SM) and reset mode (RM)" {
@@ -3446,6 +3539,119 @@ test "stream: ansi set mode (SM) and reset mode (RM)" {
     s.handler.mode = null;
     s.nextSlice("\x1B[>5h");
     try testing.expect(s.handler.mode == null);
+}
+
+test "stream: DECSTR dispatch" {
+    const H = struct {
+        calls: usize = 0,
+
+        pub fn vt(self: *@This(), comptime action: Action.Tag, value: Action.Value(action)) void {
+            _ = value;
+            switch (action) {
+                .soft_reset => self.calls += 1,
+                else => {},
+            }
+        }
+    };
+
+    const cases = [_]struct {
+        input: []const u8,
+        calls: usize,
+    }{
+        .{ .input = "\x1b[!p", .calls = 1 },
+        .{ .input = "\x1b[1!p", .calls = 0 },
+        .{ .input = "\x1b[?!p", .calls = 0 },
+        .{ .input = "\x1b[$p", .calls = 0 },
+    };
+
+    for (cases) |case| {
+        var s: Stream(H) = .init(.{ .handler = .{} });
+        s.nextSlice(case.input);
+        try testing.expectEqual(case.calls, s.handler.calls);
+    }
+}
+
+test "stream: DECRQCRA dispatch" {
+    const H = struct {
+        calls: usize = 0,
+        req: ?xt_checksum.Request = null,
+
+        pub fn vt(self: *@This(), comptime action: Action.Tag, value: Action.Value(action)) void {
+            switch (action) {
+                .request_xt_checksum => {
+                    self.calls += 1;
+                    self.req = value;
+                },
+                else => {},
+            }
+        }
+    };
+
+    const cases = [_]struct {
+        input: []const u8,
+        req: ?xt_checksum.Request = null,
+    }{
+        .{
+            .input = "\x1b[7;1;2;3;4;5*y",
+            .req = .{ .id = 7, .top = 2, .left = 3, .bottom = 4, .right = 5 },
+        },
+        .{ .input = "\x1b[7*y", .req = .{ .id = 7 } },
+        .{ .input = "\x1b[*y", .req = .{} },
+        .{ .input = "\x1b[1;1;2;3*y", .req = .{ .id = 1, .top = 2, .left = 3 } },
+        .{ .input = "\x1b[1;1;1;1;1;1;1*y" },
+        .{ .input = "\x1b[1;1;1;1;1;1y" },
+        .{ .input = "\x1b[1;1;1;1;1;1\"y" },
+    };
+
+    for (cases) |case| {
+        var s: Stream(H) = .init(.{ .handler = .{} });
+        s.nextSlice(case.input);
+        if (case.req) |req| {
+            try testing.expectEqual(1, s.handler.calls);
+            try testing.expectEqual(req, s.handler.req.?);
+        } else {
+            try testing.expectEqual(0, s.handler.calls);
+        }
+    }
+}
+
+test "stream: XTCHECKSUM dispatch" {
+    const H = struct {
+        calls: usize = 0,
+        flags: ?xt_checksum.Flags = null,
+
+        pub fn vt(self: *@This(), comptime action: Action.Tag, value: Action.Value(action)) void {
+            switch (action) {
+                .xt_checksum_extension => {
+                    self.calls += 1;
+                    self.flags = value.flags;
+                },
+                else => {},
+            }
+        }
+    };
+
+    const cases = [_]struct {
+        input: []const u8,
+        flags: ?xt_checksum.Flags = null,
+    }{
+        .{ .input = "\x1b[#y", .flags = .{} },
+        .{ .input = "\x1b[0#y", .flags = .{} },
+        .{ .input = "\x1b[5#y", .flags = .{ .positive = true, .no_trim = true } },
+        .{ .input = "\x1b[48#y", .flags = .{ .full = true } },
+        .{ .input = "\x1b[1;2#y" },
+    };
+
+    for (cases) |case| {
+        var s: Stream(H) = .init(.{ .handler = .{} });
+        s.nextSlice(case.input);
+        if (case.flags) |flags| {
+            try testing.expectEqual(1, s.handler.calls);
+            try testing.expectEqual(flags, s.handler.flags.?);
+        } else {
+            try testing.expectEqual(0, s.handler.calls);
+        }
+    }
 }
 
 test "stream: DECRQM dispatch" {
@@ -3987,8 +4193,7 @@ test "stream: osc bulk path matches per-byte path" {
         journal: std.ArrayListUnmanaged(u8) = .empty,
 
         fn record(self: *Self, comptime fmt: []const u8, args: anytype) void {
-            const s = std.fmt.allocPrint(
-                self.alloc,
+            const s = self.alloc.print(
                 fmt,
                 args,
             ) catch @panic("OOM");
@@ -4026,6 +4231,9 @@ test "stream: osc bulk path matches per-byte path" {
         }
     };
 
+    const ys: [3000]u8 = @splat('y');
+    const xs: [3000]u8 = @splat('x');
+
     const cases = [_][]const u8{
         "\x1b]52;c;aGVsbG8=\x1b\\",
         "\x1b]52;c;aGVsbG8=\x07",
@@ -4045,9 +4253,9 @@ test "stream: osc bulk path matches per-byte path" {
         // Invalid OSC number.
         "\x1b]999;junk\x07",
         // Exceeds the fixed buffer: allocating capture.
-        "\x1b]52;c;" ++ "y" ** 3000 ++ "\x1b\\",
+        "\x1b]52;c;" ++ ys ++ "\x1b\\",
         // Exceeds the fixed buffer: overflow, no dispatch.
-        "\x1b]0;" ++ "x" ** 3000 ++ "\x07",
+        "\x1b]0;" ++ xs ++ "\x07",
     };
 
     for (cases) |case| {
@@ -4254,6 +4462,9 @@ test "stream: send report with CSI t" {
 
     s.nextSlice("\x1b[18t");
     try testing.expectEqual(csi.SizeReportStyle.csi_18_t, s.handler.style);
+
+    s.nextSlice("\x1b[19t");
+    try testing.expectEqual(csi.SizeReportStyle.csi_19_t, s.handler.style);
 
     s.nextSlice("\x1b[21t");
     try testing.expectEqual(csi.SizeReportStyle.csi_21_t, s.handler.style);
@@ -4612,9 +4823,39 @@ test "stream: SGR with 17+ parameters for underline color" {
     try testing.expect(s.handler.called);
 }
 
+test "stream: tab clear with no param clears the current stop" {
+    const H = struct {
+        action: ?Action.Tag = null,
+
+        pub fn vt(
+            self: *@This(),
+            comptime action: Action.Tag,
+            value: Action.Value(action),
+        ) void {
+            _ = value;
+            switch (action) {
+                .tab_clear_current, .tab_clear_all => self.action = action,
+                else => {},
+            }
+        }
+    };
+
+    var s: Stream(H) = .init(.{ .handler = .{} });
+    s.nextSlice("\x1b[g");
+    try testing.expectEqual(@as(?Action.Tag, .tab_clear_current), s.handler.action);
+
+    s.handler.action = null;
+    s.nextSlice("\x1b[0g");
+    try testing.expectEqual(@as(?Action.Tag, .tab_clear_current), s.handler.action);
+
+    s.handler.action = null;
+    s.nextSlice("\x1b[3g");
+    try testing.expectEqual(@as(?Action.Tag, .tab_clear_all), s.handler.action);
+}
+
 test "stream: tab clear with overflowing param" {
     // Regression test for a fuzz crash: CSI with a parameter value that
-    // saturates to 65535 (u16 max) causes @enumFromInt to panic when
+    // saturates to 65535 (u16 max) causes @fromBackingInt to panic when
     // converting to TabClear (enum(u8)).
     const H = struct {
         called: bool = false,
@@ -5397,6 +5638,9 @@ test "stream: continuation allocation failure recovers" {
     @memset(input[2..], '1');
 
     failing.fail_index = failing.alloc_index;
+    // ArrayList growth remaps in place, which bypasses fail_index, so arm
+    // the resize failure index too.
+    failing.resize_fail_index = failing.resize_index;
     stream.nextSlice(input);
     var unavailable_buf: [1]u8 = undefined;
     var unavailable_writer: std.Io.Writer = .fixed(&unavailable_buf);
@@ -5406,6 +5650,7 @@ test "stream: continuation allocation failure recovers" {
     );
 
     failing.fail_index = std.math.maxInt(usize);
+    failing.resize_fail_index = std.math.maxInt(usize);
     stream.next('m');
     var recovered_buf: [1]u8 = undefined;
     var recovered_writer: std.Io.Writer = .fixed(&recovered_buf);

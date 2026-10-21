@@ -1252,6 +1252,7 @@ GHOSTTY_API void ghostty_surface_pty_tap_snapshot(ghostty_surface_t);
 // alternate screen if it shows. Free with ghostty_surface_free_text.
 GHOSTTY_API bool ghostty_surface_read_screen_vt(ghostty_surface_t,
                                                 ghostty_text_s*);
+GHOSTTY_API void ghostty_surface_paste_text(ghostty_surface_t, const char*, uintptr_t);
 GHOSTTY_API void ghostty_surface_preedit(ghostty_surface_t, const char*, uintptr_t);
 GHOSTTY_API bool ghostty_surface_mouse_captured(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_mouse_button(ghostty_surface_t,

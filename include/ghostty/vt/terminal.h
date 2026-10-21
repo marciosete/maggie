@@ -93,17 +93,19 @@ extern "C" {
  * | `GHOSTTY_TERMINAL_OPT_PWD_CHANGED`      | `GhosttyTerminalPwdChangedFn`     | Pwd change via OSC 7 / OSC 9 / OSC 1337   |
  * | `GHOSTTY_TERMINAL_OPT_ENQUIRY`          | `GhosttyTerminalEnquiryFn`        | ENQ character (0x05)                      |
  * | `GHOSTTY_TERMINAL_OPT_XTVERSION`        | `GhosttyTerminalXtversionFn`      | XTVERSION query (CSI > q)                 |
- * | `GHOSTTY_TERMINAL_OPT_SIZE`             | `GhosttyTerminalSizeFn`           | XTWINOPS query (CSI 14/16/18 t) or mode 2048 enable |
+ * | `GHOSTTY_TERMINAL_OPT_SIZE`             | `GhosttyTerminalSizeFn`           | XTWINOPS query (CSI 14/16/18/19 t) or mode 2048 enable |
  * | `GHOSTTY_TERMINAL_OPT_COLOR_SCHEME`     | `GhosttyTerminalColorSchemeFn`    | Color scheme query (CSI ? 996 n)          |
  * | `GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES`| `GhosttyTerminalDeviceAttributesFn`| Device attributes query (CSI c / > c / = c)|
  * | `GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE`  | `GhosttyTerminalClipboardWriteFn` | Clipboard write via OSC 52 / OSC 1337 / OSC 5522 |
  * | `GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ`   | `GhosttyTerminalClipboardReadFn`  | Clipboard read via OSC 52 "?" / OSC 5522  |
  * | `GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION`| `GhosttyTerminalDesktopNotificationFn` | Desktop notification via OSC 9 / OSC 777 |
  * | `GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT`  | `GhosttyTerminalProgressReportFn` | Progress report via OSC 9;4               |
+ * | `GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS`   | `GhosttyTerminalProgramStatusFn`  | Program status report via OSC 7501        |
  * | `GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE` | `GhosttyTerminalUnknownSequenceFn` | APC or OSC sequence that libghostty-vt does not implement (see Unsupported Sequences) |
  * | `GHOSTTY_TERMINAL_OPT_RENDER_HOLD`      | `GhosttyTerminalRenderHoldFn`     | Synchronized output (mode 2026) begins or ends |
  * | `GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT`  | `GhosttyTerminalSemanticPromptFn` | Shell reports a prompt or command step via OSC 133 |
  * | `GHOSTTY_TERMINAL_OPT_RESET`            | `GhosttyTerminalResetFn`          | Full reset (RIS, ESC c)                   |
+ * | `GHOSTTY_TERMINAL_OPT_RESIZE_WINDOW`    | `GhosttyTerminalResizeWindowFn`   | Window resize request (CSI 8 t)           |
  *
  * ### Defining a write_pty callback
  * @snippet c-vt-effects/src/main.c effects-write-pty
@@ -316,6 +318,18 @@ typedef enum GHOSTTY_ENUM_TYPED {
    * GHOSTTY_TERMINAL_DATA_SCROLLBAR round-trips cleanly.
    */
   GHOSTTY_SCROLL_VIEWPORT_ROW,
+
+  /**
+   * Scroll by a number of prompts relative to the viewport top. Negative
+   * values move backward and positive values move forward. Requires semantic
+   * prompt markers from the shell. Zero or no matching prompt is a no-op.
+   * If fewer prompts remain than requested, move to the last matching prompt,
+   * clamped to the active area.
+   *
+   * Moving forward through a final prompt continuation can snap to the active
+   * area even when there is no newer prompt.
+   */
+  GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT,
   GHOSTTY_SCROLL_VIEWPORT_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
 } GhosttyTerminalScrollViewportTag;
 
@@ -330,6 +344,9 @@ typedef union {
 
   /** Absolute row offset (only used with GHOSTTY_SCROLL_VIEWPORT_ROW). */
   size_t row;
+
+  /** Prompt delta (only used with GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT). */
+  intptr_t delta_prompt;
 
   /** Padding for ABI compatibility. Do not use. */
   uint64_t _padding[2];
@@ -1152,6 +1169,232 @@ typedef void (*GhosttyTerminalProgressReportFn)(
     const GhosttyTerminalProgressReport* report);
 
 /**
+ * What a program says it is doing, in a program status report (OSC 7501).
+ *
+ * See GhosttyTerminalProgramStatus for an overview of the protocol.
+ *
+ * @ingroup terminal
+ */
+typedef enum GHOSTTY_ENUM_TYPED {
+  /** At rest, waiting for the user's next instruction. For example, an
+   * interactive tool sitting at its own prompt. */
+  GHOSTTY_PROGRAM_STATUS_STATE_IDLE = 0,
+
+  /** Running on its own. The report may include a progress percentage. */
+  GHOSTTY_PROGRAM_STATUS_STATE_WORKING = 1,
+
+  /** Finished a piece of work, and the result is ready for the user to
+   * look at. */
+  GHOSTTY_PROGRAM_STATUS_STATE_DONE = 2,
+
+  /** Can't continue until the user does something. `kind` says what the
+   * program needs and `message` says why. The report may include a
+   * progress percentage. */
+  GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED = 3,
+
+  /** Failed and stopped. */
+  GHOSTTY_PROGRAM_STATUS_STATE_ERROR = 4,
+
+  /** Not a real state. Remove the record with this report's id and every
+   * record beneath it. If the id is empty, remove every record. */
+  GHOSTTY_PROGRAM_STATUS_STATE_CLEAR = 5,
+  GHOSTTY_PROGRAM_STATUS_STATE_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+} GhosttyProgramStatusState;
+
+/**
+ * What a blocked program needs from the user, in a program status report
+ * (OSC 7501).
+ *
+ * @ingroup terminal
+ */
+typedef enum GHOSTTY_ENUM_TYPED {
+  /** The program didn't say, or the state isn't
+   * GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED. */
+  GHOSTTY_PROGRAM_STATUS_KIND_NONE = 0,
+
+  /** Approval to do something, such as "Apply these changes?". */
+  GHOSTTY_PROGRAM_STATUS_KIND_PERMISSION = 1,
+
+  /** An answer the user has to type. */
+  GHOSTTY_PROGRAM_STATUS_KIND_QUESTION = 2,
+
+  /** A login, password, token, or other credential. */
+  GHOSTTY_PROGRAM_STATUS_KIND_AUTH = 3,
+  GHOSTTY_PROGRAM_STATUS_KIND_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+} GhosttyProgramStatusKind;
+
+/**
+ * A program status report (OSC 7501).
+ *
+ * The program status protocol lets a program tell the terminal what it is
+ * doing: idle, working, done, waiting on the user, or failed, and why. It
+ * is meant for long-running work like builds, deploys, and coding agents,
+ * where the user is often looking at something else and wants to know when
+ * the work finishes or needs them. The protocol only describes state. How
+ * to show it, if at all, is up to your application.
+ *
+ * The full specification is at
+ * https://www.superlogical.com/rex/docs/build/program-status
+ *
+ * For example, a program waiting for the user to approve a change sends
+ * this, where ST is the string terminator (ESC \ or BEL):
+ *
+ * @code
+ * ESC ] 7501 ; state=blocked:kind=permission:app=terraform:msg=QXBwbHk/ ST
+ * @endcode
+ *
+ * The callback then receives a report with:
+ *
+ * - `state`: GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED
+ * - `kind`: GHOSTTY_PROGRAM_STATUS_KIND_PERMISSION
+ * - `progress`: -1, because the program didn't send one, so the work is
+ *   indeterminate
+ * - `id`: empty, because this is the root record
+ * - `app`: "terraform"
+ * - `title`: empty
+ * - `message`: "Apply?", decoded from the base64 in `msg`
+ *
+ * Only reports that pass every check in the specification reach the
+ * callback. Text that the program didn't send is an empty string (len=0),
+ * never NULL. All strings are only valid during the callback, so copy any
+ * you want to keep.
+ *
+ * This is a sized struct. Later versions may add fields at the end, and
+ * `size` tells you which fields are present. Every field below has been
+ * present since this struct was introduced.
+ *
+ * @ingroup terminal
+ */
+typedef struct {
+  /** Size of this struct in bytes. */
+  size_t size;
+
+  /** What the program is doing. */
+  GhosttyProgramStatusState state;
+
+  /** What the program needs from the user. Only set for
+   * GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED. It is
+   * GHOSTTY_PROGRAM_STATUS_KIND_NONE for other states, when the program
+   * didn't say, or when it sent a kind this version doesn't know. */
+  GhosttyProgramStatusKind kind;
+
+  /** How far along the work is, from 0 through 100, or -1 when there is
+   * no percentage. Only set for GHOSTTY_PROGRAM_STATUS_STATE_WORKING and
+   * GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED. For those states, -1 means the
+   * work is indeterminate: the program is busy but has no percentage to
+   * report. It is also -1 for other states and when the program sent a
+   * value outside that range. */
+  int8_t progress;
+
+  /** Which record this report is about. Empty for the root record.
+   *
+   * A program that only reports on itself leaves this empty. A program
+   * that reports on several things at once gives each its own id, such as
+   * "us-east" and "eu-west" for a deploy to two regions. A "/" makes one
+   * record the child of another, so "build/test" is a child of "build".
+   * The parent record doesn't have to exist. */
+  GhosttyString id;
+
+  /** A stable name for the program that a machine can match on, such as
+   * "cargo", "terraform", or "claude-code". Use it as a key for grouping,
+   * filtering, or choosing an icon. It is not a label. The label is
+   * `title`. Empty when the report didn't include one. See
+   * GhosttyTerminalProgramStatusFn for how an empty app is filled in from
+   * a parent record. */
+  GhosttyString app;
+
+  /** A short label for the record, meant for people. Programs that report
+   * several records use this to tell them apart. */
+  GhosttyString title;
+
+  /** One line of text for people, saying what the record is doing,
+   * waiting for, or has finished. You may shorten it to fit, but don't
+   * try to read meaning into it. */
+  GhosttyString message;
+} GhosttyTerminalProgramStatus;
+
+/**
+ * Callback function type for program status reports (OSC 7501).
+ *
+ * Called synchronously each time the running program sends a valid
+ * report. See GhosttyTerminalProgramStatus for what a report contains.
+ *
+ * The terminal doesn't store reports, so your application keeps them. To
+ * follow the specification, keep one record per id. A report with an empty
+ * id is about the root record, the program itself. The records follow
+ * these rules:
+ *
+ * - A report replaces its record completely. A value the report leaves
+ *   out is gone from the record afterwards. It doesn't keep its old value.
+ * - A GHOSTTY_PROGRAM_STATUS_STATE_CLEAR report removes the record with
+ *   its id and every record beneath it, so clearing "build" also removes
+ *   "build/test". A clear report with an empty id removes every record.
+ * - A record without an app takes it from its nearest ancestor that has
+ *   one. If the root record has app "deploy" and the record "us-east"
+ *   has none, show "us-east" with app "deploy" too.
+ * - When a new shell prompt starts (GHOSTTY_SEMANTIC_PROMPT_PROMPT_START
+ *   from the GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT callback) or the program
+ *   running in the terminal exits, remove `working` and `blocked` records.
+ *   You may remove `idle` records too. Keep `done` and `error` records
+ *   until the user has seen them, for example until they next focus the
+ *   terminal.
+ * - Keep at most 256 records, and allow at least 64. When a new record
+ *   would go over your limit, remove the one that was updated longest ago.
+ *
+ * A full reset (RIS, `ESC c`) removes every record. When that happens,
+ * the terminal calls this with a GHOSTTY_PROGRAM_STATUS_STATE_CLEAR report
+ * and an empty id, and then calls the GHOSTTY_TERMINAL_OPT_RESET callback.
+ *
+ * `title` and `message` are already decoded and contain no control
+ * characters, but they are still untrusted text from the program. Don't
+ * treat them as markup. If you show them outside the terminal, such as in
+ * a tab or a notification, remove invisible formatting characters like
+ * text direction overrides, and say which terminal the text came from so
+ * a program can't pretend to be one running elsewhere.
+ *
+ * Example, where `Records`, `records_clear`, and `records_put` stand in for
+ * your application's own storage:
+ *
+ * @code
+ * void on_program_status(GhosttyTerminal terminal,
+ *                        void* userdata,
+ *                        const GhosttyTerminalProgramStatus* report) {
+ *   (void)terminal;
+ *   Records* records = userdata;
+ *
+ *   if (report->state == GHOSTTY_PROGRAM_STATUS_STATE_CLEAR) {
+ *     // Remove this record and every record beneath it. An empty id
+ *     // removes every record.
+ *     records_clear(records, report->id);
+ *     return;
+ *   }
+ *
+ *   // Replace the whole record. The strings are only valid during this
+ *   // call, so records_put must copy them.
+ *   records_put(records, report->id, report->state, report->message);
+ * }
+ *
+ * // Set write_pty too, so programs that check for support get a reply.
+ * ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_USERDATA, records);
+ * ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_WRITE_PTY,
+ *                      (const void*)on_write_pty);
+ * ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS,
+ *                      (const void*)on_program_status);
+ * @endcode
+ *
+ * @param terminal The terminal handle
+ * @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA
+ * @param report The report. It and its strings are only valid during the
+ *               call.
+ *
+ * @ingroup terminal
+ */
+typedef void (*GhosttyTerminalProgramStatusFn)(
+    GhosttyTerminal terminal,
+    void* userdata,
+    const GhosttyTerminalProgramStatus* report);
+
+/**
  * The step of a command that a shell integration event reports.
  *
  * More kinds may be added in later versions, so ignore any kind you don't
@@ -1311,11 +1554,13 @@ typedef void (*GhosttyTerminalSemanticPromptFn)(
  * GHOSTTY_TERMINAL_OPT_TITLE_CHANGED and GHOSTTY_TERMINAL_OPT_PWD_CHANGED
  * callbacks are not called for the cleared title and working directory,
  * so update anything you show for them here. A full reset also removes
- * any progress report. If you set GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT,
- * that callback is called before this one.
+ * any progress report and program status records. If you set
+ * GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT or
+ * GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS, those callbacks are called before
+ * this one.
  *
- * A soft reset (DECSTR, `CSI ! p`) only resets a few modes and doesn't
- * call this.
+ * A soft reset (DECSTR, `CSI ! p`) keeps the screen, title and working
+ * directory, and doesn't call this.
  *
  * @param terminal The terminal handle
  * @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA
@@ -1324,6 +1569,82 @@ typedef void (*GhosttyTerminalSemanticPromptFn)(
  */
 typedef void (*GhosttyTerminalResetFn)(GhosttyTerminal terminal,
                                        void* userdata);
+
+/**
+ * The kind of window resize request passed to a
+ * GhosttyTerminalResizeWindowFn callback.
+ *
+ * New kinds may be added in later versions. Callbacks should ignore any
+ * tag they don't handle.
+ *
+ * @ingroup terminal
+ */
+typedef enum GHOSTTY_ENUM_TYPED {
+  /**
+   * Resize the window's text area to a size in rows and columns
+   * (CSI 8 ; rows ; columns t). The value is in `value.grid`.
+   */
+  GHOSTTY_TERMINAL_RESIZE_WINDOW_GRID = 0,
+  GHOSTTY_TERMINAL_RESIZE_WINDOW_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+} GhosttyTerminalResizeWindowTag;
+
+/**
+ * A request to resize the window's text area to a size in rows and columns.
+ *
+ * @ingroup terminal
+ */
+typedef struct {
+  /** Requested height in rows, or 0 to keep the current height. */
+  uint16_t rows;
+
+  /** Requested width in columns, or 0 to keep the current width. */
+  uint16_t columns;
+} GhosttyTerminalResizeWindowGrid;
+
+/**
+ * Window resize request value.
+ *
+ * @ingroup terminal
+ */
+typedef union {
+  /** Size in rows and columns (GHOSTTY_TERMINAL_RESIZE_WINDOW_GRID). */
+  GhosttyTerminalResizeWindowGrid grid;
+
+  /** Padding for ABI compatibility. Do not use. */
+  uint64_t _padding[2];
+} GhosttyTerminalResizeWindowValue;
+
+/**
+ * A request from the running program to resize the window.
+ *
+ * @ingroup terminal
+ */
+typedef struct {
+  GhosttyTerminalResizeWindowTag tag;
+  GhosttyTerminalResizeWindowValue value;
+} GhosttyTerminalResizeWindow;
+
+/**
+ * Callback function type for window resize requests.
+ *
+ * Called synchronously when the running program asks to resize the window,
+ * such as with CSI 8 ; rows ; columns t. Check `request->tag` first, because
+ * more kinds of requests may be reported in later versions. The terminal is
+ * not resized by this: the embedder decides whether to allow the request,
+ * and if so resizes its window and the terminal. Letting any
+ * program resize the window is a nuisance at best, so consider making this
+ * opt-in for users.
+ *
+ * @param terminal The terminal handle
+ * @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA
+ * @param request Borrowed resize request
+ *
+ * @ingroup terminal
+ */
+typedef void (*GhosttyTerminalResizeWindowFn)(
+    GhosttyTerminal terminal,
+    void* userdata,
+    const GhosttyTerminalResizeWindow* request);
 
 /**
  * Callback function type for color scheme queries (CSI ? 996 n).
@@ -1384,7 +1705,7 @@ typedef GhosttyString (*GhosttyTerminalEnquiryFn)(GhosttyTerminal terminal,
 /**
  * Callback function type for terminal size reports.
  *
- * Called in response to XTWINOPS size queries (CSI 14/16/18 t) and when VT
+ * Called in response to XTWINOPS size queries (CSI 14/16/18/19 t) and when VT
  * input enables in-band size reports (mode 2048).
  * Return true and fill *out_size with the current terminal geometry,
  * or return false to suppress the report.
@@ -1677,7 +1998,7 @@ typedef enum GHOSTTY_ENUM_TYPED {
 
   /**
    * Callback invoked in response to XTWINOPS size queries
-   * (CSI 14/16/18 t). Set to NULL to silently ignore size queries.
+   * (CSI 14/16/18/19 t). Set to NULL to silently ignore size queries.
    *
    * Input type: GhosttyTerminalSizeFn
    */
@@ -1988,7 +2309,7 @@ typedef enum GHOSTTY_ENUM_TYPED {
    * Set the reset default for a terminal mode.
    *
    * This unconditionally updates both the current value and the value restored
-   * by a full terminal reset (RIS).
+   * by a terminal reset. RIS restores every mode, and DECSTR only a subset.
    *
    * Some recognized modes represent transitions or mirror additional terminal
    * state and cannot safely be configured as reset defaults. Those modes return
@@ -2002,7 +2323,7 @@ typedef enum GHOSTTY_ENUM_TYPED {
   /**
    * Set the current value of a terminal mode.
    *
-   * This does not change the value restored by a full terminal reset (RIS).
+   * This does not change the value restored by a reset (RIS or DECSTR).
    * A NULL value pointer or unknown mode returns GHOSTTY_INVALID_VALUE.
    *
    * Input type: GhosttyTerminalModeConfig*
@@ -2145,6 +2466,75 @@ typedef enum GHOSTTY_ENUM_TYPED {
    * Input type: GhosttyTerminalResetFn
    */
   GHOSTTY_TERMINAL_OPT_RESET = 43,
+
+  /**
+   * Enable checksum reports in response to DECRQCRA (CSI Pi ; Pg ; Pt ; Pl ;
+   * Pb ; Pr * y).
+   *
+   * This is disabled by default because a running program can checksum the
+   * screen one cell at a time and so read back everything on it, including
+   * output from other programs. Passing NULL or a pointer to false disables
+   * checksum reporting.
+   *
+   * While this is disabled, XTCHECKSUM (CSI Ps # y), which changes how the
+   * checksum is calculated, is ignored as well.
+   *
+   * Input type: bool*
+   */
+  GHOSTTY_TERMINAL_OPT_XT_CHECKSUM_REPORT = 44,
+
+  /**
+   * Set how the DECRQCRA checksum is calculated after a reset (RIS or DECSTR).
+   * This also changes the current calculation.
+   *
+   * The value holds the same bits as XTCHECKSUM (CSI Ps # y) and xterm's
+   * checksumExtension resource, which a running program can still use to
+   * change the calculation until the next reset:
+   *
+   *   - 1: don't negate the result
+   *   - 2: don't add the video attributes of each cell
+   *   - 4: don't omit blanks
+   *   - 8: count cells that were never written to as spaces
+   *   - 16: use full codepoints instead of the DEC 8-bit values
+   *
+   * Zero, or passing NULL, is the calculation of a real DEC terminal.
+   * Values above 31 return GHOSTTY_INVALID_VALUE.
+   *
+   * Input type: uint8_t*
+   */
+  GHOSTTY_TERMINAL_OPT_XT_CHECKSUM_EXTENSION = 45,
+
+  /**
+   * Callback invoked when the running program sends a program status
+   * report via OSC 7501. Set to NULL to ignore these reports.
+   *
+   * Programs may ask whether the terminal supports the protocol by
+   * sending `OSC 7501 ; ?`. While this callback is set, the terminal
+   * answers through GHOSTTY_TERMINAL_OPT_WRITE_PTY with `?` followed by
+   * the states and kinds it accepts:
+   *
+   * @code
+   * program:  ESC ] 7501 ; ? ST
+   * terminal: ESC ] 7501 ; ?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST
+   * @endcode
+   *
+   * While this callback is NULL, the query gets no reply, so a program
+   * that asks sees the protocol as unsupported. Asking is optional, so
+   * programs may send reports anyway. Those are dropped. Set a write_pty
+   * callback too, or programs never see the reply.
+   *
+   * Input type: GhosttyTerminalProgramStatusFn
+   */
+  GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS = 46,
+
+  /**
+   * Callback invoked when the running program asks to resize the window,
+   * such as with CSI 8 ; rows ; columns t. Set to NULL to ignore resize
+   * requests.
+   *
+   * Input type: GhosttyTerminalResizeWindowFn
+   */
+  GHOSTTY_TERMINAL_OPT_RESIZE_WINDOW = 47,
   GHOSTTY_TERMINAL_OPT_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
 } GhosttyTerminalOption;
 
@@ -2841,7 +3231,10 @@ GHOSTTY_API GhosttyResult ghostty_terminal_continuation_alloc(
  * for up, positive for down). When using GHOSTTY_SCROLL_VIEWPORT_ROW,
  * set the row field to the absolute row offset from the top of the
  * scrollable area (the same row space as the offset field of
- * GhosttyTerminalScrollbar). For other behaviors, the value is ignored.
+ * GhosttyTerminalScrollbar). When using
+ * GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT, set delta_prompt to the signed
+ * number of prompts to move. See GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT for
+ * the navigation behavior. For other behaviors, the value is ignored.
  *
  * @param terminal The terminal handle (may be NULL, in which case this is a no-op)
  * @param behavior The scroll behavior as a tagged union

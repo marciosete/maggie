@@ -39,7 +39,7 @@ const assert = @import("../../quirks.zig").inlineAssert;
 
 const Handler = @import("../stream_terminal.zig").Handler;
 
-const max_path_bytes = if (builtin.os.tag == .freestanding) 4096 else std.fs.max_path_bytes;
+const max_path_bytes = if (builtin.target.os.tag == .freestanding) 4096 else std.Io.Dir.max_path_bytes;
 
 const log = std.log.scoped(.terminal_c);
 
@@ -192,6 +192,37 @@ pub const ProgressReport = extern struct {
     progress: i8,
 };
 
+/// C: GhosttyProgramStatusState
+pub const ProgramStatusState = osc.Command.ProgramStatus.State;
+
+/// What a blocked program needs from the user. This matches
+/// `osc.Command.ProgramStatus.Kind` but adds `none` first, because C has
+/// no optional enums and a zeroed value must mean "no kind".
+///
+/// C: GhosttyProgramStatusKind
+pub const ProgramStatusKind = lib.Enum(lib.target, &.{
+    "none",
+    "permission",
+    "question",
+    "auth",
+});
+
+/// A program status report (OSC 7501). Absent text is an empty string,
+/// an absent kind is `none`, and absent progress is -1. See the header
+/// for the meaning of each field.
+///
+/// C: GhosttyTerminalProgramStatus
+pub const ProgramStatus = extern struct {
+    size: usize,
+    state: ProgramStatusState,
+    kind: ProgramStatusKind,
+    progress: i8,
+    id: lib.String,
+    app: lib.String,
+    title: lib.String,
+    message: lib.String,
+};
+
 /// C: GhosttySemanticPromptKind
 pub const SemanticPromptKind = Handler.SemanticPrompt.Kind;
 
@@ -209,6 +240,36 @@ pub const SemanticPrompt = extern struct {
     exit_code: i32,
     command: lib.String,
     @"error": lib.String,
+};
+
+/// A request to resize the window's text area to a size in rows and columns.
+///
+/// C: GhosttyTerminalResizeWindowGrid
+pub const ResizeWindowGrid = extern struct {
+    rows: u16,
+    columns: u16,
+};
+
+/// A request from the running program to resize the window.
+///
+/// C: GhosttyTerminalResizeWindow
+pub const ResizeWindow = union(Tag) {
+    grid: ResizeWindowGrid,
+
+    /// C: GhosttyTerminalResizeWindowTag
+    pub const Tag = lib.Enum(lib.target, &.{"grid"});
+
+    const c_union = lib.TaggedUnion(
+        lib.target,
+        @This(),
+        // Padding: the largest variant is 4 bytes. Use [2]u64 (16 bytes)
+        // so that other kinds of resize requests can be added without an
+        // ABI break.
+        .{ .padding = [2]u64 },
+    );
+    pub const C = c_union.C;
+    pub const CValue = c_union.CValue;
+    pub const cval = c_union.cval;
 };
 
 /// A borrowed unsupported string sequence.
@@ -260,14 +321,22 @@ pub const ModeConfig = extern struct {
     }
 };
 
-/// C callback state for terminal effects. Most trampolines are always
-/// installed on the stream handler; they check these fields and no-op when
-/// the corresponding callback is null. The unknown-sequence and
-/// clipboard trampolines are installed dynamically to preserve their
-/// null fast paths (for clipboard_write, a null Zig-level effect makes
-/// Kitty clipboard writes fail up front instead of spooling a
-/// transaction that can never commit; for clipboard_read it keeps
-/// reads denied).
+/// C callback state for terminal effects.
+///
+/// Most trampolines are always installed on the stream handler. They check
+/// these fields and do nothing when the C callback is null.
+///
+/// A few trampolines are only installed while their C callback is set,
+/// because the stream handler behaves differently when the Zig effect is
+/// null:
+///
+/// - `unknown_sequence`: unknown sequences are skipped without being
+///   captured.
+/// - `clipboard_write`: Kitty clipboard writes fail up front instead of
+///   collecting data for a write that can never finish.
+/// - `clipboard_read`: clipboard reads are denied.
+/// - `program_status`: the OSC 7501 support query gets no reply, so
+///   programs know not to send reports.
 const Effects = struct {
     userdata: ?*anyopaque = null,
     write_pty: ?WritePtyFn = null,
@@ -280,6 +349,7 @@ const Effects = struct {
     title_changed: ?TitleChangedFn = null,
     pwd_changed: ?PwdChangedFn = null,
     progress_report: ?ProgressReportFn = null,
+    program_status: ?ProgramStatusFn = null,
     semantic_prompt: ?SemanticPromptFn = null,
     reset: ?ResetFn = null,
     size_cb: ?SizeFn = null,
@@ -287,6 +357,7 @@ const Effects = struct {
     clipboard_read: ?ClipboardReadFn = null,
     unknown_sequence: ?UnknownSequenceFn = null,
     render_hold: ?RenderHoldFn = null,
+    resize_window: ?ResizeWindowFn = null,
 
     /// Scratch buffer for DA1 feature codes. The device attributes
     /// trampoline converts C feature codes into this buffer and returns
@@ -337,11 +408,18 @@ const Effects = struct {
     /// C function pointer type for the render_hold callback.
     pub const RenderHoldFn = *const fn (Terminal, ?*anyopaque, bool) callconv(lib.calling_conv) void;
 
+    /// C function pointer type for the resize_window callback.
+    pub const ResizeWindowFn = *const fn (Terminal, ?*anyopaque, *const ResizeWindow.C) callconv(lib.calling_conv) void;
+
     /// C function pointer type for the pwd_changed callback.
     pub const PwdChangedFn = *const fn (Terminal, ?*anyopaque) callconv(lib.calling_conv) void;
 
     /// C function pointer type for the progress_report callback.
     pub const ProgressReportFn = *const fn (Terminal, ?*anyopaque, *const ProgressReport) callconv(lib.calling_conv) void;
+
+    /// C function pointer type for the program_status callback. The report
+    /// and its strings are borrowed for the callback duration.
+    pub const ProgramStatusFn = *const fn (Terminal, ?*anyopaque, *const ProgramStatus) callconv(lib.calling_conv) void;
 
     /// C function pointer type for the semantic_prompt callback. The event
     /// and its strings are borrowed for the callback duration.
@@ -473,8 +551,9 @@ const Effects = struct {
         // Requests carry a handful of MIME types, so keep the common case
         // allocation-free. On OOM the request goes unanswered and the
         // handler replies with an empty clipboard.
-        var sfa = std.heap.stackFallback(128, wrapper.terminal.gpa());
-        const alloc = sfa.get();
+        var sfa_buf: [128]u8 = undefined;
+        var sfa: std.heap.BufferFirstAllocator = .init(&sfa_buf, wrapper.terminal.gpa());
+        const alloc = sfa.allocator();
         const mimes = alloc.alloc(lib.String, read.mimes.len) catch {
             log.warn("out of memory converting clipboard read request", .{});
             return;
@@ -525,8 +604,9 @@ const Effects = struct {
         // allocation-free while supporting arbitrary multi-MIME replies.
         // On OOM we don't reply and the handler answers with an empty
         // clipboard.
-        var sfa = std.heap.stackFallback(256, ctx.wrapper.terminal.gpa());
-        const alloc = sfa.get();
+        var sfa_buf: [256]u8 = undefined;
+        var sfa: std.heap.BufferFirstAllocator = .init(&sfa_buf, ctx.wrapper.terminal.gpa());
+        const alloc = sfa.allocator();
         const contents = alloc.alloc(clipboard.Content, c_contents.len) catch {
             log.warn("out of memory converting clipboard read reply", .{});
             return;
@@ -588,15 +668,15 @@ const Effects = struct {
         // because all our types are non-exhaustive enums.
 
         const n: usize = @min(c_attrs.primary.num_features, 64);
-        for (0..n) |i| wrapper.effects.da_features_buf[i] = @enumFromInt(c_attrs.primary.features[i]);
+        for (0..n) |i| wrapper.effects.da_features_buf[i] = @fromBackingInt(c_attrs.primary.features[i]);
 
         return .{
             .primary = .{
-                .conformance_level = @enumFromInt(c_attrs.primary.conformance_level),
+                .conformance_level = @fromBackingInt(c_attrs.primary.conformance_level),
                 .features = wrapper.effects.da_features_buf[0..n],
             },
             .secondary = .{
-                .device_type = @enumFromInt(c_attrs.secondary.device_type),
+                .device_type = @fromBackingInt(c_attrs.secondary.device_type),
                 .firmware_version = c_attrs.secondary.firmware_version,
                 .rom_cartridge = c_attrs.secondary.rom_cartridge,
             },
@@ -648,8 +728,39 @@ const Effects = struct {
         const func = wrapper.effects.progress_report orelse return;
         const c_report: ProgressReport = .{
             .size = @sizeOf(ProgressReport),
-            .state = @enumFromInt(@intFromEnum(report.state)),
+            .state = @fromBackingInt(@backingInt(report.state)),
             .progress = if (report.progress) |value| @intCast(value) else -1,
+        };
+        func(@ptrCast(wrapper), wrapper.effects.userdata, &c_report);
+    }
+
+    fn programStatusTrampoline(
+        handler: *Handler,
+        report: osc.Command.ProgramStatus.Report,
+    ) void {
+        const wrapper = TerminalWrapper.fromHandler(handler);
+        const func = wrapper.effects.program_status orelse return;
+
+        // Both buffers hold the longest text the parser accepts, so
+        // writing to them can't fail.
+        var title_buf: [osc.program_status.max_title_bytes]u8 = undefined;
+        var title: std.Io.Writer = .fixed(&title_buf);
+        report.writeText(.title, &title) catch unreachable;
+        var message_buf: [osc.program_status.max_msg_bytes]u8 = undefined;
+        var message: std.Io.Writer = .fixed(&message_buf);
+        report.writeText(.msg, &message) catch unreachable;
+
+        const c_report: ProgramStatus = .{
+            .size = @sizeOf(ProgramStatus),
+            .state = report.state,
+            .kind = if (report.readOption(.kind)) |kind| switch (kind) {
+                inline else => |tag| @field(ProgramStatusKind, @tagName(tag)),
+            } else .none,
+            .progress = if (report.readOption(.progress)) |value| @intCast(value) else -1,
+            .id = .init(report.readOption(.id) orelse ""),
+            .app = .init(report.readOption(.app) orelse ""),
+            .title = .init(title.buffered()),
+            .message = .init(message.buffered()),
         };
         func(@ptrCast(wrapper), wrapper.effects.userdata, &c_report);
     }
@@ -676,6 +787,21 @@ const Effects = struct {
         const wrapper = TerminalWrapper.fromHandler(handler);
         const func = wrapper.effects.reset orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata);
+    }
+
+    fn resizeWindowTrampoline(
+        handler: *Handler,
+        request: Handler.ResizeWindow,
+    ) void {
+        const wrapper = TerminalWrapper.fromHandler(handler);
+        const func = wrapper.effects.resize_window orelse return;
+        const value = ResizeWindow.cval(switch (request) {
+            .grid => |grid| .{ .grid = .{
+                .rows = grid.rows,
+                .columns = grid.columns,
+            } },
+        });
+        func(@ptrCast(wrapper), wrapper.effects.userdata, &value);
     }
 
     fn unknownSequenceTrampoline(
@@ -748,10 +874,12 @@ fn wrap(
         .reset = &Effects.resetTrampoline,
         .size = &Effects.sizeTrampoline,
         .render_hold = &Effects.renderHoldTrampoline,
+        .resize_window = &Effects.resizeWindowTrampoline,
 
         // Installed dynamically when the callback is set; see Effects.
         .clipboard_write = null,
         .clipboard_read = null,
+        .program_status = null,
     };
 
     wrapper.* = .{
@@ -1252,6 +1380,10 @@ pub const Option = enum(c_int) {
     render_hold = 41,
     semantic_prompt = 42,
     reset = 43,
+    xt_checksum_report = 44,
+    xt_checksum_extension = 45,
+    program_status = 46,
+    resize_window = 47,
 
     /// Input type expected for setting the option.
     pub fn InType(comptime self: Option) type {
@@ -1267,6 +1399,7 @@ pub const Option = enum(c_int) {
             .title_changed => ?Effects.TitleChangedFn,
             .pwd_changed => ?Effects.PwdChangedFn,
             .progress_report => ?Effects.ProgressReportFn,
+            .program_status => ?Effects.ProgramStatusFn,
             .size_cb => ?Effects.SizeFn,
             .clipboard_write => ?Effects.ClipboardWriteFn,
             .clipboard_read => ?Effects.ClipboardReadFn,
@@ -1274,14 +1407,17 @@ pub const Option = enum(c_int) {
             .render_hold => ?Effects.RenderHoldFn,
             .semantic_prompt => ?Effects.SemanticPromptFn,
             .reset => ?Effects.ResetFn,
+            .resize_window => ?Effects.ResizeWindowFn,
             .title, .pwd, .terminfo_name => ?*const lib.String,
             .color_foreground, .color_background, .color_cursor => ?*const color.RGB.C,
             .color_palette => ?*const color.PaletteC,
             .kitty_image_storage_limit => ?*const u64,
+            .xt_checksum_extension => ?*const u8,
             .kitty_image_medium_file,
             .kitty_image_medium_shared_mem,
             .glyph_protocol,
             .title_report,
+            .xt_checksum_report,
             .resize_pull_scrollback,
             => ?*const bool,
             .kitty_image_medium_temp_file => ?*const lib.String,
@@ -1307,8 +1443,8 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.enums.fromInt(Option, @intFromEnum(option)) orelse {
-            log.warn("terminal_set invalid option value={d}", .{@intFromEnum(option)});
+        _ = std.enums.fromInt(Option, @backingInt(option)) orelse {
+            log.warn("terminal_set invalid option value={d}", .{@backingInt(option)});
             return .invalid_value;
         };
     }
@@ -1341,6 +1477,7 @@ fn setTyped(
         .title_changed => wrapper.effects.title_changed = value,
         .pwd_changed => wrapper.effects.pwd_changed = value,
         .progress_report => wrapper.effects.progress_report = value,
+        .resize_window => wrapper.effects.resize_window = value,
         .size_cb => wrapper.effects.size_cb = value,
         .render_hold => wrapper.effects.render_hold = value,
         .semantic_prompt => wrapper.effects.semantic_prompt = value,
@@ -1359,6 +1496,15 @@ fn setTyped(
             else
                 null;
         },
+        .program_status => {
+            // Installed dynamically because the terminal only answers the
+            // OSC 7501 support query when something consumes reports.
+            wrapper.effects.program_status = value;
+            wrapper.stream.handler.effects.program_status = if (value != null)
+                &Effects.programStatusTrampoline
+            else
+                null;
+        },
         .unknown_sequence => {
             wrapper.effects.unknown_sequence = value;
             wrapper.stream.handler.unknown_sequence = if (value != null)
@@ -1367,6 +1513,10 @@ fn setTyped(
                 null;
         },
         .title_report => wrapper.stream.handler.title_report = if (value) |ptr|
+            ptr.*
+        else
+            false,
+        .xt_checksum_report => wrapper.stream.handler.xt_checksum_report = if (value) |ptr|
             ptr.*
         else
             false,
@@ -1513,6 +1663,11 @@ fn setTyped(
             if (value) |ptr| ptr.* else kitty_clipboard.max_write_size,
         .resize_pull_scrollback => wrapper.terminal.flags.resize_pull_scrollback =
             if (value) |ptr| ptr.* else true,
+        .xt_checksum_extension => {
+            const bits = if (value) |ptr| ptr.* else 0;
+            const flags = std.math.cast(u5, bits) orelse return .invalid_value;
+            wrapper.terminal.setDefaultXtChecksum(@bitCast(flags));
+        },
         .mode, .mode_default => {
             const config = (value orelse return .invalid_value).*;
             const mode = config.toMode() orelse return .invalid_value;
@@ -1564,6 +1719,7 @@ pub fn scroll_viewport(
         .bottom => .bottom,
         .delta => .{ .delta = behavior.value.delta },
         .row => .{ .row = behavior.value.row },
+        .delta_prompt => .{ .delta_prompt = behavior.value.delta_prompt },
     });
 }
 
@@ -1764,8 +1920,8 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.enums.fromInt(TerminalData, @intFromEnum(data)) orelse {
-            log.warn("terminal_get invalid data value={d}", .{@intFromEnum(data)});
+        _ = std.enums.fromInt(TerminalData, @backingInt(data)) orelse {
+            log.warn("terminal_get invalid data value={d}", .{@backingInt(data)});
             return .invalid_value;
         };
     }
@@ -2564,6 +2720,142 @@ test "scroll_viewport row alt screen" {
     try testing.expectEqual(@as(u64, 2), scrollbar_data.len);
 }
 
+test "scroll_viewport delta_prompt" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        2,
+    ));
+    defer free(t);
+
+    const transcript =
+        "\x1b]133;P;k=i\x07p1\r\n" ++
+        "\x1b]133;B\x07cmd1\r\n" ++
+        "\x1b]133;C\x07out1\r\n" ++
+        "\x1b]133;P;k=i\x07p2\r\n" ++
+        "\x1b]133;B\x07cmd2\r\n" ++
+        "\x1b]133;C\x07out2\r\n" ++
+        "\x1b]133;P;k=i\x07p3\r\n" ++
+        "\x1b]133;B\x07cmd3\r\n" ++
+        "\x1b]133;C\x07out3\r\n" ++
+        "\x1b]133;P;k=i\x07p4";
+    vt_write(t, transcript, transcript.len);
+
+    var scrollbar_data: TerminalScrollbar = undefined;
+
+    // A negative count goes to the previous prompt, and a positive count
+    // returns to the next prompt relative to the current viewport top.
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = -1 } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 6), scrollbar_data.offset);
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = -1 } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 3), scrollbar_data.offset);
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = 1 } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 6), scrollbar_data.offset);
+
+    // Counts beyond the retained prompt history clamp to the oldest or
+    // newest matching prompt, including the signed minimum boundary.
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = std.math.minInt(isize) } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 0), scrollbar_data.offset);
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = std.math.maxInt(isize) } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 8), scrollbar_data.offset);
+
+    // A zero count leaves the selected prompt unchanged.
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = 0 } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 8), scrollbar_data.offset);
+}
+
+test "scroll_viewport delta_prompt continuation" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        2,
+    ));
+    defer free(t);
+
+    const transcript =
+        "\x1b]133;P;k=i\x07p1\r\n" ++
+        "\x1b]133;P;k=c\x07p1-continued\r\n" ++
+        "\x1b]133;B\x07cmd1\r\n" ++
+        "\x1b]133;C\x07out1\r\n" ++
+        "\x1b]133;P;k=i\x07p2\r\n" ++
+        "\x1b]133;B\x07cmd2\r\n" ++
+        "\x1b]133;C\x07out2";
+    vt_write(t, transcript, transcript.len);
+
+    // The continuation row belongs to the first prompt group. Moving
+    // forward from that group lands on the second prompt.
+    scroll_viewport(t, .{ .tag = .row, .value = .{ .row = 0 } });
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = 1 } });
+
+    var scrollbar_data: TerminalScrollbar = undefined;
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 4), scrollbar_data.offset);
+}
+
+test "scroll_viewport delta_prompt final continuation snaps to active" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        3,
+    ));
+    defer free(t);
+
+    const transcript =
+        "\x1b]133;P;k=i\x07prompt\r\n" ++
+        "\x1b]133;P;k=c\x07continued\r\n" ++
+        "continued\r\ncontinued\r\ncontinued\r\ncontinued\r\ncontinued";
+    vt_write(t, transcript, transcript.len);
+    scroll_viewport(t, .{ .tag = .row, .value = .{ .row = 1 } });
+
+    var scrollbar_data: TerminalScrollbar = undefined;
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 1), scrollbar_data.offset);
+
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = 1 } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 4), scrollbar_data.offset);
+}
+
+test "scroll_viewport delta_prompt no markers and alternate screen" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        2,
+    ));
+    defer free(t);
+
+    const history = "one\r\ntwo\r\nthree\r\nfour";
+    vt_write(t, history, history.len);
+    scroll_viewport(t, .{ .tag = .row, .value = .{ .row = 0 } });
+
+    // Without OSC 133 prompt markers, a request leaves the viewport alone.
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = 1 } });
+    var scrollbar_data: TerminalScrollbar = undefined;
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 0), scrollbar_data.offset);
+
+    const alternate_screen = "\x1b[?1049h";
+    vt_write(t, alternate_screen, alternate_screen.len);
+    scroll_viewport(t, .{ .tag = .delta_prompt, .value = .{ .delta_prompt = -1 } });
+    try testing.expectEqual(Result.success, get(t, .scrollbar, @ptrCast(&scrollbar_data)));
+    try testing.expectEqual(@as(u64, 0), scrollbar_data.offset);
+    try testing.expectEqual(@as(u64, 2), scrollbar_data.total);
+}
+
 test "get memory_usage" {
     var t: Terminal = null;
     try testing.expectEqual(Result.success, new(
@@ -2610,7 +2902,7 @@ test "get memory_usage" {
     var compression_result: CompressionResult = undefined;
     try testing.expectEqual(
         Result.success,
-        compress(t, @intFromEnum(CompressionMode.full), &compression_result),
+        compress(t, @backingInt(CompressionMode.full), &compression_result),
     );
     try testing.expectEqual(
         history.compression_supported,
@@ -2711,7 +3003,7 @@ test "compression invalid arguments" {
     );
     try testing.expectEqual(
         Result.invalid_value,
-        compress(null, @intFromEnum(CompressionMode.incremental), &compression_result),
+        compress(null, @backingInt(CompressionMode.incremental), &compression_result),
     );
 
     var t: Terminal = null;
@@ -2729,7 +3021,7 @@ test "compression invalid arguments" {
     );
     try testing.expectEqual(
         Result.invalid_value,
-        compress(t, @intFromEnum(CompressionMode.incremental), null),
+        compress(t, @backingInt(CompressionMode.incremental), null),
     );
     try testing.expectEqual(
         Result.invalid_value,
@@ -2774,7 +3066,7 @@ test "compression activity and incremental scheduling" {
             Result.success,
             compress(
                 t,
-                @intFromEnum(CompressionMode.incremental),
+                @backingInt(CompressionMode.incremental),
                 &compression_result,
             ),
         );
@@ -2796,7 +3088,7 @@ test "compression activity and incremental scheduling" {
 
     try testing.expectEqual(
         Result.success,
-        compress(t, @intFromEnum(CompressionMode.full), &compression_result),
+        compress(t, @backingInt(CompressionMode.full), &compression_result),
     );
     try testing.expectEqual(CompressionResult.complete, compression_result);
 }
@@ -4802,6 +5094,58 @@ test "set desktop_notification callback" {
     try testing.expectEqual(@as(usize, 2), S.count);
 }
 
+test "set resize_window callback" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        24,
+    ));
+    defer free(t);
+
+    const S = struct {
+        var count: usize = 0;
+        var last_userdata: ?*anyopaque = null;
+        var last_tag: ResizeWindow.Tag = .grid;
+        var last: ResizeWindowGrid = .{ .rows = 0, .columns = 0 };
+
+        fn resizeWindow(
+            _: Terminal,
+            ud: ?*anyopaque,
+            request: *const ResizeWindow.C,
+        ) callconv(lib.calling_conv) void {
+            count += 1;
+            last_userdata = ud;
+            last_tag = request.tag;
+            last = request.value.grid;
+        }
+    };
+    S.count = 0;
+    S.last_userdata = null;
+
+    var sentinel: u8 = 44;
+    try testing.expectEqual(Result.success, set(t, .userdata, @ptrCast(&sentinel)));
+    try testing.expectEqual(Result.success, set(
+        t,
+        .resize_window,
+        @ptrCast(&S.resizeWindow),
+    ));
+
+    const seq = "\x1B[8;30;100t";
+    vt_write(t, seq, seq.len);
+    try testing.expectEqual(@as(usize, 1), S.count);
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&sentinel)), S.last_userdata);
+    try testing.expectEqual(ResizeWindow.Tag.grid, S.last_tag);
+    try testing.expectEqual(@as(u16, 30), S.last.rows);
+    try testing.expectEqual(@as(u16, 100), S.last.columns);
+
+    // Removing the callback takes effect immediately.
+    try testing.expectEqual(Result.success, set(t, .resize_window, null));
+    vt_write(t, seq, seq.len);
+    try testing.expectEqual(@as(usize, 1), S.count);
+}
+
 test "set progress_report callback" {
     var t: Terminal = null;
     try testing.expectEqual(Result.success, new(
@@ -4873,6 +5217,130 @@ test "set progress_report callback" {
     const ignored = "\x1B]9;4;1;90\x1B\\";
     vt_write(t, ignored, ignored.len);
     try testing.expectEqual(@as(usize, cases.len), S.count);
+}
+
+test "set program_status callback" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        24,
+    ));
+    defer free(t);
+
+    const S = struct {
+        var count: usize = 0;
+        var last_userdata: ?*anyopaque = null;
+        var last_size: usize = 0;
+        var last_state: ProgramStatusState = .idle;
+        var last_kind: ProgramStatusKind = .none;
+        var last_progress: i8 = -1;
+        var last_id: [64]u8 = undefined;
+        var last_id_len: usize = 0;
+        var last_app: [64]u8 = undefined;
+        var last_app_len: usize = 0;
+        var last_title: [64]u8 = undefined;
+        var last_title_len: usize = 0;
+        var last_message: [64]u8 = undefined;
+        var last_message_len: usize = 0;
+        var written: [128]u8 = undefined;
+        var written_len: usize = 0;
+
+        fn programStatus(
+            _: Terminal,
+            ud: ?*anyopaque,
+            report: *const ProgramStatus,
+        ) callconv(lib.calling_conv) void {
+            count += 1;
+            last_userdata = ud;
+            last_size = report.size;
+            last_state = report.state;
+            last_kind = report.kind;
+            last_progress = report.progress;
+            last_id_len = copy(&last_id, report.id);
+            last_app_len = copy(&last_app, report.app);
+            last_title_len = copy(&last_title, report.title);
+            last_message_len = copy(&last_message, report.message);
+        }
+
+        fn writePty(
+            _: Terminal,
+            _: ?*anyopaque,
+            ptr: [*]const u8,
+            len: usize,
+        ) callconv(lib.calling_conv) void {
+            @memcpy(written[written_len..][0..len], ptr[0..len]);
+            written_len += len;
+        }
+
+        fn copy(dst: []u8, src: lib.String) usize {
+            if (src.len > 0) @memcpy(dst[0..src.len], src.ptr[0..src.len]);
+            return src.len;
+        }
+    };
+    S.count = 0;
+    S.written_len = 0;
+
+    var sentinel: u8 = 100;
+    try testing.expectEqual(Result.success, set(t, .userdata, @ptrCast(&sentinel)));
+    try testing.expectEqual(Result.success, set(t, .write_pty, @ptrCast(&S.writePty)));
+
+    // Without the callback, the support query is not answered.
+    const query = "\x1B]7501;?\x1B\\";
+    vt_write(t, query, query.len);
+    try testing.expectEqual(@as(usize, 0), S.written_len);
+
+    try testing.expectEqual(Result.success, set(
+        t,
+        .program_status,
+        @ptrCast(&S.programStatus),
+    ));
+
+    // With the callback, it is answered with the states and kinds we
+    // accept and the same terminator.
+    vt_write(t, query, query.len);
+    try testing.expectEqualStrings(
+        "\x1B]7501;?:states=idle,working,done,blocked,error" ++
+            ":kinds=permission,question,auth\x1B\\",
+        S.written[0..S.written_len],
+    );
+    try testing.expectEqual(@as(usize, 0), S.count);
+
+    // "Plan" and "Apply?"
+    const report = "\x1B]7501;state=blocked:kind=permission:progress=40:id=a/b" ++
+        ":app=terraform:title=UGxhbg==:msg=QXBwbHk/\x07";
+    vt_write(t, report, report.len);
+    try testing.expectEqual(@as(usize, 1), S.count);
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&sentinel)), S.last_userdata);
+    try testing.expectEqual(@sizeOf(ProgramStatus), S.last_size);
+    try testing.expectEqual(ProgramStatusState.blocked, S.last_state);
+    try testing.expectEqual(ProgramStatusKind.permission, S.last_kind);
+    try testing.expectEqual(@as(i8, 40), S.last_progress);
+    try testing.expectEqualStrings("a/b", S.last_id[0..S.last_id_len]);
+    try testing.expectEqualStrings("terraform", S.last_app[0..S.last_app_len]);
+    try testing.expectEqualStrings("Plan", S.last_title[0..S.last_title_len]);
+    try testing.expectEqualStrings("Apply?", S.last_message[0..S.last_message_len]);
+
+    // Absent values are empty, none, or -1.
+    const minimal = "\x1B]7501;state=done\x1B\\";
+    vt_write(t, minimal, minimal.len);
+    try testing.expectEqual(@as(usize, 2), S.count);
+    try testing.expectEqual(ProgramStatusState.done, S.last_state);
+    try testing.expectEqual(ProgramStatusKind.none, S.last_kind);
+    try testing.expectEqual(@as(i8, -1), S.last_progress);
+    try testing.expectEqual(@as(usize, 0), S.last_id_len);
+    try testing.expectEqual(@as(usize, 0), S.last_app_len);
+    try testing.expectEqual(@as(usize, 0), S.last_title_len);
+    try testing.expectEqual(@as(usize, 0), S.last_message_len);
+
+    // Unsetting the callback ignores reports and the query again.
+    try testing.expectEqual(Result.success, set(t, .program_status, null));
+    S.written_len = 0;
+    vt_write(t, query, query.len);
+    vt_write(t, minimal, minimal.len);
+    try testing.expectEqual(@as(usize, 0), S.written_len);
+    try testing.expectEqual(@as(usize, 2), S.count);
 }
 
 test "set semantic_prompt callback" {
@@ -5992,10 +6460,14 @@ test "set device_attributes callback primary" {
         }
 
         fn da(_: Terminal, _: ?*anyopaque, out: *Effects.CDeviceAttributes) callconv(lib.calling_conv) bool {
+            var features: [64]u16 = @splat(0);
+            features[0] = 22;
+            features[1] = 52;
+
             out.* = .{
                 .primary = .{
                     .conformance_level = 64,
-                    .features = .{ 22, 52 } ++ .{0} ** 62,
+                    .features = features,
                     .num_features = 2,
                 },
                 .secondary = .{
@@ -6043,10 +6515,13 @@ test "set device_attributes callback secondary" {
         }
 
         fn da(_: Terminal, _: ?*anyopaque, out: *Effects.CDeviceAttributes) callconv(lib.calling_conv) bool {
+            var features: [64]u16 = @splat(0);
+            features[0] = 22;
+
             out.* = .{
                 .primary = .{
                     .conformance_level = 62,
-                    .features = .{22} ++ .{0} ** 63,
+                    .features = features,
                     .num_features = 1,
                 },
                 .secondary = .{
@@ -6097,7 +6572,7 @@ test "set device_attributes callback tertiary" {
             out.* = .{
                 .primary = .{
                     .conformance_level = 62,
-                    .features = .{0} ** 64,
+                    .features = @splat(0),
                     .num_features = 0,
                 },
                 .secondary = .{
@@ -6332,6 +6807,125 @@ test "title report requires explicit opt in" {
     try testing.expectEqual(Result.success, set(t, .title_report, null));
     vt_write(t, query_title, query_title.len);
     try testing.expect(S.last_data == null);
+}
+
+test "checksum report requires explicit opt in" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        24,
+    ));
+    defer free(t);
+
+    const S = struct {
+        var last_data: ?[]u8 = null;
+
+        fn deinit() void {
+            if (last_data) |data| testing.allocator.free(data);
+            last_data = null;
+        }
+
+        fn writePty(
+            _: Terminal,
+            _: ?*anyopaque,
+            ptr: [*]const u8,
+            len: usize,
+        ) callconv(lib.calling_conv) void {
+            if (last_data) |data| testing.allocator.free(data);
+            last_data = testing.allocator.dupe(u8, ptr[0..len]) catch @panic("OOM");
+        }
+    };
+    S.last_data = null;
+    defer S.deinit();
+
+    try testing.expectEqual(
+        Result.success,
+        set(t, .write_pty, @ptrCast(&S.writePty)),
+    );
+
+    const text = "hello";
+    const query = "\x1B[1;1;1;1;1;5*y";
+    vt_write(t, text, text.len);
+
+    // WRITE_PTY alone must not enable the security-sensitive response.
+    vt_write(t, query, query.len);
+    try testing.expect(S.last_data == null);
+
+    const enabled = true;
+    try testing.expectEqual(Result.success, set(t, .xt_checksum_report, &enabled));
+    vt_write(t, query, query.len);
+    try testing.expectEqualStrings("\x1bP1!~FDEC\x1b\\", S.last_data.?);
+
+    // NULL restores the secure default.
+    S.deinit();
+    try testing.expectEqual(Result.success, set(t, .xt_checksum_report, null));
+    vt_write(t, query, query.len);
+    try testing.expect(S.last_data == null);
+}
+
+test "checksum extension survives resets" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(
+        &lib.alloc.test_allocator,
+        &t,
+        80,
+        24,
+    ));
+    defer free(t);
+
+    const S = struct {
+        var last_data: ?[]u8 = null;
+
+        fn deinit() void {
+            if (last_data) |data| testing.allocator.free(data);
+            last_data = null;
+        }
+
+        fn writePty(
+            _: Terminal,
+            _: ?*anyopaque,
+            ptr: [*]const u8,
+            len: usize,
+        ) callconv(lib.calling_conv) void {
+            if (last_data) |data| testing.allocator.free(data);
+            last_data = testing.allocator.dupe(u8, ptr[0..len]) catch @panic("OOM");
+        }
+    };
+    S.last_data = null;
+    defer S.deinit();
+
+    const enabled = true;
+    try testing.expectEqual(Result.success, set(t, .write_pty, @ptrCast(&S.writePty)));
+    try testing.expectEqual(Result.success, set(t, .xt_checksum_report, &enabled));
+
+    // Don't negate the result.
+    const positive: u8 = 1;
+    try testing.expectEqual(Result.success, set(t, .xt_checksum_extension, &positive));
+
+    const text = "hello";
+    const query = "\x1B[1;1;1;1;1;5*y";
+    vt_write(t, text, text.len);
+    vt_write(t, query, query.len);
+    try testing.expectEqualStrings("\x1bP1!~0214\x1b\\", S.last_data.?);
+
+    // A reset restores the configured calculation, not the DEC one.
+    const negate = "\x1B[0#y";
+    const ris = "\x1Bc";
+    vt_write(t, negate, negate.len);
+    vt_write(t, ris, ris.len);
+    vt_write(t, text, text.len);
+    vt_write(t, query, query.len);
+    try testing.expectEqualStrings("\x1bP1!~0214\x1b\\", S.last_data.?);
+
+    // NULL restores the DEC calculation.
+    try testing.expectEqual(Result.success, set(t, .xt_checksum_extension, null));
+    vt_write(t, query, query.len);
+    try testing.expectEqualStrings("\x1bP1!~FDEC\x1b\\", S.last_data.?);
+
+    const invalid: u8 = 32;
+    try testing.expectEqual(Result.invalid_value, set(t, .xt_checksum_extension, &invalid));
 }
 
 test "resize updates pixel dimensions" {

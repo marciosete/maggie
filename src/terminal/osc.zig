@@ -19,6 +19,8 @@ const encoding = @import("osc/encoding.zig");
 
 pub const color = parsers.color;
 pub const semantic_prompt = parsers.semantic_prompt;
+pub const program_status = parsers.program_status;
+pub const hierarchical_context = parsers.hierarchical_context;
 
 const log = std.log.scoped(.osc);
 
@@ -162,7 +164,7 @@ pub const Command = union(Key) {
 
     /// OSC 3008. Hierarchical context signalling (UAPI spec).
     /// https://uapi-group.org/specifications/specs/osc_context/
-    context_signal: parsers.context_signal.Command,
+    hierarchical_context: parsers.hierarchical_context.Command,
 
     /// Kitty desktop notifications (OSC 99)
     kitty_desktop_notification: KittyDesktopNotification,
@@ -171,13 +173,21 @@ pub const Command = union(Key) {
     /// produced when `Parser.unknown_max_bytes` is nonzero.
     unknown: Unknown,
 
+    /// Program status protocol (OSC 7501). A program reports what it is
+    /// doing, such as working or waiting on the user, or asks whether the
+    /// terminal supports the protocol. See `ProgramStatus`.
+    program_status: ProgramStatus,
+
     pub const SemanticPrompt = parsers.semantic_prompt.Command;
+    pub const HierarchicalContext = parsers.hierarchical_context.Command;
 
     pub const KittyClipboardProtocol = parsers.kitty_clipboard_protocol.OSC;
 
     pub const KittyDndProtocol = parsers.kitty_dnd_protocol.OSC;
 
     pub const KittyDesktopNotification = parsers.kitty_desktop_notification.OSC;
+
+    pub const ProgramStatus = parsers.program_status.Command;
 
     pub const Key = LibEnum(
         lib.target,
@@ -208,9 +218,10 @@ pub const Command = union(Key) {
             "kitty_text_sizing",
             "kitty_clipboard_protocol",
             "kitty_dnd_protocol",
-            "context_signal",
+            "hierarchical_context",
             "kitty_desktop_notification",
             "unknown",
+            "program_status",
         },
     );
 
@@ -273,7 +284,7 @@ pub const Command = union(Key) {
 
         pub fn cval(self: ProgressReport) C {
             return .{
-                .state = @intFromEnum(self.state),
+                .state = @backingInt(self.state),
                 .progress = if (self.progress) |progress| @intCast(std.math.clamp(
                     progress,
                     0,
@@ -454,6 +465,9 @@ pub const Parser = struct {
         @"55",
         @"66",
         @"72",
+        @"75",
+        @"750",
+        @"7501",
         @"77",
         @"99",
         @"104",
@@ -539,8 +553,9 @@ pub const Parser = struct {
             .kitty_clipboard_protocol,
             .kitty_dnd_protocol,
             .kitty_desktop_notification,
-            .context_signal,
+            .hierarchical_context,
             .unknown,
+            .program_status,
             => {},
         }
 
@@ -974,7 +989,23 @@ pub const Parser = struct {
             .@"7" => switch (c) {
                 ';' => self.captureTrailing(.fixed),
                 '2' => self.state = .@"72",
+                '5' => self.state = .@"75",
                 '7' => self.state = .@"77",
+                else => self.unknownOrInvalid(c),
+            },
+
+            .@"75" => switch (c) {
+                '0' => self.state = .@"750",
+                else => self.unknownOrInvalid(c),
+            },
+
+            .@"750" => switch (c) {
+                '1' => self.state = .@"7501",
+                else => self.unknownOrInvalid(c),
+            },
+
+            .@"7501" => switch (c) {
+                ';' => self.captureTrailing(.allocating),
                 else => self.unknownOrInvalid(c),
             },
 
@@ -1083,6 +1114,8 @@ pub const Parser = struct {
             .@"55",
             .@"552",
             .@"6",
+            .@"75",
+            .@"750",
             .@"77",
             => bridge: {
                 self.unknownOrInvalid(null);
@@ -1134,13 +1167,15 @@ pub const Parser = struct {
 
             .@"52" => parsers.clipboard_operation.parse(self, terminator_ch),
 
-            .@"3008" => parsers.context_signal.parse(self, terminator_ch),
+            .@"3008" => parsers.hierarchical_context.parse(self, terminator_ch),
 
             .@"66" => parsers.kitty_text_sizing.parse(self, terminator_ch),
 
             .@"72" => parsers.kitty_dnd_protocol.parse(self, terminator_ch),
 
             .@"99" => parsers.kitty_desktop_notification.parse(self, terminator_ch),
+
+            .@"7501" => parsers.program_status.parse(self, terminator_ch),
 
             .@"133" => parsers.semantic_prompt.parse(self, terminator_ch),
 
