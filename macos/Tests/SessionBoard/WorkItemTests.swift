@@ -2,6 +2,9 @@ import AppKit
 import Testing
 @testable import Ghostty
 
+// On the main actor: deleting a card goes through the app's windows, which other
+// suites open and close on the main thread at the same time.
+@MainActor
 struct WorkItemTests {
     private func store() -> WorkItemStore {
         WorkItemStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("work-items-\(UUID().uuidString)"))
@@ -29,11 +32,14 @@ struct WorkItemTests {
 
     /// A board shows the cards made on it, those of no window, made before boards were
     /// a window's, and those of a window no longer open, so none is lost.
-    @Test @MainActor func aBoardShowsItsWindowsCards() throws {
+    @Test func aBoardShowsItsWindowsCards() throws {
         let store = store()
         defer { try? FileManager.default.removeItem(at: store.directory) }
         let host = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
         let other = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        // Closed by hand, so not released on closing too, which ARC already does.
+        host.isReleasedWhenClosed = false
+        other.isReleasedWhenClosed = false
         defer {
             host.close()
             other.close()
