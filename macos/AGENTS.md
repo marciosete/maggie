@@ -50,6 +50,32 @@ knows only two of GPT-Live's voices, so a sample is a brief GPT-Live session in 
 told to say its line, ended when its audio goes quiet after speaking (the stream itself
 never stops while silence goes in), and kept under `Voice/previews/`.
 
+Permissions (`VoicePermission`): the voice needs the microphone, and the wake phrases
+("hey Maggie", "unmute", heard on the Mac by `VoiceWakeListener` while the voice is
+muted or paused) need speech recognition. Both are asked for when the voice starts, while
+the user is there to answer; the answers show in Settings › Voice › Permissions and the
+popover says when the Mac can't listen (`VoiceAgent.wakeProblem`). macOS asks once and
+never again on its own, and keeps the answer against the bundle id and the code
+signature's designated requirement: the release's Developer ID signature is stable, so
+updates keep the answers, but a build signed otherwise under the same bundle id (a local
+`fork/install.sh` over the official app) doesn't match them. `VoicePermission.reset` runs
+`tccutil reset <service> <bundle id>` (no privileges needed) so the app can ask afresh;
+"Ask Again" in Settings does that. There is no entitlement for speech recognition under
+the hardened runtime; only `NSSpeechRecognitionUsageDescription`, which `fork/package.sh`
+rewrites for Maggie. See `fork/voice-permissions.md` for what to tell a user.
+
+Session news (`VoiceWatchRules`, `VoiceHookNotice`): the voice announces a watched
+session (or all, with the setting) that needs the user, finishes, fails or ends, from
+two sources. The sidebar's lights, polled every second, say waiting and finished. The
+plugin's hook events (`ClaudePlugin/hooks/hooks.json` → `agent-event.sh` → the events
+folder `ClaudeSubagents` watches, which sends each on `ClaudeSubagents.events`) say it the
+moment it happens and carry more: a `Notification`'s `permission_prompt` message, a
+`Stop`'s `last_assistant_message`, a `StopFailure`'s error, a `SessionEnd`'s reason. A hook
+event names its Claude session id; `VoiceSessionDirectory.candidate(forClaudeSession:)`
+finds the tab running it through the session registry. The two sources share a throttle:
+one notice of a kind a session every half minute, so the light following a hook is quiet.
+`VoiceAgent` subscribes when it starts and ignores events written before then.
+
 ## AppleScript
 
 - The AppleScript scripting definition is in `macos/Ghostty.sdef`.

@@ -114,11 +114,7 @@ final class VoiceAudioEngine: @unchecked Sendable {
 
     /// Whether the user has let the app use the microphone, asking if they haven't been.
     static func requestAccess() async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized: return true
-        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
-        default: return false
-        }
+        await VoicePermission.microphone.request() == .allowed
     }
 
     /// The aggregate device made for a microphone and speaker that aren't one device.

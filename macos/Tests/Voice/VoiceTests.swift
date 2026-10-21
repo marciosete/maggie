@@ -203,11 +203,32 @@ struct VoiceWatchRulesTests {
         #expect(rules.notice(from: .pending, to: .clean, session: "g", at: now) == nil)
     }
 
-    @Test func oneNoticeASessionEveryHalfMinute() {
+    @Test func oneNoticeOfAKindASessionEveryHalfMinute() {
         var rules = VoiceWatchRules()
-        #expect(rules.notice(from: .working, to: .waiting, session: "a", at: now) != nil)
-        #expect(rules.notice(from: .working, to: .clean, session: "a", at: now.addingTimeInterval(10)) == nil)
-        #expect(rules.notice(from: .working, to: .clean, session: "a", at: now.addingTimeInterval(31)) != nil)
+        // A hook's Stop, then the light catching up a second later, is one notice.
+        #expect(rules.notice(of: .finished, session: "a", at: now) != nil)
+        #expect(rules.notice(from: .working, to: .clean, session: "a", at: now.addingTimeInterval(1)) == nil)
+        // Different news isn't a repeat: it can need the user right after finishing.
+        #expect(rules.notice(from: .clean, to: .waiting, session: "a", at: now.addingTimeInterval(10)) != nil)
+        #expect(rules.notice(of: .finished, session: "a", at: now.addingTimeInterval(31)) != nil)
+        // Another session is its own matter.
+        #expect(rules.notice(of: .finished, session: "b", at: now.addingTimeInterval(2)) != nil)
+    }
+
+    @Test func theLineSaysWhatHappenedAndTheLastWords() {
+        #expect(VoiceWatchRules.line(number: 4, title: "Login tests", kind: .finished, status: "Done", lastWords: "All green.")
+            == "Session 4, Login tests, finished: Done. Its last words: All green.")
+        #expect(VoiceWatchRules.line(number: 2, title: "Docs", kind: .needsYou, status: "Waiting for you", detail: "Claude needs your permission to use Bash")
+            == "Session 2, Docs, needs you: Claude needs your permission to use Bash.")
+        #expect(VoiceWatchRules.line(number: 2, title: "Docs", kind: .needsYou, status: "Waiting for you")
+            == "Session 2, Docs, needs you: Waiting for you.")
+        #expect(VoiceWatchRules.line(number: 7, title: "API", kind: .failed, status: nil, detail: "rate limit")
+            == "Session 7, API, stopped on an error: rate limit.")
+        #expect(VoiceWatchRules.line(number: 7, title: "API", kind: .ended, status: nil, detail: "logout") == "Session 7, API, ended (logout).")
+        #expect(VoiceWatchRules.line(number: 7, title: "API", kind: .ended, status: nil, lastWords: "") == "Session 7, API, ended.")
+        #expect(VoiceWatchRules.announces("a", watched: ["a"], all: false))
+        #expect(!VoiceWatchRules.announces("b", watched: ["a"], all: false))
+        #expect(VoiceWatchRules.announces("b", watched: [], all: true))
     }
 
     @Test func onlyWatchedSessionsAreAnnouncedUnlessAllAre() {
@@ -226,6 +247,113 @@ struct VoiceWatchRulesTests {
         var everyone = VoiceWatchRules()
         let all = everyone.notices(from: before, to: after, watched: [], all: true, at: now)
         #expect(all.map(\.sessionID) == ["a", "b"])
+    }
+}
+
+// MARK: - Hook events
+
+@Suite
+struct VoiceHookNoticeTests {
+    private func event(_ name: String, _ fields: [String: Any] = [:]) throws -> ClaudeAgentEvent {
+        var object: [String: Any] = ["hook_event_name": name, "session_id": "00893aaf-19fa-41d2-8238-13269b9b3ca0"]
+        object.merge(fields) { _, new in new }
+        return try #require(ClaudeAgentEvent(json: try JSONSerialization.data(withJSONObject: object)))
+    }
+
+    @Test func aPermissionPromptNeedsTheUserAndAnIdleReminderDoesnt() throws {
+        let prompt = try event("Notification", ["notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"])
+        #expect(VoiceHookNotice.meaning(of: prompt) == .init(kind: .needsYou, detail: "Claude needs your permission to use Bash"))
+        #expect(VoiceHookNotice.meaning(of: try event("Notification", ["notification_type": "elicitation_dialog", "message": "Pick one"]))?.kind == .needsYou)
+        #expect(VoiceHookNotice.meaning(of: try event("Notification", ["notification_type": "agent_needs_input", "message": "?"]))?.kind == .needsYou)
+        // A minute after a Stop that was already told.
+        #expect(VoiceHookNotice.meaning(of: try event("Notification", ["notification_type": "idle_prompt", "message": "Claude is waiting"])) == nil)
+        #expect(VoiceHookNotice.meaning(of: try event("Notification", ["notification_type": "auth_success"])) == nil)
+        #expect(VoiceHookNotice.meaning(of: try event("Notification", ["message": "no type"])) == nil)
+    }
+
+    @Test func aStopFinishesWithItsLastWordsAndASubagentsDoesnt() throws {
+        let stop = try event("Stop", ["last_assistant_message": "Done: the tests pass.", "stop_hook_active": false])
+        #expect(VoiceHookNotice.meaning(of: stop) == .init(kind: .finished, lastWords: "Done: the tests pass."))
+        #expect(VoiceHookNotice.meaning(of: try event("Stop")) == .init(kind: .finished))
+        #expect(VoiceHookNotice.meaning(of: try event("Stop", ["agent_id": "a1"])) == nil)
+        #expect(VoiceHookNotice.meaning(of: try event("SubagentStop", ["agent_id": "a1"])) == nil)
+    }
+
+    @Test func aFailureSaysWhatWentWrong() throws {
+        let failure = try event("StopFailure", ["error": "rate_limit", "error_details": "429 Too Many Requests"])
+        #expect(VoiceHookNotice.meaning(of: failure) == .init(kind: .failed, detail: "rate limit (429 Too Many Requests)"))
+        #expect(VoiceHookNotice.meaning(of: try event("StopFailure", ["error": "server_error"]))?.detail == "server error")
+        #expect(VoiceHookNotice.meaning(of: try event("StopFailure"))?.detail == nil)
+        #expect(VoiceHookNotice.meaning(of: try event("StopFailure", ["agent_id": "a1", "error": "rate_limit"])) == nil)
+    }
+
+    @Test func anEndIsNewsUnlessTheSessionGoesOn() throws {
+        #expect(VoiceHookNotice.meaning(of: try event("SessionEnd", ["reason": "prompt_input_exit"])) == .init(kind: .ended, detail: "prompt input exit"))
+        #expect(VoiceHookNotice.meaning(of: try event("SessionEnd")) == .init(kind: .ended))
+        #expect(VoiceHookNotice.meaning(of: try event("SessionEnd", ["reason": "clear"])) == nil)
+        #expect(VoiceHookNotice.meaning(of: try event("SessionEnd", ["reason": "resume"])) == nil)
+        #expect(VoiceHookNotice.meaning(of: try event("SubagentStart", ["agent_id": "a1", "agent_type": "Explore"])) == nil)
+        #expect(VoiceHookNotice.meaning(of: try event("SessionStart", ["source": "startup"])) == nil)
+    }
+}
+
+// MARK: - Permissions
+
+@Suite
+struct VoicePermissionTests {
+    @Test func macOSsAnswersMapToStates() {
+        #expect(VoicePermission.state(SFSpeechRecognizerAuthorizationStatus.notDetermined) == .notAsked)
+        #expect(VoicePermission.state(SFSpeechRecognizerAuthorizationStatus.authorized) == .allowed)
+        #expect(VoicePermission.state(SFSpeechRecognizerAuthorizationStatus.denied) == .denied)
+        #expect(VoicePermission.state(SFSpeechRecognizerAuthorizationStatus.restricted) == .restricted)
+        #expect(VoicePermission.state(AVAuthorizationStatus.notDetermined) == .notAsked)
+        #expect(VoicePermission.state(AVAuthorizationStatus.authorized) == .allowed)
+        #expect(VoicePermission.state(AVAuthorizationStatus.denied) == .denied)
+        #expect(VoicePermission.state(AVAuthorizationStatus.restricted) == .restricted)
+    }
+
+    @Test func theControlAsksOnlyWhileMacOSWill() {
+        // macOS shows its prompt once; declined, only System Settings or a reset changes
+        // the answer, so the control sends the user there instead of asking into the void.
+        #expect(VoicePermission.action(for: .notAsked) == .request)
+        #expect(VoicePermission.action(for: .denied) == .openSettings)
+        #expect(VoicePermission.action(for: .restricted) == .openSettings)
+        #expect(VoicePermission.action(for: .allowed) == nil)
+    }
+
+    @Test func theResetIsTccutilForThisApp() {
+        #expect(VoicePermission.resetCommand(for: .speechRecognition, bundleID: "com.marciosete.maggie")
+            == ["/usr/bin/tccutil", "reset", "SpeechRecognition", "com.marciosete.maggie"])
+        #expect(VoicePermission.resetCommand(for: .microphone, bundleID: "com.marciosete.maggie.dev")
+            == ["/usr/bin/tccutil", "reset", "Microphone", "com.marciosete.maggie.dev"])
+    }
+
+    @Test func systemSettingsOpensAtTheRightPane() {
+        #expect(VoicePermission.speechRecognition.settingsURL.absoluteString
+            == "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")
+        #expect(VoicePermission.microphone.settingsURL.absoluteString
+            == "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+    }
+
+    @Test func guidanceNamesTheWayBack() {
+        let denied = VoicePermission.speechRecognition.guidance(for: .denied, appName: "Maggie")
+        #expect(denied.contains("Speech Recognition in System Settings › Privacy & Security"))
+        #expect(denied.contains("Ask Again"))
+        #expect(denied.contains("click the microphone"))
+        #expect(VoicePermission.microphone.guidance(for: .denied, appName: "Maggie").contains("Microphone in System Settings"))
+        // Allowed in name only: an answer kept for another signature of the app.
+        #expect(VoicePermission.speechRecognition.guidance(for: .allowed, appName: "Maggie").contains("earlier signature"))
+        #expect(VoicePermission.speechRecognition.guidance(for: .notAsked, appName: "Maggie").contains("when the voice starts"))
+        #expect(VoicePermission.speechRecognition.guidance(for: .restricted, appName: "Maggie").contains("management profile"))
+    }
+
+    @Test func theWakeProblemIsSaidOnlyWhenThereIsOne() {
+        #expect(VoicePermission.wakeProblem(for: .allowed) == nil)
+        #expect(VoicePermission.wakeProblem(for: .notAsked) == nil)
+        let denied = VoicePermission.wakeProblem(for: .denied, appName: "Maggie")
+        #expect(denied?.contains("Speech Recognition in System Settings") == true)
+        #expect(denied?.contains("click the microphone") == true)
+        #expect(VoicePermission.wakeProblem(for: .restricted)?.contains("restricted") == true)
     }
 }
 

@@ -81,6 +81,11 @@ final class VoiceSessionDirectory {
     private var nextNumber = 1
     private(set) var snapshot = SidebarSnapshot(rows: [])
 
+    /// The sidebar session each Claude Code session (by its id, as hook events name it)
+    /// was found running in, so it is still known once its registry entry is gone: a
+    /// `SessionEnd` arrives as the process exits.
+    private var claudeSessions: [UUID: String] = [:]
+
     func start() {
         feed.onChange = { [weak self] new in
             guard let self else { return }
@@ -151,6 +156,29 @@ final class VoiceSessionDirectory {
 
     func window(for candidate: VoiceSessionReference.Candidate) -> TerminalWindow? {
         feed.ids.window(for: candidate.session.id)
+    }
+
+    /// The candidate whose tab runs the Claude Code session `id`, as its hook events name
+    /// it: the one with a terminal whose foreground process is that session, or, once
+    /// the session has exited, the one it was last found in.
+    func candidate(forClaudeSession id: String) -> VoiceSessionReference.Candidate? {
+        guard let uuid = UUID(uuidString: id) else { return nil }
+        let candidates = candidates
+        if let found = candidates.first(where: { runs(uuid, in: $0) }) {
+            claudeSessions[uuid] = found.session.id
+            return found
+        }
+        guard let known = claudeSessions[uuid] else { return nil }
+        return candidates.first { $0.session.id == known }
+    }
+
+    private func runs(_ session: UUID, in candidate: VoiceSessionReference.Candidate) -> Bool {
+        guard let controller = window(for: candidate)?.terminalController else { return false }
+        let leaves = controller.surfaceTree.root?.leaves() ?? []
+        return leaves.contains { leaf in
+            guard let pid = leaf.surfaceModel?.foregroundPID else { return false }
+            return ClaudeCodeSession.id(ofRunning: pid) == session
+        }
     }
 
     /// A session as the backend hears about it.

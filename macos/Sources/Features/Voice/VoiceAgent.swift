@@ -195,6 +195,16 @@ final class VoiceAgent: ObservableObject {
     @Published private(set) var contextRatio: Double = 0
     @Published private(set) var endpointName = "This Mac"
 
+    /// macOS's answers for the microphone and speech recognition, as last read; asked
+    /// for when the voice starts, and read again when the app comes to the front, since
+    /// the user may have been to System Settings.
+    @Published private(set) var microphoneAccess = VoicePermission.microphone.state
+    @Published private(set) var speechAccess = VoicePermission.speechRecognition.state
+
+    /// Why the Mac can't listen for "hey Maggie" and "unmute", while that is so: speech
+    /// recognition refused, or the microphone not opening. Shown in the popover.
+    @Published private(set) var wakeProblem: String?
+
     var estimatedCostUSD: Double { billedSeconds / 60 * Self.perMinuteUSD }
 
     let settings = VoiceSettings.shared
@@ -244,6 +254,14 @@ final class VoiceAgent: ObservableObject {
     /// The last reason the wake listener gave for not working, said once, not every time.
     private var wakeFailure: String?
 
+    /// The hook events Claude Code sends the app, while the voice is on, and since when:
+    /// a backlog written while it was off is old news.
+    private var hookEvents: AnyCancellable?
+    private var hookSince = Date()
+
+    /// A hook event written this long before the voice started still counts as news.
+    static let hookGrace: TimeInterval = 2
+
     /// The reply under way when the user muted is dropped as it arrives, until it ends.
     private var silencingReply = false
 
@@ -278,11 +296,48 @@ final class VoiceAgent: ObservableObject {
         tools.watchAll = { [weak self] all in self?.watchAll(all) }
         tools.control = { [weak self] control in self?.control(control) }
         wake.onWake = { [weak self] phrase in self?.woken(by: phrase) }
-        wake.onFailure = { [weak self] message in
-            guard let self, self.wakeFailure != message else { return }
-            self.wakeFailure = message
-            self.record(.notice, message)
+        wake.onFailure = { [weak self] message in self?.wakeFailed(message) }
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshPermissions() }
+            }
+            .store(in: &settingsObservers)
+    }
+
+    // MARK: Permissions
+
+    /// Reads macOS's answers again: after the user has been to System Settings, say. A
+    /// wake problem that was the speech permission is over once it is allowed, and the
+    /// Mac listens again if it should be.
+    func refreshPermissions() {
+        microphoneAccess = VoicePermission.microphone.state
+        speechAccess = VoicePermission.speechRecognition.state
+        if speechAccess == .allowed, wakeProblem != nil {
+            wakeProblem = nil
+            wakeFailure = nil
+            updateWakeListening()
         }
+    }
+
+    /// Asks macOS for `permission` now, from Settings › Voice.
+    func request(_ permission: VoicePermission) async {
+        _ = await permission.request()
+        refreshPermissions()
+    }
+
+    /// Clears macOS's answer for `permission` and asks afresh: for one declined, or one
+    /// given to an earlier signature of the app that this build doesn't match.
+    func resetAndRequest(_ permission: VoicePermission) async throws {
+        _ = try await permission.resetAndRequest()
+        refreshPermissions()
+    }
+
+    /// The Mac can't listen for a wake phrase: shown while it matters, said once.
+    private func wakeFailed(_ message: String) {
+        wakeProblem = message
+        guard wakeFailure != message else { return }
+        wakeFailure = message
+        record(.notice, message)
     }
 
     /// A spoken control, from the backend's tool.
@@ -390,12 +445,19 @@ final class VoiceAgent: ObservableObject {
             return
         }
         Task {
-            guard await VoiceWakeListener.requestAccess() else {
-                record(.notice, "Speech recognition isn't allowed, so \"unmute\" by voice won't work; click the microphone instead.")
+            let access = await VoicePermission.speechRecognition.request()
+            speechAccess = access
+            guard access == .allowed else {
+                if let problem = VoicePermission.wakeProblem(for: access) { wakeFailed(problem) }
                 return
             }
             guard wakeSource == source else { return }
             wake.start(from: source)
+            if wake.isRunning {
+                wakeProblem = nil
+            } else if source == .microphone {
+                wakeFailed("The Mac's microphone couldn't be opened to listen for \"hey Maggie\"; click to continue instead.")
+            }
         }
     }
 
@@ -420,12 +482,22 @@ final class VoiceAgent: ObservableObject {
         reconnects = 0
         applyAudioSettings()
         directory.start()
+        listenToSessionEvents()
         Task {
-            guard await VoiceAudioEngine.requestAccess() else {
-                phase = .failed("Maggie needs the microphone. Allow it in System Settings › Privacy & Security › Microphone.")
-                directory.stop()
+            let microphone = await VoicePermission.microphone.request()
+            microphoneAccess = microphone
+            guard microphone == .allowed else {
+                phase = .failed("Maggie needs the microphone. Allow it in System Settings › Privacy & Security › Microphone, or ask again in Settings › Voice.")
+                teardown()
                 return
             }
+            guard phase == .connecting else { return }
+            // Speech recognition is asked for now, while the user is here to answer, not
+            // the first time the voice is muted or paused, which may be while they are
+            // away. Declined, the voice still works; the wake phrases don't, and the
+            // popover and Settings › Voice say so and show the way back.
+            speechAccess = await VoicePermission.speechRecognition.request()
+            if let problem = VoicePermission.wakeProblem(for: speechAccess) { wakeFailed(problem) }
             guard phase == .connecting else { return }
             connect(apiKey: apiKey, greeting: .fresh)
         }
@@ -735,6 +807,7 @@ final class VoiceAgent: ObservableObject {
         workingOn = nil
         userSpeaking = false
         afterSpeaking = nil
+        hookEvents = nil
         wake.stop()
     }
 
@@ -914,25 +987,49 @@ final class VoiceAgent: ObservableObject {
         if !all { watched = [] }
     }
 
+    /// A session's light changed: the sidebar's view of it, a second or so behind.
     private func sessionsChanged(from old: SidebarSnapshot, to new: SidebarSnapshot) {
         guard phase.isOn else { return }
         let notices = watchRules.notices(from: old, to: new, watched: watched, all: settings.announcesAllSessions, at: Date())
         for notice in notices {
             guard let candidate = directory.candidates.first(where: { $0.session.id == notice.sessionID }) else { continue }
-            let what: String
-            switch notice.kind {
-            case .needsYou: what = "needs you: \(candidate.session.lightLabel ?? "waiting")"
-            case .finished: what = "finished: \(candidate.session.lightLabel ?? "done")"
-            }
-            var text = "Session \(candidate.number), \(candidate.session.title), \(what)."
-            if let window = directory.window(for: candidate),
-               let pid = window.terminalController?.focusedSurface?.surfaceModel?.foregroundPID,
-               let session = AgentSession.running(pid: pid),
-               let last = ClaudeCodeResponse.last(inSession: session) {
-                text += " Its last words: \(VoiceTools.trimmed(VoiceSpeech.speakable(last), to: 600))"
-            }
-            notify(text)
+            notify(VoiceWatchRules.line(
+                number: candidate.number, title: candidate.session.title, kind: notice.kind,
+                status: candidate.session.lightLabel, lastWords: lastWords(of: candidate)))
         }
+    }
+
+    /// Listens to the hook events Claude Code sends the app (`ClaudeSubagents`), from
+    /// now on: a session that needs the user, finishes a turn, fails or ends is told the
+    /// moment it happens, with what the event carries.
+    private func listenToSessionEvents() {
+        hookSince = Date()
+        ClaudeSubagents.shared.start()
+        hookEvents = ClaudeSubagents.shared.events.sink { [weak self] delivery in
+            MainActor.assumeIsolated { self?.sessionEvent(delivery.event, writtenAt: delivery.writtenAt) }
+        }
+    }
+
+    private func sessionEvent(_ event: ClaudeAgentEvent, writtenAt: Date) {
+        guard phase.isOn, writtenAt >= hookSince.addingTimeInterval(-Self.hookGrace),
+              let meaning = VoiceHookNotice.meaning(of: event),
+              let candidate = directory.candidate(forClaudeSession: event.sessionID),
+              VoiceWatchRules.announces(candidate.session.id, watched: watched, all: settings.announcesAllSessions),
+              watchRules.notice(of: meaning.kind, session: candidate.session.id, at: Date()) != nil else { return }
+        let lastWords = meaning.lastWords.map { VoiceTools.trimmed(VoiceSpeech.speakable($0), to: 600) }
+            ?? (meaning.kind == .finished ? self.lastWords(of: candidate) : nil)
+        notify(VoiceWatchRules.line(
+            number: candidate.number, title: candidate.session.title, kind: meaning.kind,
+            status: candidate.session.lightLabel, detail: meaning.detail, lastWords: lastWords))
+    }
+
+    /// The agent's last response in `candidate`'s session, made sayable.
+    private func lastWords(of candidate: VoiceSessionReference.Candidate) -> String? {
+        guard let window = directory.window(for: candidate),
+              let pid = window.terminalController?.focusedSurface?.surfaceModel?.foregroundPID,
+              let session = AgentSession.running(pid: pid),
+              let last = ClaudeCodeResponse.last(inSession: session) else { return nil }
+        return VoiceTools.trimmed(VoiceSpeech.speakable(last), to: 600)
     }
 
     /// Tells the backend something from Maggie, waking the voice if it is paused.

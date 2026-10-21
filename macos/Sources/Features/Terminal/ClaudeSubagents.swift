@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// A subagent or teammate a Claude Code session started, as the sidebar lists it under
@@ -102,6 +103,22 @@ struct ClaudeAgentEvent: Equatable {
     /// them.
     let backgroundTasks: [Task]?
 
+    /// A `Notification`'s `notification_type` (`permission_prompt`, `idle_prompt`, …) and
+    /// what it says.
+    let notificationType: String?
+    let message: String?
+
+    /// A `Stop`'s or `StopFailure`'s `last_assistant_message`: the response the turn ended
+    /// with, or the error shown.
+    let lastAssistantMessage: String?
+
+    /// A `StopFailure`'s `error` (`rate_limit`, `server_error`, …) and `error_details`.
+    let error: String?
+    let errorDetails: String?
+
+    /// A `SessionEnd`'s `reason` (`clear`, `resume`, `logout`, `prompt_input_exit`, `other`).
+    let reason: String?
+
     init?(json data: Data) {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let name = object["hook_event_name"] as? String,
@@ -119,6 +136,12 @@ struct ClaudeAgentEvent: Equatable {
         transcript = url("transcript_path")
         agentTranscript = url("agent_transcript_path")
         teammateName = string("teammate_name")
+        notificationType = string("notification_type")
+        message = string("message")
+        lastAssistantMessage = string("last_assistant_message")
+        error = string("error")
+        errorDetails = string("error_details")
+        reason = string("reason")
         backgroundTasks = (object["background_tasks"] as? [[String: Any]]).map { tasks in
             tasks.compactMap { task in
                 guard let id = task["id"] as? String, let type = task["type"] as? String else { return nil }
@@ -299,15 +322,27 @@ struct ClaudeSubagentRoster: Codable, Equatable {
     }
 }
 
-/// The subagents of every Claude Code session in the app, by session.
+/// The subagents of every Claude Code session in the app, by session, and every hook
+/// event as it arrives.
 ///
 /// The plugin's hooks drop each event as a file in `eventsDirectory` (see
 /// `agent-event.sh`). The folder is watched; each new file is read into its session's
 /// roster and deleted, and the rosters are saved, so the app picks up where it was after
-/// a relaunch, and events from while it wasn't running are read when it starts.
+/// a relaunch, and events from while it wasn't running are read when it starts. Each
+/// event read is also sent on `events`, for the voice (`VoiceAgent`) to announce.
 @MainActor
 final class ClaudeSubagents: ObservableObject {
     static let shared = ClaudeSubagents()
+
+    /// A hook event as it was read, with when the hook wrote it, so a listener that
+    /// starts late can tell a backlog from news.
+    struct Delivery {
+        let event: ClaudeAgentEvent
+        let writtenAt: Date
+    }
+
+    /// Every hook event, on the main thread, in the order the hooks wrote them.
+    let events = PassthroughSubject<Delivery, Never>()
 
     /// The variable that tells `agent-event.sh` where to put events.
     nonisolated static let environmentVariable = "MAGGIE_AGENT_EVENTS"
@@ -399,10 +434,14 @@ final class ClaudeSubagents: ObservableObject {
         isReading = true
         let reader = reader
         DispatchQueue.global(qos: .utility).async {
-            let rosters = reader.read(at: Date())
+            var deliveries: [Delivery] = []
+            let rosters = reader.read(at: Date()) { event, writtenAt in
+                deliveries.append(Delivery(event: event, writtenAt: writtenAt))
+            }
             DispatchQueue.main.async {
                 self.isReading = false
                 if self.rosters != rosters { self.rosters = rosters }
+                for delivery in deliveries { self.events.send(delivery) }
                 if self.readAgain {
                     self.readAgain = false
                     self.read()
@@ -425,12 +464,15 @@ final class ClaudeSubagentReader: @unchecked Sendable {
         rostersFile = rosters
     }
 
-    func read(at now: Date) -> [UUID: [ClaudeSubagent]] {
+    /// Reads the pending events into the rosters, handing each one Claude Code wrote (not
+    /// the app's own) to `handle` with the time it was written.
+    func read(at now: Date, handing handle: (ClaudeAgentEvent, Date) -> Void = { _, _ in }) -> [UUID: [ClaudeSubagent]] {
         var rosters = self.rosters ?? load()
         let before = rosters
 
-        for (file, event) in pendingEvents() {
+        for (file, event, writtenAt) in pendingEvents() {
             if let event {
+                if event.name != ClaudeSubagents.clearEvent { handle(event, writtenAt) }
                 if event.name == "SessionEnd" {
                     rosters[event.sessionID] = nil
                 } else if event.name == "SubagentStart" || rosters[event.sessionID] != nil {
@@ -464,9 +506,9 @@ final class ClaudeSubagentReader: @unchecked Sendable {
         return shown
     }
 
-    /// The event files, in the order they were written. A file that isn't an event
-    /// comes with nil, to be deleted.
-    private func pendingEvents() -> [(URL, ClaudeAgentEvent?)] {
+    /// The event files, in the order they were written, with when. A file that isn't an
+    /// event comes with nil, to be deleted.
+    private func pendingEvents() -> [(URL, ClaudeAgentEvent?, Date)] {
         let keys: [URLResourceKey] = [.contentModificationDateKey]
         let files = (try? FileManager.default.contentsOfDirectory(
             at: events, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
@@ -476,8 +518,8 @@ final class ClaudeSubagentReader: @unchecked Sendable {
                 (file, (try? file.resourceValues(forKeys: Set(keys)))?.contentModificationDate ?? .distantPast)
             }
             .sorted { ($0.1, $0.0.lastPathComponent) < ($1.1, $1.0.lastPathComponent) }
-        return dated.map { file, _ in
-            (file, (try? Data(contentsOf: file)).flatMap(ClaudeAgentEvent.init(json:)))
+        return dated.map { file, date in
+            (file, (try? Data(contentsOf: file)).flatMap(ClaudeAgentEvent.init(json:)), date)
         }
     }
 

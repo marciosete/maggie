@@ -47,15 +47,9 @@ final class VoiceWakeListener: @unchecked Sendable {
 
     /// Whether speech recognition may be used, asking if it hasn't been decided. Both
     /// recognisers need it; without it SpeechAnalyzer hears nothing and says nothing.
+    /// See `VoicePermission` for what the answer depends on and how it is recovered.
     static func requestAccess() async -> Bool {
-        switch SFSpeechRecognizer.authorizationStatus() {
-        case .authorized: return true
-        case .notDetermined:
-            return await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
-            }
-        default: return false
-        }
+        await VoicePermission.speechRecognition.request() == .allowed
     }
 
     /// Whether `text` holds a wake phrase.

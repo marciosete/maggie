@@ -77,6 +77,23 @@ struct ClaudeSubagentsTests {
         #expect(ClaudeAgentEvent(json: Data(#"{"hook_event_name":"Stop"}"#.utf8)) == nil)
     }
 
+    @Test func anEventCarriesWhatTheVoiceSays() throws {
+        let notification = try event("Notification", [
+            "notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash", "title": "Permission needed",
+        ])
+        #expect(notification.notificationType == "permission_prompt")
+        #expect(notification.message == "Claude needs your permission to use Bash")
+        let stop = try event("Stop", ["last_assistant_message": "Done: the tests pass.", "stop_hook_active": false])
+        #expect(stop.lastAssistantMessage == "Done: the tests pass.")
+        #expect(stop.notificationType == nil)
+        let failure = try event("StopFailure", ["error": "rate_limit", "error_details": "429 Too Many Requests"])
+        #expect(failure.error == "rate_limit")
+        #expect(failure.errorDetails == "429 Too Many Requests")
+        let end = try event("SessionEnd", ["reason": "prompt_input_exit"])
+        #expect(end.reason == "prompt_input_exit")
+        #expect(try event("Stop", ["last_assistant_message": ""]).lastAssistantMessage == nil)
+    }
+
     // MARK: Roster
 
     @Test func aSubagentWorksUntilItStopsAndStaysListed() throws {
@@ -258,9 +275,22 @@ struct ClaudeSubagentsTests {
         }
 
         try hook(["hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore"])
+        // A session without subagents isn't followed, but its events are handed over all
+        // the same; the app's own clear event isn't.
+        try hook(["hook_event_name": "Stop", "session_id": "ffffffff-19fa-41d2-8238-13269b9b3ca0", "last_assistant_message": "Done."])
+        let clear = ["hook_event_name": ClaudeSubagents.clearEvent, "session_id": Self.session]
+        try JSONSerialization.data(withJSONObject: clear).write(to: events.appendingPathComponent("9-clear.json"))
         let reader = ClaudeSubagentReader(events: events, rosters: root.appendingPathComponent("subagents.json"))
         let session = try #require(UUID(uuidString: Self.session))
-        #expect(reader.read(at: Date())[session]?.map(\.id) == ["a1"])
+        var handed: [(String, String?, Date)] = []
+        let before = Date().addingTimeInterval(-5)
+        let rosters = reader.read(at: Date(), handing: { event, writtenAt in
+            handed.append((event.name, event.lastAssistantMessage, writtenAt))
+        })
+        #expect(rosters[session]?.map(\.id) == ["a1"])
+        #expect(handed.map(\.0) == ["SubagentStart", "Stop"])
+        #expect(handed.map(\.1) == [nil, "Done."])
+        #expect(handed.allSatisfy { $0.2 >= before })
         #expect(try FileManager.default.contentsOfDirectory(atPath: events.path).isEmpty)
 
         // A new reader picks up the saved rosters.
@@ -289,7 +319,12 @@ struct ClaudeSubagentsTests {
         let data = try Data(contentsOf: directory.appendingPathComponent("hooks/hooks.json"))
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let hooks = try #require(object["hooks"] as? [String: Any])
-        #expect(Set(hooks.keys) == ["SubagentStart", "SubagentStop", "TeammateIdle", "StopFailure", "Stop", "SessionEnd"])
+        #expect(Set(hooks.keys) == ["SubagentStart", "SubagentStop", "TeammateIdle", "StopFailure", "Stop", "SessionEnd", "Notification"])
+        for (name, entries) in hooks {
+            let commands = try #require(entries as? [[String: Any]], Comment(rawValue: name))
+            #expect(!commands.isEmpty, Comment(rawValue: name))
+            #expect(commands.allSatisfy { ($0["hooks"] as? [[String: Any]])?.first?["command"] as? String == "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-event.sh\"" }, Comment(rawValue: name))
+        }
     }
 
     // MARK: Transcript

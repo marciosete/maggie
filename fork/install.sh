@@ -13,6 +13,15 @@
 #
 # It reads the same Ghostty config file as the official app.
 #
+# macOS keeps privacy answers (microphone, speech recognition, ...) per bundle ID and
+# code signature. The official release is signed with a Developer ID certificate, so
+# an install from here, under the same bundle ID, doesn't match the answers given to
+# it, nor the other way round: macOS asks again, or holds the old answer against the
+# new build until it is reset (Ask Again in Settings › Voice, or
+# `tccutil reset SpeechRecognition <bundle id>`). To test beside the official app,
+# install under another name and bundle ID: APP_NAME="Maggie Dev"
+# BUNDLE_ID=com.marciosete.maggie.dev fork/install.sh.
+#
 # Usage: fork/install.sh [--build-only | --install-staged [--after PID]]
 #
 #   (no option)        build and install; Maggie must not be running
@@ -173,12 +182,35 @@ migrate_legacy_state() {
     fi
 }
 
+# The signing identity an app carries, as codesign names it, or "ad hoc".
+authority_of() {
+    local authority
+    authority="$(codesign -dvv "$1" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+    echo "${authority:-ad hoc}"
+}
+
+# macOS keeps privacy answers per signature; a build signed differently from the one
+# installed won't have them, so say so, and how to get them back.
+warn_if_signature_changes() {
+    [ -d "$TARGET" ] || return 0
+    local old new
+    old="$(authority_of "$TARGET")"
+    new="$(authority_of "$STAGED")"
+    [ "$old" != "$new" ] || return 0
+    echo "warning: the installed $APP_NAME is signed by \"$old\" and the new build by \"$new\"." >&2
+    echo "         macOS keeps privacy answers (microphone, speech recognition, ...) per signature," >&2
+    echo "         so it asks again, or holds the old answers against the new build until reset." >&2
+    echo "         If \"hey Maggie\" stops working: Ask Again in Settings › Voice, or" >&2
+    echo "         tccutil reset SpeechRecognition $BUNDLE_ID" >&2
+}
+
 install_staged() {
     if [ ! -d "$STAGED" ]; then
         echo "error: nothing staged at $STAGED. Run with --build-only first." >&2
         exit 1
     fi
 
+    warn_if_signature_changes
     migrate_legacy_state
 
     echo "==> Installing to $TARGET"

@@ -98,6 +98,18 @@ struct VoicePopover: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let problem = agent.wakeProblem {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(problem)
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if VoicePermission.action(for: agent.speechAccess) == .openSettings {
+                        Button("Open System Settings…") { VoicePermission.speechRecognition.openSettings() }
+                            .controlSize(.small)
+                    }
+                }
+            }
             transcript
             controls
         }
@@ -311,6 +323,17 @@ struct VoiceSettingsView: View {
             }
 
             Section {
+                VoicePermissionRow(permission: .microphone, state: agent.microphoneAccess, canAskAgain: !agent.phase.isOn)
+                VoicePermissionRow(permission: .speechRecognition, state: agent.speechAccess, canAskAgain: true)
+            } header: {
+                Text("Permissions")
+            } footer: {
+                Text("macOS asks for each once, the first time the voice starts, and not again on its own. A prompt declined or dismissed leaves it off until it is turned on in System Settings, or asked again here. An update keeps the answers; a build signed differently under the same name (a local build over the official app) doesn't, and Ask Again clears the old answer so macOS asks afresh.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 ForEach(VoiceSettings.voices, id: \.self) { voice in
                     VoiceChoiceRow(voice: voice, selected: settings.voice == voice, preview: preview) {
                         settings.voice = voice
@@ -398,6 +421,61 @@ struct VoiceSettingsView: View {
             keySaved = OpenAI.apiKey() != nil
         } catch {
             keySaved = false
+        }
+    }
+}
+
+/// One of macOS's answers in Settings › Voice, with the way to change it: Request Access
+/// while macOS hasn't asked; System Settings once it has said no, since it won't ask
+/// again; and Ask Again, which clears the answer and asks afresh, for an answer declined
+/// or given to another signature of the app.
+struct VoicePermissionRow: View {
+    let permission: VoicePermission
+    let state: VoicePermission.State
+
+    /// Whether the answer may be cleared now: not the microphone's while the voice uses it.
+    let canAskAgain: Bool
+
+    @ObservedObject private var agent = VoiceAgent.shared
+    @State private var failure: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(permission.title)
+                Spacer()
+                Text(state.label)
+                    .foregroundStyle(state == .allowed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+                switch VoicePermission.action(for: state) {
+                case .request?:
+                    Button("Request Access") {
+                        Task { await agent.request(permission) }
+                    }
+                case .openSettings?:
+                    Button("Open System Settings") { permission.openSettings() }
+                case nil:
+                    EmptyView()
+                }
+                if state != .notAsked {
+                    Button("Ask Again") {
+                        Task {
+                            do {
+                                try await agent.resetAndRequest(permission)
+                                failure = nil
+                            } catch {
+                                let command = VoicePermission.resetCommand(for: permission, bundleID: Bundle.main.bundleIdentifier ?? "")
+                                failure = "The answer couldn't be cleared (\(error.localizedDescription)). In Terminal: \(command.joined(separator: " "))"
+                            }
+                        }
+                    }
+                    .disabled(!canAskAgain)
+                    .help(canAskAgain ? "Clears macOS's answer and asks afresh." : "Stop the voice first.")
+                }
+            }
+            Text(failure ?? "\(permission.purpose) \(permission.guidance(for: state))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

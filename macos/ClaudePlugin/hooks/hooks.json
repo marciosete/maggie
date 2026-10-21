@@ -1,6 +1,9 @@
 {
-  "description": "Tells Maggie when a session's subagents and teammates start and stop, so the sidebar lists them under the session",
+  "description": "Tells Maggie when a session's subagents and teammates start and stop, so the sidebar lists them under the session, and when the session needs the user, finishes a turn, fails or ends, so the voice can say so",
   "hooks": {
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-event.sh\"", "timeout": 5 }] }
+    ],
     "SubagentStart": [
       { "hooks": [{ "type": "command", "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-event.sh\"", "timeout": 5 }] }
     ],
