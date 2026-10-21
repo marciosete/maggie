@@ -270,8 +270,18 @@ final class TabSidebarModel: ObservableObject {
     /// The folder group currently being renamed inline, if any.
     @Published var editingFolderGroupID: UUID?
 
-    /// The text typed so far while renaming a tab, group, folder or folder group inline.
+    /// Whether the window is being named inline.
+    @Published var isEditingWindowName = false
+
+    /// The text typed so far while renaming a tab, group, folder, folder group or the
+    /// window inline.
     @Published var editingDraft = ""
+
+    /// What the window is called, shared by its tabs.
+    @Published private(set) var windowName: String?
+
+    /// Whether another window has a sidebar too, which is when a name tells them apart.
+    @Published private(set) var hasOtherWindows = false
 
     /// What is typed in the search field. The sidebar shows only the sessions matching it.
     @Published var searchQuery = "" {
@@ -380,6 +390,11 @@ final class TabSidebarModel: ObservableObject {
         let selected = tabGroup?.selectedWindow ?? hostWindow
         let newRows = Self.rows(of: windows, selected: selected, folderIDs: hostWindow.folderSpace.folderIDs)
         if newRows != rows { rows = newRows }
+
+        let name = hostWindow.folderSpace.name
+        if name != windowName { windowName = name }
+        let others = !otherWindows.isEmpty
+        if others != hasOtherWindows { hasOtherWindows = others }
 
         // Refreshes run on the main loop.
         let jump = MainActor.assumeIsolated {
@@ -534,6 +549,7 @@ final class TabSidebarModel: ObservableObject {
         let store = UserTabFolderStore.shared
         for window in windows.dropFirst() where window.folderSpace !== space {
             window.folderSpace.folderIDs.forEach { space.add($0) }
+            if space.name == nil { space.name = window.folderSpace.name }
             window.folderSpace = space
         }
         for window in windows {
@@ -1146,6 +1162,9 @@ final class TabSidebarModel: ObservableObject {
             UserTabFolderStore.shared.update(folderID) { $0.name = name }
         } else if let groupID = editingFolderGroupID, !name.isEmpty {
             UserTabFolderGroupStore.shared.update(groupID) { $0.name = name }
+        } else if isEditingWindowName {
+            // An empty name takes the name away.
+            setWindowName(name.isEmpty ? nil : name)
         }
 
         endEditing()
@@ -1157,11 +1176,13 @@ final class TabSidebarModel: ObservableObject {
     }
 
     private func endEditing() {
-        guard editingTabID != nil || editingGroupID != nil || editingFolderID != nil || editingFolderGroupID != nil else { return }
+        guard editingTabID != nil || editingGroupID != nil || editingFolderID != nil || editingFolderGroupID != nil
+            || isEditingWindowName else { return }
         editingTabID = nil
         editingGroupID = nil
         editingFolderID = nil
         editingFolderGroupID = nil
+        isEditingWindowName = false
 
         // Inline editing takes focus away from the terminal, so give it back.
         guard let hostWindow,
@@ -1249,6 +1270,163 @@ final class TabSidebarModel: ObservableObject {
     private func removeFolderGroupIfEmpty(_ groupID: UUID) {
         guard !UserTabFolderStore.shared.folders.values.contains(where: { $0.groupID == groupID }) else { return }
         UserTabFolderGroupStore.shared.remove(groupID)
+    }
+
+    // MARK: Windows
+
+    func beginRenameWindow() {
+        commitEditing()
+        editingDraft = windowName ?? ""
+        isEditingWindowName = true
+    }
+
+    /// Names the window, or takes its name away with nil. Every tab saves it.
+    func setWindowName(_ name: String?) {
+        guard let hostWindow, hostWindow.folderSpace.name != name else { return }
+        hostWindow.folderSpace.name = name
+        for window in tabWindows {
+            window.invalidateRestorableState()
+        }
+        // Every sidebar refreshes, since the others list this window by its name.
+        for case let window as TerminalWindow in NSApp.windows {
+            window.postTabSidebarItemDidChange()
+        }
+    }
+
+    /// The other windows with a sidebar, each by the tab it shows, by name.
+    var otherWindows: [TerminalWindow] {
+        guard let hostWindow else { return [] }
+        let ours = hostWindow.tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier(hostWindow)
+        var seen: Set<ObjectIdentifier> = [ours]
+        var result: [TerminalWindow] = []
+        for case let window as TerminalWindow in NSApp.windows
+        where window.supportsTabSidebar && window.terminalController != nil {
+            let key = window.tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier(window)
+            guard seen.insert(key).inserted else { continue }
+            result.append(window.tabGroup?.selectedWindow as? TerminalWindow ?? window)
+        }
+        return result.sorted {
+            Self.displayName(of: $0).localizedStandardCompare(Self.displayName(of: $1)) == .orderedAscending
+        }
+    }
+
+    /// What a window is listed as: its name, or else the session it shows.
+    static func displayName(of window: TerminalWindow) -> String {
+        window.folderSpace.name ?? window.sessionTitle ?? window.title
+    }
+
+    /// Moves a tab, or a group, folder or folder group with everything in it, to the end
+    /// of another window's sidebar.
+    func move(_ payload: TabSidebarDragState.Payload, toWindow target: TerminalWindow) {
+        let model = target.tabSidebarModel
+        switch payload {
+        case .tab(let window): model.dropAtEnd(window)
+        case .group(let id): model.moveGroup(id, to: .end, after: false)
+        case .folder(let id): model.moveFolder(id, to: .end, after: false)
+        case .folderGroup(let id): model.moveFolderGroup(id, to: .end, after: false)
+        }
+    }
+
+    /// Moves a tab, or a group, folder or folder group with everything in it, to a window
+    /// of its own. The first of its tabs is moved out natively, and the rest follow it.
+    func moveToNewWindow(_ payload: TabSidebarDragState.Payload) {
+        guard let block = Self.block(of: payload) else {
+            if case .tab(let window) = payload { moveToNewWindow(window) }
+            return
+        }
+        guard let first = tabWindows.first(where: { Entry(window: $0).nestingKeys[block.level] == block.id }) else { return }
+        let groupID = first.userTabGroupID
+        let folderID = first.userTabFolderID
+
+        // Moving a tab out natively takes it out of its group and folder, so it is put
+        // back in them for the rest to join. A group goes without its folder, which
+        // would otherwise open, empty, in the new window.
+        first.moveTabToNewWindow(nil)
+        first.userTabGroupID = groupID
+        if block.level != TabSidebarOrder.Level.group {
+            first.userTabFolderID = folderID
+        }
+
+        // The new window takes a main loop turn to settle.
+        DispatchQueue.main.async { [weak self] in
+            self?.move(payload, toWindow: first)
+        }
+    }
+
+    /// Whether moving the payload to a window of its own makes sense: it must have a
+    /// session to move out first.
+    func canMoveToNewWindow(_ payload: TabSidebarDragState.Payload) -> Bool {
+        guard let block = Self.block(of: payload) else { return true }
+        return tabWindows.contains { Entry(window: $0).nestingKeys[block.level] == block.id }
+    }
+
+    private static func block(of payload: TabSidebarDragState.Payload) -> TabSidebarOrder.Block? {
+        switch payload {
+        case .tab: return nil
+        case .group(let id): return .group(id)
+        case .folder(let id): return .folder(id)
+        case .folderGroup(let id): return .folderGroup(id)
+        }
+    }
+
+    /// Brings into this window what of `block` is in other windows: its tabs, after this
+    /// window's own, and the folders it holds, empty ones too, out of the other windows'
+    /// sidebars. A block dragged in from another window then moves like one of this
+    /// window's own. A folder brought in alone leaves its folder group behind.
+    private func adopt(_ block: TabSidebarOrder.Block) {
+        // A window on its own may have no tab group yet; it gets one with the first tab.
+        guard let hostWindow else { return }
+        let store = UserTabFolderStore.shared
+        let space = hostWindow.folderSpace
+
+        // The other windows, a tab group at a time, each in its tab order.
+        var sources: [[TerminalWindow]] = []
+        var seen: Set<ObjectIdentifier> = [hostWindow.tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier(hostWindow)]
+        for case let window as TerminalWindow in NSApp.windows {
+            let key = window.tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier(window)
+            guard seen.insert(key).inserted else { continue }
+            sources.append(window.tabGroup?.windows.compactMap { $0 as? TerminalWindow } ?? [window])
+        }
+        guard !sources.isEmpty else { return }
+
+        let folderIDs: [UUID]
+        switch block.level {
+        case TabSidebarOrder.Level.folder:
+            folderIDs = [block.id]
+        case TabSidebarOrder.Level.folderGroup:
+            folderIDs = sources.flatMap { $0.first?.folderSpace.folderIDs ?? [] }
+                .filter { store[$0]?.groupID == block.id }
+        default:
+            folderIDs = []
+        }
+
+        var changed: [TerminalWindow] = []
+        for windows in sources {
+            guard let first = windows.first else { continue }
+            let leaving = folderIDs.filter { first.folderSpace.folderIDs.contains($0) }
+            leaving.forEach { first.folderSpace.remove($0) }
+
+            let moving = windows.filter { Entry(window: $0).nestingKeys[block.level] == block.id }
+            for window in moving {
+                window.tabGroup?.removeWindow(window)
+                window.folderSpace = space
+                (hostWindow.tabGroup?.windows.last ?? hostWindow).addTabbedWindowSafely(window, ordered: .above)
+            }
+            if !leaving.isEmpty || !moving.isEmpty {
+                changed.append(contentsOf: windows.filter { !moving.contains($0) })
+            }
+        }
+        guard !changed.isEmpty else { return }
+
+        folderIDs.forEach { space.add($0) }
+        if block.level == TabSidebarOrder.Level.folder, let groupID = store[block.id]?.groupID {
+            store.update(block.id) { $0.groupID = nil }
+            removeFolderGroupIfEmpty(groupID)
+        }
+        for window in changed + tabWindows {
+            window.invalidateRestorableState()
+            window.postTabSidebarItemDidChange()
+        }
     }
 
     // MARK: Reordering
@@ -1379,6 +1557,7 @@ final class TabSidebarModel: ObservableObject {
     /// whatever that is. The tabs keep their order and their group, and take the folder
     /// of where they land (see `TabSidebarOrder.landing`).
     func moveGroup(_ groupID: UUID, to destination: BlockDestination, after: Bool) {
+        adopt(.group(groupID))
         guard let hostWindow, let tabGroup = hostWindow.tabGroup else { return }
         let block = TabSidebarOrder.Block.group(groupID)
         guard let moved = Self.order(tabGroup.windows, moving: block, to: destination, after: after) else { return }
@@ -1412,6 +1591,7 @@ final class TabSidebarModel: ObservableObject {
     /// whatever that is. The tabs keep their order, their groups and their folder, and the
     /// folder takes the folder group of where it lands.
     func moveFolder(_ folderID: UUID, to destination: BlockDestination, after: Bool) {
+        adopt(.folder(folderID))
         guard let hostWindow, let tabGroup = hostWindow.tabGroup else { return }
         let block = TabSidebarOrder.Block.folder(folderID)
         guard let moved = Self.order(tabGroup.windows, moving: block, to: destination, after: after) else { return }
@@ -1431,6 +1611,8 @@ final class TabSidebarModel: ObservableObject {
 
     /// Drops a folder onto a folder group header, adding it to the start of that group.
     func drop(folder folderID: UUID, ontoFolderGroup groupID: UUID) {
+        adopt(.folder(folderID))
+
         // Before the group's first other folder, or just into the group when none shows.
         let store = UserTabFolderStore.shared
         if let first = tabWindows.first(where: { store[$0.userTabFolderID]?.groupID == groupID && $0.userTabFolderID != folderID }),
@@ -1444,6 +1626,7 @@ final class TabSidebarModel: ObservableObject {
     /// Moves every tab of a folder group together, before or after `destination`. The
     /// tabs keep their order and everything they are in.
     func moveFolderGroup(_ groupID: UUID, to destination: BlockDestination, after: Bool) {
+        adopt(.folderGroup(groupID))
         guard let hostWindow, let tabGroup = hostWindow.tabGroup else { return }
         let block = TabSidebarOrder.Block.folderGroup(groupID)
         guard let moved = Self.order(tabGroup.windows, moving: block, to: destination, after: after) else { return }

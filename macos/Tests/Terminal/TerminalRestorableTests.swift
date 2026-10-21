@@ -113,6 +113,9 @@ struct TerminalRestorableTests {
         #expect(v7Generic.userTabFolder == nil)
         #expect(v7Generic.sidebarFolders == nil)
         #expect(v7Generic.sidebarFolderGroups == nil)
+
+        // State saved before windows had names has none.
+        #expect(v7Generic.windowName == nil)
     }
 
     /// The sidebar's folders and folder groups come back as saved, the way the workspace
@@ -142,6 +145,28 @@ struct TerminalRestorableTests {
         #expect(decoded.sidebarFolderGroups == [work])
         #expect(decoded.sidebarFolders?.last?.name == "empty")
         #expect(decoded.sidebarFolders?.last?.isCollapsed == true)
+    }
+
+    /// A window's name comes back with each of its tabs.
+    @MainActor
+    @Test func windowNameRoundTrips() throws {
+        let tree = try SplitTreeTests.makeHorizontalSplit()
+        let state = TerminalRestorableState.InternalState<MockView>(
+            focusedSurface: nil,
+            surfaceTree: tree.0,
+            effectiveFullscreenMode: nil,
+            tabColor: nil,
+            titleOverride: nil,
+            userTabGroup: nil,
+            speechVoiceID: nil,
+            userTabFolder: nil,
+            sidebarFolders: nil,
+            sidebarFolderGroups: nil,
+            windowName: "Work")
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(TerminalRestorableState.InternalState<MockView>.self, from: data)
+        #expect(decoded.windowName == "Work")
     }
 }
 

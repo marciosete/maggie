@@ -39,6 +39,10 @@ extension TerminalRestorableState {
 
         // The work item the session is linked to. Optional, like the place.
         var workItemID: UUID?
+
+        // MARK: - Window
+        // The name of the window the tab is in. Optional, like the folders.
+        var windowName: String?
     }
 }
 
@@ -65,6 +69,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
             sidebarFolderGroups: folderGroupIDs.compactMap { UserTabFolderGroupStore.shared[$0] },
             boardPlace: window?.boardPlace,
             workItemID: window?.workItemID,
+            windowName: window?.folderSpace.name,
         )
     }
 }

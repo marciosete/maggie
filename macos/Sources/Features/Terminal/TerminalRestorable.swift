@@ -97,6 +97,9 @@ final class TerminalRestorableState: TerminalRestorable {
     var workItemID: UUID? {
         internalState.workItemID
     }
+    var windowName: String? {
+        internalState.windowName
+    }
 
     /// Internal State we use to perform unit tests
     ///
@@ -160,7 +163,7 @@ final class TerminalRestorableState: TerminalRestorable {
         for folder in sidebarFolders {
             UserTabFolderStore.shared.register(folder)
         }
-        (window as? TerminalWindow)?.folderSpace = TabSidebarFolderSpace(folderIDs: sidebarFolders.map(\.id))
+        (window as? TerminalWindow)?.folderSpace = TabSidebarFolderSpace(folderIDs: sidebarFolders.map(\.id), name: windowName)
         if let userTabFolder {
             UserTabFolderStore.shared.register(userTabFolder)
             (window as? TerminalWindow)?.folderSpace.add(userTabFolder.id)

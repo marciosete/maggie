@@ -158,6 +158,8 @@ struct TabSidebarView: View {
             // Leave room for the traffic lights and the titlebar.
             Color.clear.frame(height: max(topInset, 8))
 
+            TabSidebarWindowHeader(model: model)
+
             HStack(spacing: 4) {
                 TabSidebarSearchField(model: model)
                 TabSidebarFilterButton(model: model)
@@ -294,6 +296,83 @@ struct TabSidebarView: View {
                     }
                     .onEnded { _ in resizeStartWidth = nil }
             )
+    }
+}
+
+// MARK: - Window
+
+/// The window's name, such as "Work", which tells it from the others. It shows once the
+/// window is named or another window has a sidebar too. Double-click to rename it.
+private struct TabSidebarWindowHeader: View {
+    @ObservedObject var model: TabSidebarModel
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        if model.windowName != nil || model.hasOtherWindows || model.isEditingWindowName {
+            HStack(spacing: 6) {
+                Image(systemName: "macwindow")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                if model.isEditingWindowName {
+                    TextField("Window Name", text: $model.editingDraft)
+                        .textFieldStyle(.plain)
+                        .font(TabSidebarStyle.titleFont)
+                        .focused($fieldFocused)
+                        .onAppear { DispatchQueue.main.async { fieldFocused = true } }
+                        .onSubmit { model.commitEditing() }
+                        .onExitCommand { model.cancelEditing() }
+                        .onChange(of: fieldFocused) { focused in
+                            if !focused && model.isEditingWindowName { model.commitEditing() }
+                        }
+                } else if let name = model.windowName {
+                    Text(name)
+                        .font(TabSidebarStyle.titleFont.weight(.semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(Color.primary.opacity(0.85))
+                } else {
+                    Text("Name This Window")
+                        .font(TabSidebarStyle.titleFont)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: TabSidebarStyle.rowHeight)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { model.beginRenameWindow() }
+            .onTapGesture { if model.windowName == nil { model.beginRenameWindow() } }
+            .help("Double-click to rename the window")
+            .contextMenu {
+                Button("Rename Window…") { model.beginRenameWindow() }
+                if model.windowName != nil {
+                    Button("Remove Window Name") { model.setWindowName(nil) }
+                }
+            }
+        }
+    }
+}
+
+/// Moves a session, or a group, folder or folder group with everything in it, to the end
+/// of another window's sidebar, or to a window of its own.
+private struct TabSidebarMoveToWindowMenu: View {
+    @ObservedObject var model: TabSidebarModel
+    let payload: TabSidebarDragState.Payload
+
+    /// What is moved, as the menu names it.
+    let noun: String
+
+    var body: some View {
+        let others = model.otherWindows
+        Menu("Move \(noun) to Window") {
+            ForEach(others, id: \.self) { window in
+                Button(TabSidebarModel.displayName(of: window)) { model.move(payload, toWindow: window) }
+            }
+            if !others.isEmpty { Divider() }
+            Button("New Window") { model.moveToNewWindow(payload) }
+                .disabled(!model.canMoveToNewWindow(payload))
+        }
     }
 }
 
@@ -607,6 +686,8 @@ private struct TabSidebarFolderGroupHeader: View {
             model.toggleCollapsed(folderGroup: group.id)
         }
         Divider()
+        TabSidebarMoveToWindowMenu(model: model, payload: .folderGroup(group.id), noun: "Folder Group")
+        Divider()
         Button("Ungroup Folders") { model.ungroupFolders(group.id) }
         Button("Close Folder Group") { model.closeFolderGroup(group.id) }
             .help("Close every folder in the group with its sessions")
@@ -803,6 +884,8 @@ private struct TabSidebarFolderHeader: View {
             Button("Remove Folder from Group") { model.removeFolderFromGroup(folder.id) }
         }
         Divider()
+        TabSidebarMoveToWindowMenu(model: model, payload: .folder(folder.id), noun: "Folder")
+        Divider()
         Button("Remove Folder") { model.removeFolder(folder.id) }
             .help("Take the folder out of the sidebar and keep its sessions")
         Button("Close Folder") { model.closeFolder(folder.id) }
@@ -985,6 +1068,8 @@ private struct TabSidebarGroupHeader: View {
         if folderID != nil {
             Button("Remove Group from Folder") { model.removeGroupFromFolder(group.id) }
         }
+        Divider()
+        TabSidebarMoveToWindowMenu(model: model, payload: .group(group.id), noun: "Group")
         Divider()
         Button("Ungroup") { model.ungroup(group.id) }
         Button("Close Group") { model.closeGroup(group.id) }
@@ -1752,7 +1837,7 @@ struct TabSidebarSessionMenu: View {
 
             Divider()
 
-            Button("Move Session to New Window") { model.moveToNewWindow(window) }
+            TabSidebarMoveToWindowMenu(model: model, payload: .tab(window), noun: "Session")
 
             Divider()
 
