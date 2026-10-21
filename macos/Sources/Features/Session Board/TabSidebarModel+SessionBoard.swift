@@ -4,6 +4,17 @@ extension TabSidebarModel {
     /// The sessions of the sidebar, in sidebar order.
     var boardTabs: [Tab] { rows.flatMap(\.allTabs) }
 
+    /// The work items on this window's board: its own, with those of no window or of a
+    /// window no longer open, which every board shows so none is lost.
+    func boardItems(_ items: [WorkItem]) -> [WorkItem] {
+        guard let id = window?.folderSpace.id else { return items }
+        let open = Set(NSApp.windows.compactMap { ($0 as? TerminalWindow)?.folderSpace.id })
+        return items.filter { item in
+            guard let windowID = item.windowID else { return true }
+            return windowID == id || !open.contains(windowID)
+        }
+    }
+
     /// Each board column's sessions, in their order on the board.
     func boardLanes(of tabs: [Tab]? = nil) -> [String: [ObjectIdentifier]] {
         SessionBoardLayout.lanes(

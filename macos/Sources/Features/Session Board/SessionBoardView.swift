@@ -39,9 +39,12 @@ struct SessionBoardView: View {
 
     private var tabs: [TabSidebarModel.Tab] { model.boardTabs }
 
+    /// The window's own cards.
+    private var items: [WorkItem] { model.boardItems(store.items) }
+
     var body: some View {
         let content = SessionBoardContent(
-            mode: settings.mode, tabs: tabs, items: store.items, settings: settings,
+            mode: settings.mode, tabs: tabs, items: items, settings: settings,
             sessionLanes: model.boardLanes())
         VStack(spacing: 0) {
             header
@@ -68,8 +71,9 @@ struct SessionBoardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Board")
+            Text(model.windowName.map { "Board · \($0)" } ?? "Board")
                 .font(.system(size: 14, weight: .semibold))
+                .lineLimit(1)
 
             Picker("Show", selection: $settings.mode) {
                 ForEach(SessionBoardMode.allCases, id: \.self) { mode in
@@ -93,7 +97,7 @@ struct SessionBoardView: View {
             .frame(width: 200, height: 24)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
 
-            SessionBoardFilterBar(model: model, tabs: tabs, items: store.items, mode: settings.mode)
+            SessionBoardFilterBar(model: model, tabs: tabs, items: items, mode: settings.mode)
 
             Spacer()
 
@@ -351,7 +355,7 @@ struct SessionBoardView: View {
     private func addCard(to column: String, keepsAdding: Bool = true) {
         let title = newTitle
         newTitle = ""
-        store.add(title, to: column)
+        store.add(title, to: column, window: model.window?.folderSpace.id)
         if keepsAdding {
             DispatchQueue.main.async { focus = .newCard }
         } else {
@@ -694,6 +698,16 @@ private struct WorkItemCard<Field: Hashable, Sessions: View>: View {
                     Toggle(tab.title, isOn: Binding(
                         get: { tab.workItemID == item.id },
                         set: { linked in tab.window?.workItemID = linked ? item.id : nil }))
+                }
+            }
+        }
+        let others = model.otherWindows
+        if !others.isEmpty {
+            Menu("Move Card to Window") {
+                ForEach(others, id: \.self) { window in
+                    Button(TabSidebarModel.displayName(of: window)) {
+                        WorkItemStore.shared.move(item.id, toWindow: window.folderSpace.id)
+                    }
                 }
             }
         }

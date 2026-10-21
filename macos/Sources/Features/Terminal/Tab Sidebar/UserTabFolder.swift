@@ -34,14 +34,19 @@ struct UserTabFolder: Codable, Equatable, Identifiable {
 /// at the same one; a window that joins the tab group gives its folders to it (see
 /// `TabSidebarModel.unifyFolderSpace`). A folder with no sessions has nothing else to
 /// keep it, which is why this exists. Being the one thing a window's tabs share, it
-/// holds the window's name too.
+/// holds the window's name and id too.
 final class TabSidebarFolderSpace {
+    /// What tells the window from the others across restarts: the work items made on its
+    /// board are its own, and its board's filter is kept by it.
+    let id: UUID
+
     var folderIDs: [UUID] = []
 
     /// What the window is called, such as "Work", to tell it from the others.
     var name: String?
 
-    init(folderIDs: [UUID] = [], name: String? = nil) {
+    init(id: UUID = UUID(), folderIDs: [UUID] = [], name: String? = nil) {
+        self.id = id
         self.folderIDs = folderIDs
         self.name = name
     }

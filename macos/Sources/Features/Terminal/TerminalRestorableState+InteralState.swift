@@ -43,6 +43,9 @@ extension TerminalRestorableState {
         // MARK: - Window
         // The name of the window the tab is in. Optional, like the folders.
         var windowName: String?
+
+        // The id of the window the tab is in. Optional, like the name.
+        var windowID: UUID?
     }
 }
 
@@ -70,6 +73,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
             boardPlace: window?.boardPlace,
             workItemID: window?.workItemID,
             windowName: window?.folderSpace.name,
+            windowID: window?.folderSpace.id,
         )
     }
 }

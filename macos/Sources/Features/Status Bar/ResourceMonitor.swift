@@ -22,11 +22,14 @@ struct ResourceSession: Identifiable, Equatable {
 
     /// The sidebar folder it is in.
     let folder: String?
+
+    /// The window it is a tab of (see `ResourceMonitor.windowKey`).
+    let windowKey: ObjectIdentifier
     var usage: ResourceUsage
     var processCount: Int
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id && lhs.title == rhs.title && lhs.folder == rhs.folder
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.folder == rhs.folder && lhs.windowKey == rhs.windowKey
             && lhs.usage == rhs.usage && lhs.processCount == rhs.processCount
     }
 }
@@ -48,6 +51,26 @@ final class ResourceMonitor: ObservableObject {
     @Published private(set) var hasSampled = false
 
     var total: ResourceUsage { sessions.map(\.usage).reduce(app, +) }
+
+    /// The sessions of the window `window` is a tab of, which its status bar counts; all
+    /// of them without a window.
+    func sessions(inWindowOf window: TerminalWindow?) -> [ResourceSession] {
+        guard let window else { return sessions }
+        let key = Self.windowKey(of: window)
+        return sessions.filter { $0.windowKey == key }
+    }
+
+    /// Whether the sessions are in more than one window.
+    var spansWindows: Bool {
+        guard let first = sessions.first?.windowKey else { return false }
+        return sessions.contains { $0.windowKey != first }
+    }
+
+    /// What tells the window a tab is in: its native tab group, or the tab itself when it
+    /// has none.
+    static func windowKey(of window: TerminalWindow) -> ObjectIdentifier {
+        window.tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier(window)
+    }
 
     private var users = 0
     private var timer: Timer?
@@ -121,6 +144,7 @@ final class ResourceMonitor: ObservableObject {
                 window: window,
                 title: window.title.isEmpty ? "Session" : window.title,
                 folder: window.userTabFolderID.flatMap { folders[$0]?.name },
+                windowKey: Self.windowKey(of: window),
                 usage: measured?.usage ?? ResourceUsage(),
                 processCount: measured?.processCount ?? 0)
         }

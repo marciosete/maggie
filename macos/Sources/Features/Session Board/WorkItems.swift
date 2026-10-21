@@ -17,14 +17,19 @@ struct WorkItem: Codable, Equatable, Identifiable {
     /// The color the card is filled with, picked by hand.
     var color: TerminalTabColor = .none
 
+    /// The window whose board it is on (see `TabSidebarFolderSpace.id`). Nil for one
+    /// made before boards were a window's, which every board shows.
+    var windowID: UUID?
+
     let createdAt: Date
     var updatedAt: Date
 
-    init(id: UUID = UUID(), title: String, column: String, order: Double, at now: Date = Date()) {
+    init(id: UUID = UUID(), title: String, column: String, order: Double, windowID: UUID? = nil, at now: Date = Date()) {
         self.id = id
         self.title = title
         self.column = column
         self.order = order
+        self.windowID = windowID
         createdAt = now
         updatedAt = now
     }
@@ -36,10 +41,11 @@ struct WorkItem: Codable, Equatable, Identifiable {
     static let colorChoices: [TerminalTabColor] = TerminalTabColor.allCases.filter { !$0.followsClaudeCode }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, column, order, color, createdAt, updatedAt
+        case id, title, column, order, color, windowID, createdAt, updatedAt
     }
 
-    // Items saved before cards had colors read as uncolored.
+    // Items saved before cards had colors read as uncolored, and before boards were a
+    // window's as on every board.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -47,6 +53,7 @@ struct WorkItem: Codable, Equatable, Identifiable {
         column = try container.decode(String.self, forKey: .column)
         order = try container.decode(Double.self, forKey: .order)
         color = try container.decodeIfPresent(TerminalTabColor.self, forKey: .color) ?? .none
+        windowID = try container.decodeIfPresent(UUID.self, forKey: .windowID)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
@@ -81,13 +88,13 @@ final class WorkItemStore: ObservableObject {
 
     // MARK: Changes
 
-    /// Adds an item at the end of `column`.
+    /// Adds an item at the end of `column`, on the board of the window `windowID`.
     @discardableResult
-    func add(_ title: String, to column: String, at now: Date = Date()) -> WorkItem? {
+    func add(_ title: String, to column: String, window windowID: UUID? = nil, at now: Date = Date()) -> WorkItem? {
         let title = Self.clean(title)
         guard !title.isEmpty else { return nil }
         let last = items.filter { $0.column == column }.map(\.order).max() ?? -1
-        let item = WorkItem(title: title, column: column, order: last + 1, at: now)
+        let item = WorkItem(title: title, column: column, order: last + 1, windowID: windowID, at: now)
         items.append(item)
         save()
         return item
@@ -101,6 +108,11 @@ final class WorkItemStore: ObservableObject {
 
     func setColor(_ color: TerminalTabColor, of id: UUID, at now: Date = Date()) {
         update(id, at: now) { $0.color = color }
+    }
+
+    /// Puts an item on the board of the window `windowID`.
+    func move(_ id: UUID, toWindow windowID: UUID, at now: Date = Date()) {
+        update(id, at: now) { $0.windowID = windowID }
     }
 
     /// Removes an item and its notes. Its sessions stay, linked to nothing.

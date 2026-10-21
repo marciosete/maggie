@@ -200,7 +200,13 @@ struct SessionBoardFilter: Equatable {
 final class SessionBoardFilterStore: ObservableObject {
     static let shared = SessionBoardFilterStore()
 
-    @Published var filter = SessionBoardFilter()
+    /// Each window's filter, by the window's id (see `TabSidebarFolderSpace.id`).
+    @Published private var filters: [UUID: SessionBoardFilter] = [:]
+
+    subscript(window: UUID) -> SessionBoardFilter {
+        get { filters[window] ?? SessionBoardFilter() }
+        set { filters[window] = newValue.isActive ? newValue : nil }
+    }
 }
 
 /// How sessions lay out on the board, apart from the views so it can be tested.

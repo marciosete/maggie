@@ -87,16 +87,18 @@ struct TabSidebarFilterTests {
         #expect(TabSidebarFilter.filter(rows, by: filter, settings: settings).isEmpty)
     }
 
-    @Test func theFilterIsOneForEveryWindow() {
+    @Test func theFilterIsOneForEveryTabOfAWindow() {
         let store = SessionBoardFilterStore()
         var hosts: [TerminalWindow] = []
-        func model() -> TabSidebarModel {
+        func model(sharing space: TabSidebarFolderSpace? = nil) -> TabSidebarModel {
             let host = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+            if let space { host.folderSpace = space }
             hosts.append(host)
             return TabSidebarModel(hostWindow: host, filterStore: store)
         }
         let first = model()
-        let second = model()
+        let second = model(sharing: hosts[0].folderSpace)
+        let otherWindow = model()
         var secondChanges = 0
         let watching = second.objectWillChange.sink { _ in secondChanges += 1 }
         defer { watching.cancel() }
@@ -108,10 +110,15 @@ struct TabSidebarFilterTests {
         #expect(second.isFiltering)
         #expect(secondChanges == 1)
 
-        // Cleared in one, it is cleared in all.
+        // Another window shows other sessions, so it keeps a filter of its own.
+        #expect(!otherWindow.isFiltering)
+        otherWindow.boardFilter.colors = [.red]
+        #expect(first.boardFilter == SessionBoardFilter(colors: [.purple]))
+
+        // Cleared in one tab, it is cleared in the window's others.
         second.boardFilter = SessionBoardFilter()
         #expect(!first.isFiltering)
-        #expect(secondChanges == 2)
+        #expect(otherWindow.isFiltering)
     }
 
     @Test func theLightsAreOfferedWhileASessionFollowsClaudeCode() {

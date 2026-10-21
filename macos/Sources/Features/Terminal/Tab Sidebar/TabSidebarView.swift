@@ -40,7 +40,7 @@ struct TabSidebarContainerView<Content: View>: View {
                 Rectangle()
                     .fill(Color(nsColor: .separatorColor))
                     .frame(height: 1)
-                StatusBarView()
+                StatusBarView(window: model.window)
                     .background(statusBarBackground)
             }
         }
@@ -1788,7 +1788,7 @@ struct TabSidebarSessionMenu: View {
             }
 
             // Linked by hand: on the board's Together view the session shows under it.
-            let items = WorkItemStore.shared.items
+            let items = model.boardItems(WorkItemStore.shared.items)
             if !items.isEmpty {
                 Menu("Work Item") {
                     ForEach(items) { item in

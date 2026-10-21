@@ -5,6 +5,9 @@ import SwiftUI
 /// Claude and Codex plan limits on the left, keeping the Mac awake and the resource
 /// manager on the right. Right-clicking it picks what it shows.
 struct StatusBarView: View {
+    /// The window it is the bar of, whose sessions the resource manager counts.
+    weak var window: TerminalWindow?
+
     @ObservedObject var settings = StatusBarSettings.shared
     @ObservedObject private var usage = UsagePanelModel.shared
 
@@ -53,7 +56,7 @@ struct StatusBarView: View {
             }
 
             if settings.shows(.resources) {
-                StatusBarResourcesButton()
+                StatusBarResourcesButton(window: window)
             }
         }
         .font(.system(size: 11))
@@ -240,33 +243,36 @@ extension CodexLimits {
 
 // MARK: - Resources
 
-/// The memory every session and the app use, and how many sessions there are. Clicking
-/// it lists them.
+/// The memory the window's sessions use, and how many it has. Clicking it lists them,
+/// and every other window's.
 private struct StatusBarResourcesButton: View {
+    weak var window: TerminalWindow?
     @ObservedObject private var monitor = ResourceMonitor.shared
     @State private var isShowingPopover = false
 
     var body: some View {
+        let sessions = monitor.sessions(inWindowOf: window)
+        let memory = sessions.map(\.usage).reduce(ResourceUsage(), +).memory
         Button {
             isShowingPopover.toggle()
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "memorychip")
                     .font(.system(size: 10))
-                Text(monitor.hasSampled ? ResourceFormat.memory(monitor.total.memory) : "–")
+                Text(monitor.hasSampled ? ResourceFormat.memory(memory) : "–")
                     .monospacedDigit()
                 Text("·").foregroundStyle(.tertiary)
                 Image(systemName: "apple.terminal")
                     .font(.system(size: 10))
-                Text("\(monitor.sessions.count)")
+                Text("\(sessions.count)")
                     .monospacedDigit()
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Resource Manager\n\(ResourceFormat.memory(monitor.total.memory)) used by Maggie and its sessions\n\(monitor.sessions.count) sessions")
+        .help("Resource Manager\n\(ResourceFormat.memory(memory)) used by this window's sessions\n\(sessions.count) sessions in this window")
         .popover(isPresented: $isShowingPopover, arrowEdge: .top) {
-            ResourceManagerView(monitor: monitor) { isShowingPopover = false }
+            ResourceManagerView(monitor: monitor, window: window) { isShowingPopover = false }
         }
         .onAppear { monitor.start() }
         .onDisappear { monitor.stop() }

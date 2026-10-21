@@ -27,6 +27,31 @@ struct WorkItemTests {
         #expect(again.items == store.items)
     }
 
+    /// A board shows the cards made on it, those of no window, made before boards were
+    /// a window's, and those of a window no longer open, so none is lost.
+    @Test @MainActor func aBoardShowsItsWindowsCards() throws {
+        let store = store()
+        defer { try? FileManager.default.removeItem(at: store.directory) }
+        let host = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        let other = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        defer {
+            host.close()
+            other.close()
+        }
+        let model = TabSidebarModel(hostWindow: host)
+        store.add("Mine", to: "todo", window: host.folderSpace.id)
+        store.add("Theirs", to: "todo", window: other.folderSpace.id)
+        store.add("Legacy", to: "todo")
+        store.add("Orphan", to: "todo", window: UUID())
+        #expect(model.boardItems(store.items).map(\.title) == ["Mine", "Legacy", "Orphan"])
+
+        // Moved to the other window, it goes from this board, and stays there on reload.
+        let mine = try #require(store.items.first)
+        store.move(mine.id, toWindow: other.folderSpace.id)
+        #expect(model.boardItems(store.items).map(\.title) == ["Legacy", "Orphan"])
+        #expect(WorkItemStore(directory: store.directory)[mine.id]?.windowID == other.folderSpace.id)
+    }
+
     @Test func cardsTakeAColorAndKeepIt() throws {
         let store = store()
         defer { try? FileManager.default.removeItem(at: store.directory) }

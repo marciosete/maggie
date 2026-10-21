@@ -1,12 +1,23 @@
 import AppKit
 import SwiftUI
 
-/// The resource manager: every session with the memory and CPU its terminals' processes
-/// use, grouped by sidebar folder, and Maggie's own. Clicking a session goes to it; its
-/// ✕ closes it, asking first if anything in it is still running.
+/// The resource manager: the window's sessions, or every window's, with the memory and
+/// CPU their terminals' processes use, grouped by sidebar folder, and Maggie's own.
+/// Clicking a session goes to it; its ✕ closes it, asking first if anything in it is
+/// still running.
 struct ResourceManagerView: View {
     @ObservedObject var monitor: ResourceMonitor
+
+    /// The window it was opened from.
+    weak var window: TerminalWindow?
     let dismiss: () -> Void
+
+    enum Scope {
+        case window
+        case all
+    }
+
+    @State private var scope: Scope = .window
 
     enum Sort {
         case memory
@@ -31,7 +42,7 @@ struct ResourceManagerView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if monitor.sessions.isEmpty {
+                    if sessions.isEmpty {
                         Text("No sessions")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity)
@@ -47,7 +58,7 @@ struct ResourceManagerView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
             }
-            .frame(height: monitor.sessions.isEmpty ? 48 : min(360, CGFloat(rowCount) * 24 + 12))
+            .frame(height: sessions.isEmpty ? 48 : min(360, CGFloat(rowCount) * 24 + 12))
 
             Divider()
 
@@ -72,20 +83,51 @@ struct ResourceManagerView: View {
         .onAppear { monitor.sample() }
     }
 
+    /// Whether it lists every window's sessions: when asked to, or with only one window.
+    private var showsAll: Bool { scope == .all || window == nil || !monitor.spansWindows }
+
+    private var sessions: [ResourceSession] {
+        showsAll ? monitor.sessions : monitor.sessions(inWindowOf: window)
+    }
+
+    /// The window's sessions, or every session and the app.
+    private var total: ResourceUsage {
+        showsAll ? monitor.total : sessions.map(\.usage).reduce(ResourceUsage(), +)
+    }
+
     private var header: some View {
-        HStack(spacing: 8) {
-            Text("Resource Manager")
-                .font(.system(size: 13, weight: .semibold))
-            Spacer()
-            Text("\(ResourceFormat.cpu(monitor.total.cpu)) CPU")
-                .help("CPU of every session and the app, in percent of one core")
-            Text("·").foregroundStyle(.tertiary)
-            Text(ResourceFormat.memory(monitor.total.memory))
-                .help("Memory of every session and the app, as Activity Monitor counts it")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Resource Manager")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                HStack(spacing: 8) {
+                    Text("\(ResourceFormat.cpu(total.cpu)) CPU")
+                        .help(showsAll
+                            ? "CPU of every session and the app, in percent of one core"
+                            : "CPU of this window's sessions, in percent of one core")
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(ResourceFormat.memory(total.memory))
+                        .help(showsAll
+                            ? "Memory of every session and the app, as Activity Monitor counts it"
+                            : "Memory of this window's sessions, as Activity Monitor counts it")
+                }
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            }
+
+            // Only with sessions in more than one window is there a choice to make.
+            if window != nil && monitor.spansWindows {
+                Picker("Sessions", selection: $scope) {
+                    Text("This Window").tag(Scope.window)
+                    Text("All Windows").tag(Scope.all)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+            }
         }
-        .font(.system(size: 11))
-        .monospacedDigit()
-        .foregroundStyle(.secondary)
     }
 
     private var columns: some View {
@@ -125,7 +167,7 @@ struct ResourceManagerView: View {
 
     /// Folders by what they use, with the sessions in no folder last.
     private var groups: [Group] {
-        let byFolder = Dictionary(grouping: monitor.sessions) { $0.folder }
+        let byFolder = Dictionary(grouping: sessions) { $0.folder }
         var groups = byFolder.compactMap { folder, sessions -> Group? in
             guard let folder else { return nil }
             return Group(name: folder, sessions: sorted(sessions))
