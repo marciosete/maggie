@@ -53,10 +53,17 @@ final class ResourceMonitor: ObservableObject {
     var total: ResourceUsage { sessions.map(\.usage).reduce(app, +) }
 
     /// The sessions of the window `window` is a tab of, which its status bar counts; all
-    /// of them without a window.
+    /// of them without a window. None until the window has been sampled.
+    ///
+    /// The window's key is the one read when it was sampled, not read now: this runs in
+    /// the status bar's view body, and reading `tabGroup` there on a window that has no
+    /// tab group yet makes AppKit build one, in the middle of SwiftUI's update. The
+    /// bar's views come out of that no longer told of the monitor's changes, so the
+    /// first window's bar kept showing its first sample until the bar was made again.
     func sessions(inWindowOf window: TerminalWindow?) -> [ResourceSession] {
         guard let window else { return sessions }
-        let key = Self.windowKey(of: window)
+        let id = ObjectIdentifier(window)
+        guard let key = sessions.first(where: { $0.id == id })?.windowKey else { return [] }
         return sessions.filter { $0.windowKey == key }
     }
 
