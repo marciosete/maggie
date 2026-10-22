@@ -87,6 +87,11 @@ struct RemoteProtocolTests {
                 BoardCard(kind: .workItem, id: "w1", title: "Mobile", column: "todo", color: .purple, colorLabel: "Feature", sessionIDs: ["s1"]),
                 BoardCard(kind: .session, id: "s2", title: "Fix", column: "todo", light: .waiting),
             ])),
+        .board(BoardSnapshot(
+            columns: [BoardColumn(id: "todo", label: "To Do", color: .blue, icon: "circle")],
+            cards: [BoardCard(kind: .workItem, id: "w1", title: "Mobile", column: "todo", sessionIDs: ["s1"])],
+            mode: .together,
+            sessions: [BoardCard(kind: .session, id: "s1", title: "Plan", column: "todo", light: .working, workItemID: "w1")])),
         .usage(RemoteUsageReport(
             rangeLabel: "Last 7 days",
             costUsd: 12.5,
@@ -141,6 +146,48 @@ struct RemoteProtocolTests {
     @Test func aBoardRequestWithoutABodyReads() throws {
         let old = Data(#"{"version":1,"kind":"fetchBoard"}"#.utf8)
         #expect(try JSONDecoder().decode(ClientMessage.self, from: old) == .fetchBoard(FetchBoard()))
+    }
+
+    /// The phone lays the board out as the Mac's board does in each of its views.
+    @Test func eachBoardViewShowsWhatTheMacsDoes() {
+        let board = BoardSnapshot(
+            columns: [BoardColumn(id: "todo", label: "To Do", color: nil, icon: "circle")],
+            cards: [
+                BoardCard(kind: .workItem, id: "w1", title: "Mobile", column: "todo", sessionIDs: ["s1"]),
+                BoardCard(kind: .session, id: "s2", title: "Loose", column: "todo"),
+            ],
+            mode: .workItems,
+            sessions: [
+                BoardCard(kind: .session, id: "s1", title: "Linked", column: "todo", workItemID: "w1"),
+                BoardCard(kind: .session, id: "s2", title: "Loose", column: "todo"),
+            ])
+
+        #expect(board.items(in: "todo", mode: .workItems).map(\.id) == ["w1"])
+        #expect(board.sessions(in: "todo", mode: .workItems).isEmpty)
+
+        #expect(board.items(in: "todo", mode: .sessions).isEmpty)
+        #expect(board.sessions(in: "todo", mode: .sessions).map(\.id) == ["s1", "s2"])
+
+        #expect(board.items(in: "todo", mode: .together).map(\.id) == ["w1"])
+        #expect(board.sessions(in: "todo", mode: .together).map(\.id) == ["s2"])
+        #expect(board.sessions(of: board.cards[0]).map(\.title) == ["Linked"])
+
+        // A moved session goes to the end of its new column in every view.
+        var moved = board
+        moved.move(MoveCard(kind: .session, id: "s1", column: "done"))
+        #expect(moved.sessions(in: "done", mode: .sessions).map(\.id) == ["s1"])
+        #expect(moved.sessions(in: "todo", mode: .sessions).map(\.id) == ["s2"])
+        moved.move(MoveCard(kind: .workItem, id: "w1", column: "done"))
+        #expect(moved.items(in: "done", mode: .together).map(\.id) == ["w1"])
+
+        // A Mac that sends only the unlinked sessions still fills the sessions view.
+        let older = BoardSnapshot(columns: board.columns, cards: board.cards)
+        #expect(older.sessions(in: "todo", mode: .sessions).map(\.id) == ["s2"])
+    }
+
+    @Test func aBoardWithoutModeOrSessionsReads() throws {
+        let old = Data(#"{"version":1,"kind":"board","body":{"columns":[],"cards":[]}}"#.utf8)
+        #expect(try JSONDecoder().decode(HostMessage.self, from: old) == .board(BoardSnapshot(columns: [], cards: [])))
     }
 
     /// A sidebar from a Mac that doesn't send windows still reads, with none.

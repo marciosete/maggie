@@ -56,6 +56,15 @@ struct RemoteBoardTests {
         #expect(card.color == .green)
         #expect(card.sessionIDs == ["s0"])
         #expect(!board.cards.contains { $0.title == "linked" })
+
+        // Every session comes on its own too, the linked one saying which item it is on,
+        // with the view the Mac shows.
+        #expect(board.sessions(in: first, mode: .sessions).map(\.title) == ["sooner", "later", "never moved"])
+        #expect(board.sessions(in: second, mode: .sessions).map(\.title) == ["linked"])
+        #expect(board.sessions.first { $0.title == "linked" }?.workItemID == item.id.uuidString)
+        #expect(board.sessions.first { $0.title == "sooner" }?.workItemID == nil)
+        #expect(board.mode?.rawValue == settings.mode.rawValue)
+        #expect(board.sessions(of: card).map(\.title) == ["linked"])
     }
 }
 

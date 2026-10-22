@@ -2,7 +2,8 @@ import AppKit
 import Combine
 
 /// The session board as the device sees it, laid out as the Mac's board lays it out:
-/// work items, then the sessions not linked to one, in each column's order.
+/// work items, then the sessions not linked to one, in each column's order; and every
+/// session on its own, as the sessions view shows them, with the view the Mac shows.
 enum RemoteBoard {
     static func snapshot(
         tabs: [TabSidebarModel.Tab],
@@ -25,6 +26,14 @@ enum RemoteBoard {
         let itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         let tabsByID = Dictionary(uniqueKeysWithValues: loose.map { ($0.id, $0) })
 
+        let allTabs = Dictionary(tabs.map { ($0.id, $0) }) { first, _ in first }
+        let allLanes = SessionBoardLayout.lanes(tabs.map { .init(id: $0.id, place: $0.boardPlace) }, settings: settings)
+        let sessions = settings.columns.flatMap { column in
+            (allLanes[column.id] ?? []).compactMap { allTabs[$0] }.map { tab in
+                session(tab, column: column.id, settings: settings, id: id, workItemID: tab.workItemID.flatMap { itemIDs.contains($0) ? $0.uuidString : nil })
+            }
+        }
+
         var cards: [BoardCard] = []
         for column in settings.columns {
             for itemID in itemLanes[column.id] ?? [] {
@@ -40,17 +49,28 @@ enum RemoteBoard {
             }
             for tabID in sessionLanes[column.id] ?? [] {
                 guard let tab = tabsByID[tabID] else { continue }
-                cards.append(BoardCard(
-                    kind: .session,
-                    id: id(tab),
-                    title: tab.title,
-                    column: column.id,
-                    color: TabColorName(tab.assignedColor),
-                    colorLabel: settings.label(of: tab.assignedColor),
-                    light: tab.claudeCodeState.map { SessionLight($0.light) }))
+                cards.append(session(tab, column: column.id, settings: settings, id: id, workItemID: nil))
             }
         }
-        return BoardSnapshot(columns: columns, cards: cards)
+        return BoardSnapshot(columns: columns, cards: cards, mode: BoardMode(rawValue: settings.mode.rawValue), sessions: sessions)
+    }
+
+    private static func session(
+        _ tab: TabSidebarModel.Tab,
+        column: String,
+        settings: SessionBoardSettings,
+        id: (TabSidebarModel.Tab) -> String,
+        workItemID: String?
+    ) -> BoardCard {
+        BoardCard(
+            kind: .session,
+            id: id(tab),
+            title: tab.title,
+            column: column,
+            color: TabColorName(tab.assignedColor),
+            colorLabel: settings.label(of: tab.assignedColor),
+            light: tab.claudeCodeState.map { SessionLight($0.light) },
+            workItemID: workItemID)
     }
 
     /// The work items on the board of the window `id` names, or all of them when it names
