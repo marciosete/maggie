@@ -258,6 +258,9 @@ final class RemoteClient {
     /// The paired device, once it said hello or paired.
     private(set) var device: RemoteDevice?
     private(set) var subscribedToSidebar = false
+
+    /// The window whose board the device last asked for; none for every window's.
+    private var boardWindowID: String?
     private var helloTimer: Timer?
 
     /// The sessions this device mirrors.
@@ -393,8 +396,8 @@ final class RemoteClient {
     private func sendBoard() {
         guard let feed = service?.feed else { return }
         send(.board(RemoteBoard.snapshot(
-            tabs: feed.allTabs(),
-            items: WorkItemStore.shared.items,
+            tabs: feed.tabs(inWindow: boardWindowID),
+            items: RemoteBoard.items(WorkItemStore.shared.items, window: boardWindowID),
             settings: .shared,
             id: { tab in tab.window.map(feed.ids.id(for:)) ?? tab.id.debugDescription })))
     }
@@ -468,11 +471,12 @@ final class RemoteClient {
         case .ping(let ping):
             send(.pong(ping))
 
-        case .fetchBoard:
+        case .fetchBoard(let request):
+            boardWindowID = request.windowID
             sendBoard()
 
         case .moveCard(let request):
-            if !RemoteBoard.move(request, tabs: service.feed.allTabs(), feed: service.feed) {
+            if !RemoteBoard.move(request, tabs: service.feed.tabs(inWindow: boardWindowID), feed: service.feed) {
                 send(.error(RemoteError(code: .notFound, message: "That card or column is no longer on the Mac's board.")))
             }
             sendBoard()

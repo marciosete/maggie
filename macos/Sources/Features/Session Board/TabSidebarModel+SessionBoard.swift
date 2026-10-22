@@ -8,6 +8,11 @@ extension TabSidebarModel {
     /// window no longer open, which every board shows so none is lost.
     func boardItems(_ items: [WorkItem]) -> [WorkItem] {
         guard let id = window?.folderSpace.id else { return items }
+        return Self.boardItems(items, window: id)
+    }
+
+    /// The work items on the board of the window `id` (see `TabSidebarFolderSpace.id`).
+    static func boardItems(_ items: [WorkItem], window id: UUID) -> [WorkItem] {
         let open = Set(NSApp.windows.compactMap { ($0 as? TerminalWindow)?.folderSpace.id })
         return items.filter { item in
             guard let windowID = item.windowID else { return true }

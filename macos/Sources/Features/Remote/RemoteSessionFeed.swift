@@ -130,8 +130,7 @@ final class RemoteSessionFeed {
 
     /// Builds the snapshot now and sends it if it changed.
     func update() {
-        let rows = currentRows()
-        let new = Self.snapshot(rows: rows, context: Context(
+        let new = Self.snapshot(windows: currentWindows(), context: Context(
             id: { [ids] tab in
                 if let window = tab.window { return ids.id(for: window) }
                 return ids.id(for: tab.id) ?? tab.id.debugDescription
@@ -149,24 +148,40 @@ final class RemoteSessionFeed {
 
     /// Every session, in sidebar order.
     func allTabs() -> [TabSidebarModel.Tab] {
-        currentRows().flatMap(\.allTabs)
+        currentWindows().flatMap { $0.rows.flatMap(\.allTabs) }
     }
 
-    /// The sidebar rows of every window's native tab group.
-    private func currentRows() -> [TabSidebarModel.Row] {
+    /// The sessions of the window `id` names (see `SidebarWindow.id`), in sidebar order,
+    /// or every session when it names none or one the Mac no longer has.
+    func tabs(inWindow id: String?) -> [TabSidebarModel.Tab] {
+        let windows = currentWindows()
+        let rows = windows.first { $0.id == id }?.rows ?? windows.flatMap(\.rows)
+        return rows.flatMap(\.allTabs)
+    }
+
+    /// Every window's native tab group with its sidebar rows.
+    private func currentWindows() -> [Window] {
         var seen = Set<ObjectIdentifier>()
-        var rows: [TabSidebarModel.Row] = []
+        var result: [Window] = []
+        let main = NSApp.mainWindow as? TerminalWindow
+        let front = main.map { $0.tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier($0) }
         for window in NSApp.windows.compactMap({ $0 as? TerminalWindow }) where window.isVisible || window.tabGroup != nil {
             let tabGroup = window.tabGroup
             let key = tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier(window)
             guard seen.insert(key).inserted else { continue }
             let windows = tabGroup?.windows.compactMap { $0 as? TerminalWindow } ?? [window]
-            rows += TabSidebarModel.rows(
-                of: windows,
-                selected: tabGroup?.selectedWindow ?? window,
-                folderIDs: windows.first?.folderSpace.folderIDs ?? [])
+            let selected = tabGroup?.selectedWindow as? TerminalWindow ?? window
+            result.append(Window(
+                id: window.folderSpace.id.uuidString,
+                name: window.folderSpace.name,
+                title: TabSidebarModel.displayName(of: selected),
+                isFront: key == front,
+                rows: TabSidebarModel.rows(
+                    of: windows,
+                    selected: selected,
+                    folderIDs: windows.first?.folderSpace.folderIDs ?? [])))
         }
-        return rows
+        return result
     }
 
     private func readInfo() {
@@ -221,9 +236,38 @@ final class RemoteSessionFeed {
         var hasGit: (String) -> Bool
     }
 
+    /// One window's sidebar.
+    struct Window {
+        var id: String
+        var name: String?
+        var title: String
+        var isFront: Bool
+        var rows: [TabSidebarModel.Row]
+    }
+
+    /// Every window's rows together, and each window's own, listed by title as the
+    /// Mac's sidebar lists the other windows.
+    static func snapshot(windows: [Window], context: Context) -> SidebarSnapshot {
+        let shown = windows.map { window in
+            SidebarWindow(
+                id: window.id,
+                name: window.name,
+                title: window.title,
+                isFront: window.isFront,
+                rows: sidebarRows(window.rows, context: context))
+        }
+        return SidebarSnapshot(
+            rows: merged(shown.flatMap(\.rows)),
+            windows: shown.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending })
+    }
+
     static func snapshot(rows: [TabSidebarModel.Row], context: Context) -> SidebarSnapshot {
+        SidebarSnapshot(rows: merged(sidebarRows(rows, context: context)))
+    }
+
+    private static func merged(_ rows: [SidebarRow]) -> [SidebarRow] {
         var result: [SidebarRow] = []
-        for row in sidebarRows(rows, context: context) {
+        for row in rows {
             // Two windows can show the same folder; it is listed once, with both's rows.
             if case .folder(let folder) = row,
                let index = result.firstIndex(where: { if case .folder(let shown) = $0 { return shown.id == folder.id } else { return false } }),
@@ -234,7 +278,7 @@ final class RemoteSessionFeed {
             }
             result.append(row)
         }
-        return SidebarSnapshot(rows: result)
+        return result
     }
 
     private static func sidebarRows(_ rows: [TabSidebarModel.Row], context: Context) -> [SidebarRow] {

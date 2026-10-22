@@ -52,8 +52,8 @@ public enum ClientMessage: Equatable, Sendable {
 
     case ping(Ping)
 
-    /// Send the session board once.
-    case fetchBoard
+    /// Send the session board once, and again after each `moveCard`.
+    case fetchBoard(FetchBoard)
 
     /// Move a card to another column of the board, at its end.
     case moveCard(MoveCard)
@@ -223,9 +223,13 @@ public struct NewSession: Codable, Equatable, Sendable {
     public var folderID: String?
     public var path: String?
 
-    public init(folderID: String? = nil, path: String? = nil) {
+    /// The window it opens in (see `SidebarWindow.id`); none for the Mac's front one.
+    public var windowID: String?
+
+    public init(folderID: String? = nil, path: String? = nil, windowID: String? = nil) {
         self.folderID = folderID
         self.path = path
+        self.windowID = windowID
     }
 }
 
@@ -238,6 +242,17 @@ public struct SessionCreated: Codable, Equatable, Sendable {
     public init(id: String, folderID: String?) {
         self.id = id
         self.folderID = folderID
+    }
+}
+
+/// Which board to send: one window's, as that window's board shows it on the Mac, or
+/// with none, every window's sessions and cards.
+public struct FetchBoard: Codable, Equatable, Sendable {
+    /// See `SidebarWindow.id`.
+    public var windowID: String?
+
+    public init(windowID: String? = nil) {
+        self.windowID = windowID
     }
 }
 
@@ -578,7 +593,8 @@ extension ClientMessage: Codable {
         case .resyncSession(let body): try container.encode(body, forKey: .body)
         case .registerPush(let body): try container.encode(body, forKey: .body)
         case .ping(let body): try container.encode(body, forKey: .body)
-        case .fetchBoard, .fetchUsage: break
+        case .fetchBoard(let body): try container.encode(body, forKey: .body)
+        case .fetchUsage: break
         case .moveCard(let body): try container.encode(body, forKey: .body)
         case .renameSession(let body): try container.encode(body, forKey: .body)
         case .peekSession(let body): try container.encode(body, forKey: .body)
@@ -606,7 +622,8 @@ extension ClientMessage: Codable {
         case "resyncSession": self = .resyncSession(try container.decode(SessionRef.self, forKey: .body))
         case "registerPush": self = .registerPush(try container.decode(RegisterPush.self, forKey: .body))
         case "ping": self = .ping(try container.decode(Ping.self, forKey: .body))
-        case "fetchBoard": self = .fetchBoard
+        // A device that knows only one board sends no body.
+        case "fetchBoard": self = .fetchBoard(try container.decodeIfPresent(FetchBoard.self, forKey: .body) ?? FetchBoard())
         case "moveCard": self = .moveCard(try container.decode(MoveCard.self, forKey: .body))
         case "fetchUsage": self = .fetchUsage
         case "renameSession": self = .renameSession(try container.decode(RenameSession.self, forKey: .body))

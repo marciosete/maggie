@@ -6,22 +6,31 @@ import Foundation
 /// Names follow the Mac's `TabSidebarModel`: a row is a session (a tab), a group of
 /// sessions, a folder (holding sessions and groups) or a folder group (holding folders).
 public struct SidebarSnapshot: Codable, Equatable, Sendable {
+    /// Every window's rows together, a folder open in two windows listed once.
     public var rows: [SidebarRow]
 
+    /// Each window's own rows, by name. Empty from a Mac that doesn't send them.
+    public var windows: [SidebarWindow]
+
     /// Folders with no session in them, which the sidebar still lists, are rows too.
-    public init(rows: [SidebarRow]) {
+    public init(rows: [SidebarRow], windows: [SidebarWindow] = []) {
         self.rows = rows
+        self.windows = windows
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rows = try container.decode([SidebarRow].self, forKey: .rows)
+        windows = try container.decodeIfPresent([SidebarWindow].self, forKey: .windows) ?? []
+    }
+
+    public func window(id: String) -> SidebarWindow? {
+        windows.first { $0.id == id }
     }
 
     /// Every folder, in sidebar order: the choices for New Session.
     public var folders: [SidebarFolder] {
-        rows.flatMap { row -> [SidebarFolder] in
-            switch row {
-            case .folder(let folder): return [folder]
-            case .folderGroup(let group): return group.folders
-            case .session, .group: return []
-            }
-        }
+        rows.flatMap(\.folders)
     }
 
     /// Every session, in sidebar order.
@@ -32,6 +41,36 @@ public struct SidebarSnapshot: Codable, Equatable, Sendable {
     public func session(id: String) -> SidebarSession? {
         sessions.first { $0.id == id }
     }
+}
+
+/// One of the Mac's windows, each with its own sidebar.
+public struct SidebarWindow: Codable, Equatable, Sendable, Identifiable {
+    /// Lasts across the Mac's restarts, so a device can keep its choice.
+    public var id: String
+
+    /// What the window was named, such as "Work"; none for an unnamed one.
+    public var name: String?
+
+    /// What the Mac lists the window as: its name, or else the session it shows.
+    public var title: String
+
+    /// The Mac's front window.
+    public var isFront: Bool
+    public var rows: [SidebarRow]
+
+    public init(id: String, name: String? = nil, title: String, isFront: Bool = false, rows: [SidebarRow]) {
+        self.id = id
+        self.name = name
+        self.title = title
+        self.isFront = isFront
+        self.rows = rows
+    }
+
+    /// Every folder, in sidebar order.
+    public var folders: [SidebarFolder] { rows.flatMap(\.folders) }
+
+    /// Every session, in sidebar order.
+    public var sessions: [SidebarSession] { rows.flatMap(\.sessions) }
 }
 
 public enum SidebarRow: Equatable, Sendable, Identifiable {
@@ -46,6 +85,15 @@ public enum SidebarRow: Equatable, Sendable, Identifiable {
         case .group(let group): return "group-\(group.id)"
         case .folder(let folder): return "folder-\(folder.id)"
         case .folderGroup(let group): return "folders-\(group.id)"
+        }
+    }
+
+    /// The folders the row is or holds.
+    public var folders: [SidebarFolder] {
+        switch self {
+        case .folder(let folder): return [folder]
+        case .folderGroup(let group): return group.folders
+        case .session, .group: return []
         }
     }
 

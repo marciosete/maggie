@@ -188,6 +188,32 @@ struct RemoteSessionFeedTests {
         #expect(snapshot.sessions.map(\.title) == ["a", "b"])
     }
 
+    @Test func eachWindowIsSentWithItsOwnRows() {
+        let folder = UserTabFolder(name: "ghostty", path: "/Users/me/ghostty")
+        let windows: [RemoteSessionFeed.Window] = [
+            .init(id: "w1", name: "Work", title: "Work", isFront: false, rows: [
+                .folder(.init(folder: folder, rows: [.tab(tab(0, title: "a", light: nil, folderID: folder.id))])),
+            ]),
+            .init(id: "w2", name: nil, title: "build", isFront: true, rows: [
+                .tab(tab(1, title: "build", light: nil)),
+                .folder(.init(folder: folder, rows: [.tab(tab(2, title: "b", light: nil, folderID: folder.id))])),
+            ]),
+        ]
+        let snapshot = RemoteSessionFeed.snapshot(windows: windows, context: context())
+
+        // All windows together, as before, with the shared folder once.
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.sessions.map(\.title) == ["a", "b", "build"])
+
+        // Each window by title, with only its own sessions.
+        #expect(snapshot.windows.map(\.title) == ["build", "Work"])
+        #expect(snapshot.window(id: "w1")?.name == "Work")
+        #expect(snapshot.window(id: "w1")?.sessions.map(\.title) == ["a"])
+        #expect(snapshot.window(id: "w2")?.sessions.map(\.title) == ["build", "b"])
+        #expect(snapshot.window(id: "w2")?.isFront == true)
+        #expect(snapshot.window(id: "w2")?.folders.map(\.name) == ["ghostty"])
+    }
+
     @Test func updatesAreSpacedOut() {
         var coalescer = RemoteCoalescer(interval: 0.25)
         #expect(coalescer.delay(at: now) == 0)

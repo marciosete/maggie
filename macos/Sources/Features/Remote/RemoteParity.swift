@@ -53,6 +53,14 @@ enum RemoteBoard {
         return BoardSnapshot(columns: columns, cards: cards)
     }
 
+    /// The work items on the board of the window `id` names, or all of them when it names
+    /// none or one the Mac no longer has.
+    @MainActor
+    static func items(_ items: [WorkItem], window id: String?) -> [WorkItem] {
+        guard let uuid = id.flatMap(UUID.init(uuidString:)), RemoteCommands.window(id: uuid.uuidString) != nil else { return items }
+        return TabSidebarModel.boardItems(items, window: uuid)
+    }
+
     /// Moves a card to the end of `column`, as dropping it there on the Mac's board does.
     @MainActor
     static func move(_ request: MoveCard, tabs: [TabSidebarModel.Tab], feed: RemoteSessionFeed) -> Bool {

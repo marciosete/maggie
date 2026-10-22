@@ -49,13 +49,15 @@ struct RemoteProtocolTests {
         .resyncSession(SessionRef(id: "s1")),
         .registerPush(RegisterPush(token: "abcd", environment: .sandbox)),
         .ping(Ping(nonce: .max)),
-        .fetchBoard,
+        .fetchBoard(FetchBoard()),
+        .fetchBoard(FetchBoard(windowID: "w1")),
         .moveCard(MoveCard(kind: .workItem, id: "w1", column: "done")),
         .fetchUsage,
         .renameSession(RenameSession(id: "s1", title: "Release notes")),
         .peekSession(SessionRef(id: "s1")),
         .newSession(NewSession()),
         .newSession(NewSession(path: "/Users/me/projects/orca")),
+        .newSession(NewSession(folderID: "f1", windowID: "w1")),
         .fitSession(FitSession(id: "s1", columns: 92, rows: 40)),
         .fitSession(FitSession(id: "s1", columns: nil, rows: nil)),
         .listFolders(ListFolders()),
@@ -70,6 +72,10 @@ struct RemoteProtocolTests {
         .paired(Paired(deviceToken: "token", deviceID: "d1", hostName: "macmini")),
         .welcome(Welcome(hostName: "macmini", capabilities: ["push"])),
         .sidebar(sidebar),
+        .sidebar(SidebarSnapshot(rows: sidebar.rows, windows: [
+            SidebarWindow(id: "w1", name: "Work", title: "Work", isFront: true, rows: sidebar.rows),
+            SidebarWindow(id: "w2", title: "build", rows: []),
+        ])),
         .sessionOpened(SessionOpened(id: "s1", stream: 7, columns: 120, rows: 40)),
         .sessionClosed(SessionClosed(id: "s1", reason: .processRunning)),
         .sessionCreated(SessionCreated(id: "s9", folderID: "f1")),
@@ -129,6 +135,18 @@ struct RemoteProtocolTests {
     @Test func aNewSessionWithAFolderReadsAsBefore() throws {
         let old = Data(#"{"version":1,"kind":"newSession","body":{"folderID":"f1"}}"#.utf8)
         #expect(try JSONDecoder().decode(ClientMessage.self, from: old) == .newSession(NewSession(folderID: "f1")))
+    }
+
+    /// A board request from a device that knows only one board asks for every window's.
+    @Test func aBoardRequestWithoutABodyReads() throws {
+        let old = Data(#"{"version":1,"kind":"fetchBoard"}"#.utf8)
+        #expect(try JSONDecoder().decode(ClientMessage.self, from: old) == .fetchBoard(FetchBoard()))
+    }
+
+    /// A sidebar from a Mac that doesn't send windows still reads, with none.
+    @Test func aSidebarWithoutWindowsReads() throws {
+        let old = Data(#"{"version":1,"kind":"sidebar","body":{"rows":[]}}"#.utf8)
+        #expect(try JSONDecoder().decode(HostMessage.self, from: old) == .sidebar(SidebarSnapshot(rows: [])))
     }
 
     @Test func unknownKindIsReported() throws {

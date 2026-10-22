@@ -5,13 +5,15 @@ import AppKit
 enum RemoteCommands {
     /// Opens a session where `request` says: in a sidebar folder, in a folder under
     /// `home` (opened in the sidebar first, or found there), or in `home` itself, outside
-    /// any folder, like a plain new tab.
+    /// any folder, like a plain new tab. It opens in the window the request names, or
+    /// else the front one.
     static func newSession(_ request: NewSession, home: URL, feed: RemoteSessionFeed) -> Result<SessionCreated, RemoteError> {
+        let chosen = request.windowID.flatMap(window(id:))
         if let folderID = request.folderID {
-            return newSession(folderID: folderID, feed: feed)
+            return newSession(folderID: folderID, in: chosen, feed: feed)
         }
         let windows = NSApp.windows.compactMap { $0 as? TerminalWindow }
-        guard let host = windows.first(where: \.isKeyWindow) ?? windows.first else {
+        guard let host = chosen ?? windows.first(where: \.isKeyWindow) ?? windows.first else {
             return .failure(RemoteError(code: .internal, message: "The Mac has no window to open a session in."))
         }
 
@@ -28,12 +30,12 @@ enum RemoteCommands {
         guard let url = RemoteFolders.resolve(path, home: home) else {
             return .failure(RemoteError(code: .notFound, message: "That folder isn't inside the Mac's home folder for devices."))
         }
-        // A folder already open in a sidebar is used as it is.
-        let open = windows.lazy.compactMap { window in
+        // A folder already open in a sidebar is used as it is, the chosen window's only.
+        let open = (chosen.map { [$0] } ?? windows).lazy.compactMap { window in
             window.folderSpace.folderIDs.first { UserTabFolderStore.shared[$0]?.url.standardizedFileURL == url }
         }.first
         guard let folderID = open ?? host.tabSidebarModel.openFolder(at: url),
-              let window = (windows.first { $0.folderSpace.folderIDs.contains(folderID) } ?? host)
+              let window = (([host] + windows).first { $0.folderSpace.folderIDs.contains(folderID) } ?? host)
                 .tabSidebarModel.newTab(inFolder: folderID) else {
             return .failure(RemoteError(code: .internal, message: "The Mac could not open a session."))
         }
@@ -43,7 +45,7 @@ enum RemoteCommands {
 
     /// Opens a session in a folder, as the folder's New Session does, so the agent starts
     /// in it as in any new tab. Only folders holding a git checkout take one.
-    static func newSession(folderID: String, feed: RemoteSessionFeed) -> Result<SessionCreated, RemoteError> {
+    static func newSession(folderID: String, in chosen: TerminalWindow? = nil, feed: RemoteSessionFeed) -> Result<SessionCreated, RemoteError> {
         guard let uuid = UUID(uuidString: folderID), let folder = UserTabFolderStore.shared[uuid] else {
             return .failure(RemoteError(code: .notFound, message: "That folder is no longer open on the Mac."))
         }
@@ -51,9 +53,11 @@ enum RemoteCommands {
             return .failure(RemoteError(code: .badRequest, message: "No git repository in \(folder.abbreviatedPath)."))
         }
 
-        // The tab group the folder is open in, or else any.
+        // The chosen window if the folder is open in it, or else the tab group it is open
+        // in, or else any.
         let windows = NSApp.windows.compactMap { $0 as? TerminalWindow }
-        guard let host = windows.first(where: { $0.folderSpace.folderIDs.contains(uuid) }) ?? windows.first else {
+        let holding = ((chosen.map { [$0] } ?? []) + windows).first { $0.folderSpace.folderIDs.contains(uuid) }
+        guard let host = holding ?? windows.first else {
             return .failure(RemoteError(code: .internal, message: "The Mac has no window to open a session in."))
         }
         guard let window = host.tabSidebarModel.newTab(inFolder: uuid) else {
@@ -61,6 +65,14 @@ enum RemoteCommands {
         }
         feed.setNeedsUpdate()
         return .success(SessionCreated(id: feed.ids.id(for: window), folderID: folderID))
+    }
+
+    /// The window whose id is `id` (see `TabSidebarFolderSpace.id`), as the tab it shows.
+    static func window(id: String) -> TerminalWindow? {
+        guard let uuid = UUID(uuidString: id),
+              let window = NSApp.windows.lazy.compactMap({ $0 as? TerminalWindow }).first(where: { $0.folderSpace.id == uuid })
+        else { return nil }
+        return window.tabGroup?.selectedWindow as? TerminalWindow ?? window
     }
 
     /// Brings the session's tab to the front on the Mac.
