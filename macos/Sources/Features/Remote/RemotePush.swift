@@ -6,6 +6,8 @@ import CryptoKit
 /// Notification service with the developer's .p8 key; no server in between.
 ///
 /// Its own switch in Settings › Mobile, apart from the Mac's own bell notifications.
+/// None go out while someone is at this Mac, since they would see the change here,
+/// and none go to a device that is connected and showing the sessions already.
 @MainActor
 final class RemotePush: ObservableObject {
     private enum Keys {
@@ -13,6 +15,8 @@ final class RemotePush: ObservableObject {
         static let keyID = "RemotePushKeyID"
         static let teamID = "RemotePushTeamID"
         static let topic = "RemotePushTopic"
+        static let holdsWhileInUse = "RemotePushHoldsWhileInUse"
+        static let inUseMinutes = "RemotePushInUseMinutes"
     }
 
     @Published var isEnabled: Bool {
@@ -21,6 +25,18 @@ final class RemotePush: ObservableObject {
             restart()
         }
     }
+
+    /// No pushes while the Mac is in use: input within `inUseMinutes` and the screen
+    /// unlocked. On unless switched off.
+    @Published var holdsWhileInUse: Bool {
+        didSet { UserDefaults.ghostty.set(holdsWhileInUse, forKey: Keys.holdsWhileInUse) }
+    }
+
+    @Published var inUseMinutes: Int {
+        didSet { UserDefaults.ghostty.set(inUseMinutes, forKey: Keys.inUseMinutes) }
+    }
+
+    static let defaultInUseMinutes = 2
 
     @Published var keyID: String {
         didSet {
@@ -44,6 +60,12 @@ final class RemotePush: ObservableObject {
     @Published private(set) var hasKey: Bool
     @Published private(set) var lastResult: String?
 
+    /// Devices with the companion open and connected; the server keeps it current.
+    var connectedDevices: Set<String> = []
+
+    /// What the Mac knows about whether someone is at it. Replaceable for tests.
+    var presence: () -> MacPresence = MacPresence.current
+
     private let devices: RemoteDeviceStore
     private let ids: RemoteSessionIDs
     private let session: URLSession
@@ -65,8 +87,16 @@ final class RemotePush: ObservableObject {
         keyID = defaults.string(forKey: Keys.keyID) ?? ""
         teamID = defaults.string(forKey: Keys.teamID) ?? ""
         topic = defaults.string(forKey: Keys.topic) ?? Self.defaultTopic
+        holdsWhileInUse = defaults.object(forKey: Keys.holdsWhileInUse) == nil ? true : defaults.bool(forKey: Keys.holdsWhileInUse)
+        let minutes = defaults.integer(forKey: Keys.inUseMinutes)
+        inUseMinutes = minutes > 0 ? minutes : Self.defaultInUseMinutes
         hasKey = FileManager.default.fileExists(atPath: keyFile.path)
         restart()
+    }
+
+    /// Whether someone is at this Mac now, by the hold setting.
+    var isMacInUse: Bool {
+        holdsWhileInUse && presence().isInUse(within: inUseMinutes)
     }
 
     var isConfigured: Bool {
@@ -119,11 +149,16 @@ final class RemotePush: ObservableObject {
         lights = lights.filter { live.contains($0.key) }
     }
 
-    /// Sends `notice` to every device with a push token.
+    /// Sends `notice` to every device with a push token, unless someone is at this Mac;
+    /// a device that is connected is looking already and is skipped.
     func send(_ notice: RemotePushRules.Notice, title: String) {
         guard isConfigured else { return }
+        if isMacInUse {
+            lastResult = "Held while this Mac is in use"
+            return
+        }
         for device in devices.devices {
-            guard let token = device.pushToken else { continue }
+            guard let token = device.pushToken, !connectedDevices.contains(device.id) else { continue }
             Task { await deliver(notice, title: title, token: token, environment: device.pushEnvironment ?? .production, deviceID: device.id) }
         }
     }
@@ -164,6 +199,29 @@ final class RemotePush: ObservableObject {
         let jwt = try fresh.jwt(at: Date())
         credentials = fresh
         return jwt
+    }
+}
+
+/// What the Mac knows about whether someone is at it.
+struct MacPresence {
+    /// Seconds since the last keyboard, mouse or trackpad input.
+    var idle: TimeInterval
+    var screenLocked: Bool
+
+    /// Someone is at the Mac when there was input in the last `minutes` and the screen
+    /// is unlocked; a locked screen means they left, however recently.
+    func isInUse(within minutes: Int) -> Bool {
+        !screenLocked && idle < TimeInterval(minutes) * 60
+    }
+
+    static func current() -> MacPresence {
+        // Any input event, as CoreGraphics spells it.
+        let anyInput = CGEventType(rawValue: ~0)!
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+        // The key is only there while the screen is locked.
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any] ?? [:]
+        let locked = session["CGSSessionScreenIsLocked"] as? Bool ?? false
+        return MacPresence(idle: idle, screenLocked: locked)
     }
 }
 

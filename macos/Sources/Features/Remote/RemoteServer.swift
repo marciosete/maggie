@@ -82,7 +82,9 @@ final class RemoteService: ObservableObject {
     @Published private(set) var fingerprint: CertificateFingerprint?
 
     /// The devices connected now, by device id.
-    @Published private(set) var connectedDevices: Set<String> = []
+    @Published private(set) var connectedDevices: Set<String> = [] {
+        didSet { push.connectedDevices = connectedDevices }
+    }
 
     let devices: RemoteDeviceStore
     let pairing = RemotePairing()

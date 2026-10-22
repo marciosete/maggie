@@ -35,6 +35,25 @@ struct RemotePushRulesTests {
 }
 
 @Suite
+struct MacPresenceTests {
+    @Test func recentInputMeansSomeoneIsAtTheMac() {
+        #expect(MacPresence(idle: 5, screenLocked: false).isInUse(within: 2))
+        #expect(MacPresence(idle: 119, screenLocked: false).isInUse(within: 2))
+        #expect(!MacPresence(idle: 120, screenLocked: false).isInUse(within: 2))
+        #expect(!MacPresence(idle: 3600, screenLocked: false).isInUse(within: 2))
+    }
+
+    @Test func aLockedScreenMeansTheyLeft() {
+        #expect(!MacPresence(idle: 1, screenLocked: true).isInUse(within: 2))
+    }
+
+    @Test func theMinutesAreTheSetting() {
+        #expect(MacPresence(idle: 500, screenLocked: false).isInUse(within: 10))
+        #expect(!MacPresence(idle: 500, screenLocked: false).isInUse(within: 1))
+    }
+}
+
+@Suite
 struct RemotePushCredentialsTests {
     @Test func theTokenVerifiesWithThePublicKey() throws {
         let key = P256.Signing.PrivateKey()
@@ -130,7 +149,17 @@ struct RemotePushDeliveryTests {
         push.keyID = "KEY1234567"
         push.teamID = "TEAM123456"
         push.topic = "com.marciosete.maggie.mobile"
+        // Whoever runs the tests is at the Mac; these look at a Mac left an hour ago.
+        push.presence = { MacPresence(idle: 3600, screenLocked: false) }
+        // The settings persist between tests, so each starts from the defaults.
+        push.holdsWhileInUse = true
+        push.inUseMinutes = RemotePush.defaultInUseMinutes
         return Fixture(push: push, store: store, deviceID: device.id, directory: directory)
+    }
+
+    /// Long enough for a push that was going to be sent to reach the stand-in.
+    private func settle() async {
+        try? await Task.sleep(for: .milliseconds(200))
     }
 
     private func waitFor(_ condition: () -> Bool) async {
@@ -174,6 +203,67 @@ struct RemotePushDeliveryTests {
         push.send(RemotePushRules.Notice(session: "S1", light: .clean), title: "Done thing")
         await waitFor { store.device(id: deviceID)?.pushToken == nil }
         #expect(store.device(id: deviceID)?.pushToken == nil)
+    }
+
+    @Test func nothingIsSentWhileSomeoneIsAtTheMac() async throws {
+        FakeAPNs.status = 200
+        FakeAPNs.requests = []
+        let fixture = try makePush()
+        let push = fixture.push
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        push.presence = { MacPresence(idle: 10, screenLocked: false) }
+
+        push.send(RemotePushRules.Notice(session: "S1", light: .waiting), title: "Fix the build")
+        await settle()
+        #expect(FakeAPNs.requests.isEmpty)
+        #expect(push.lastResult == "Held while this Mac is in use")
+
+        // Switched off, being at the Mac no longer matters.
+        push.holdsWhileInUse = false
+        defer { push.holdsWhileInUse = true }
+        push.send(RemotePushRules.Notice(session: "S1", light: .waiting), title: "Fix the build")
+        await waitFor { !FakeAPNs.requests.isEmpty }
+        #expect(FakeAPNs.requests.count == 1)
+    }
+
+    @Test func theHoldLiftsOnceTheMacIsLeft() async throws {
+        FakeAPNs.status = 200
+        FakeAPNs.requests = []
+        let fixture = try makePush()
+        let push = fixture.push
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        push.inUseMinutes = 5
+
+        push.presence = { MacPresence(idle: 299, screenLocked: false) }
+        push.send(RemotePushRules.Notice(session: "S1", light: .waiting), title: "Fix the build")
+        await settle()
+        #expect(FakeAPNs.requests.isEmpty)
+
+        push.presence = { MacPresence(idle: 30, screenLocked: true) }
+        push.send(RemotePushRules.Notice(session: "S1", light: .waiting), title: "Fix the build")
+        await waitFor { !FakeAPNs.requests.isEmpty }
+        #expect(FakeAPNs.requests.count == 1)
+    }
+
+    @Test func aConnectedDeviceIsNotNotified() async throws {
+        FakeAPNs.status = 200
+        FakeAPNs.requests = []
+        let fixture = try makePush()
+        let (push, store) = (fixture.push, fixture.store)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let (ipad, _) = store.add(name: "iPad")
+        store.update(id: ipad.id) {
+            $0.pushToken = "feedface9876"
+            $0.pushEnvironment = .sandbox
+        }
+        push.connectedDevices = [fixture.deviceID]
+        #expect(store.devices.count == 2)
+        #expect(store.device(id: ipad.id)?.pushToken == "feedface9876")
+
+        push.send(RemotePushRules.Notice(session: "S1", light: .waiting), title: "Fix the build")
+        await waitFor { !FakeAPNs.requests.isEmpty }
+        await settle()
+        #expect(FakeAPNs.requests.map { $0.0.url?.lastPathComponent } == ["feedface9876"])
     }
 
     @Test func nothingIsSentWithoutAKey() throws {

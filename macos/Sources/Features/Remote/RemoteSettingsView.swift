@@ -150,6 +150,11 @@ struct RemotePushSettings: View {
     var body: some View {
         Section {
             Toggle("Notify devices when a session waits or finishes", isOn: $push.isEnabled)
+            Toggle("Hold them while this Mac is in use", isOn: $push.holdsWhileInUse)
+            Stepper(value: $push.inUseMinutes, in: 1...60) {
+                Text("In use means input in the last \(push.inUseMinutes) min")
+            }
+            .disabled(!push.holdsWhileInUse)
             TextField("Key ID", text: $push.keyID)
             TextField("Team ID", text: $push.teamID)
             TextField("App Bundle ID", text: $push.topic)
@@ -165,7 +170,7 @@ struct RemotePushSettings: View {
         } header: {
             Text("Push Notifications")
         } footer: {
-            Text("Create an APNs key in your Apple developer account and choose its .p8 here. These pushes are apart from the Mac's own notifications.")
+            Text("Create an APNs key in your Apple developer account and choose its .p8 here. These pushes are apart from the Mac's own notifications. A device that is connected with the companion open is never notified; it shows the change already.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
