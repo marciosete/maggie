@@ -69,6 +69,25 @@ final class SessionBoardSettings: ObservableObject {
 
     private static let modeKey = "SessionBoardMode"
     private static let colorLabelsKey = "SessionBoardColorLabels"
+    private static let collapsedKey = "SessionBoardCollapsedColumns"
+
+    /// The columns folded to a strip with their name down it, so the ones being worked
+    /// in have the room. Shared by every window, like the columns.
+    @Published private(set) var collapsed: Set<String> {
+        didSet { defaults.set(collapsed.sorted(), forKey: Self.collapsedKey) }
+    }
+
+    func isCollapsed(_ id: String) -> Bool {
+        collapsed.contains(id)
+    }
+
+    func setCollapsed(_ id: String, _ isCollapsed: Bool) {
+        if isCollapsed { collapsed.insert(id) } else { collapsed.remove(id) }
+    }
+
+    func toggleCollapsed(_ id: String) {
+        setCollapsed(id, !isCollapsed(id))
+    }
 
     /// What each color means on the board, such as Red for Urgent, named by hand.
     @Published private(set) var colorLabels: [TerminalTabColor: String] = [:] {
@@ -116,6 +135,7 @@ final class SessionBoardSettings: ObservableObject {
         let saved = defaults.data(forKey: Self.columnsKey)
             .flatMap { try? JSONDecoder().decode([SessionBoardColumn].self, from: $0) }
         columns = saved.flatMap { $0.isEmpty ? nil : $0 } ?? Self.defaultColumns
+        collapsed = Set(defaults.stringArray(forKey: Self.collapsedKey) ?? [])
     }
 
     /// The column a session saved in `id` shows in: that one while it exists, else the
@@ -140,6 +160,7 @@ final class SessionBoardSettings: ObservableObject {
     func removeColumn(_ id: String) -> String? {
         guard columns.count > 1, let index = columns.firstIndex(where: { $0.id == id }) else { return nil }
         columns.remove(at: index)
+        collapsed.remove(id)
         return columns[max(0, index - 1)].id
     }
 

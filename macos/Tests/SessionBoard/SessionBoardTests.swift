@@ -76,9 +76,30 @@ struct SessionBoardTests {
     @Test func everyColumnIconIsASymbol() {
         let icons = SessionBoardSettings.icons
         #expect(Set(icons).count == icons.count)
-        for icon in icons + SessionBoardSettings.defaultColumns.map(\.icon) {
+        for icon in icons + SessionBoardSettings.defaultColumns.map(\.icon) + [SessionBoardView.collapseSymbol] {
             #expect(NSImage(systemSymbolName: icon, accessibilityDescription: nil) != nil, "\(icon)")
         }
+    }
+
+    /// A column folds and opens again; folded columns are remembered, and a removed
+    /// column is forgotten.
+    @Test func collapsedColumnsAreSavedAndGoWithTheirColumn() {
+        let defaults = UserDefaults(suiteName: "SessionBoardTests-\(UUID().uuidString)")!
+        let settings = SessionBoardSettings(defaults: defaults)
+        #expect(settings.collapsed.isEmpty)
+
+        settings.toggleCollapsed("done")
+        settings.setCollapsed("todo", true)
+        #expect(settings.isCollapsed("done"))
+        #expect(settings.isCollapsed("todo"))
+        #expect(!settings.isCollapsed("in-progress"))
+        #expect(SessionBoardSettings(defaults: defaults).collapsed == ["done", "todo"])
+
+        settings.toggleCollapsed("done")
+        #expect(!settings.isCollapsed("done"))
+        _ = settings.removeColumn("todo")
+        #expect(settings.collapsed.isEmpty)
+        #expect(SessionBoardSettings(defaults: defaults).collapsed.isEmpty)
     }
 
     @Test func anEmptyFilterShowsEverything() {

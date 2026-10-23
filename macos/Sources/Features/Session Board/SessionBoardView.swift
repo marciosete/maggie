@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 /// work items, kept by hand like a kanban board; the sessions of the window's sidebar;
 /// or both together, each session that is linked to an item under it, in its column.
 /// Dragging a card moves it to another column or another place in its own; nothing
-/// else moves it.
+/// else moves it. A column folds to a strip with its name down it, so the columns being
+/// worked in have the room; clicking the strip opens it again.
 struct SessionBoardView: View {
     @ObservedObject var model: TabSidebarModel
     @ObservedObject var settings = SessionBoardSettings.shared
@@ -36,6 +37,9 @@ struct SessionBoardView: View {
     }
 
     static let columnWidth: CGFloat = 280
+    static let collapsedColumnWidth: CGFloat = 36
+
+    static let collapseSymbol = "arrow.right.and.line.vertical.and.arrow.left"
 
     private var tabs: [TabSidebarModel.Tab] { model.boardTabs }
 
@@ -52,7 +56,11 @@ struct SessionBoardView: View {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(settings.columns) { column in
-                        lane(column, content: content)
+                        if settings.isCollapsed(column.id) {
+                            collapsedLane(column, content: content)
+                        } else {
+                            lane(column, content: content)
+                        }
                     }
                 }
                 .padding(14)
@@ -138,17 +146,47 @@ struct SessionBoardView: View {
 
     // MARK: Lanes
 
-    private func lane(_ column: SessionBoardColumn, content: SessionBoardContent) -> some View {
-        let color = Color(nsColor: column.displayColor)
+    /// A column's cards, and the ones the search and filters leave shown.
+    private struct Lane {
+        var items: [WorkItem]
+        var sessions: [TabSidebarModel.Tab]
+        var shownItems: [WorkItem]
+        var shownSessions: [TabSidebarModel.Tab]
+
+        var total: Int { items.count + sessions.count }
+        var shown: Int { shownItems.count + shownSessions.count }
+    }
+
+    private func cards(in column: SessionBoardColumn, content: SessionBoardContent) -> Lane {
         // Every column stays; filtered by status, only the picked ones keep their cards.
         let showsColumn = model.boardFilter.shows(column: column.id)
         let items = content.items(in: column.id)
         let sessions = content.sessions(in: column.id)
-        let shownItems = showsColumn ? items.filter { matches($0, sessions: content.sessions(of: $0.id)) } : []
-        let shownSessions = showsColumn ? sessions.filter(matches) : []
-        let total = items.count + sessions.count
-        let shown = shownItems.count + shownSessions.count
-        let isNarrowed = isSearching || model.boardFilter.isActive
+        return Lane(
+            items: items,
+            sessions: sessions,
+            shownItems: showsColumn ? items.filter { matches($0, sessions: content.sessions(of: $0.id)) } : [],
+            shownSessions: showsColumn ? sessions.filter(matches) : [])
+    }
+
+    private var isNarrowed: Bool { isSearching || model.boardFilter.isActive }
+
+    private func count(_ lane: Lane) -> some View {
+        Text(isNarrowed ? "\(lane.shown) / \(lane.total)" : "\(lane.total)")
+            .font(.system(size: 10, weight: .medium))
+            .monospacedDigit()
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.primary.opacity(0.08)))
+    }
+
+    private func lane(_ column: SessionBoardColumn, content: SessionBoardContent) -> some View {
+        let color = Color(nsColor: column.displayColor)
+        let lane = cards(in: column, content: content)
+        let shownItems = lane.shownItems
+        let shownSessions = lane.shownSessions
+        let total = lane.total
+        let shown = lane.shown
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: column.icon)
@@ -156,17 +194,25 @@ struct SessionBoardView: View {
                 Text(column.label)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text(isNarrowed ? "\(shown) / \(total)" : "\(total)")
-                    .font(.system(size: 10, weight: .medium))
-                    .monospacedDigit()
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.primary.opacity(0.08)))
+                count(lane)
                 Spacer()
+                Button {
+                    collapse(column.id)
+                } label: {
+                    Image(systemName: Self.collapseSymbol)
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .help("Collapse \(column.label)")
+                .accessibilityLabel("Collapse \(column.label)")
             }
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
             .frame(height: 38)
 
             Divider()
@@ -216,6 +262,63 @@ struct SessionBoardView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.08)))
         // Dropped anywhere else in the column, a card goes to its end.
         .onDrop(of: [.plainText], delegate: dropDelegate(.init(column: column.id, before: nil)))
+    }
+
+    /// A collapsed column: a strip as tall as the others with the column's icon, how
+    /// many cards it holds and its name read downwards. Clicking it opens the column;
+    /// a card dropped on it goes to its end.
+    private func collapsedLane(_ column: SessionBoardColumn, content: SessionBoardContent) -> some View {
+        let color = Color(nsColor: column.displayColor)
+        let lane = cards(in: column, content: content)
+        let isDropTarget = dragging != nil && dropTarget == .init(column: column.id, before: nil)
+        return Button {
+            expand(column.id)
+        } label: {
+            VStack(spacing: 0) {
+                Image(systemName: column.icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(color)
+                    .frame(height: 38)
+                Divider()
+                count(lane)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 10)
+                VerticalText(column.label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.top, 10)
+                Spacer(minLength: 0)
+            }
+            .frame(width: Self.collapsedColumnWidth)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(color.opacity(column.color == .none ? 0.03 : 0.05)))
+        .overlay(alignment: .top) {
+            UnevenRoundedRectangle(topLeadingRadius: 10, topTrailingRadius: 10)
+                .fill(color.opacity(0.75))
+                .frame(height: 2)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isDropTarget ? color : Color.primary.opacity(0.08), lineWidth: isDropTarget ? 2 : 1))
+        .help("Expand \(column.label)")
+        .accessibilityLabel("\(column.label), collapsed, \(lane.total) cards")
+        .accessibilityHint("Expands the column")
+        .onDrop(of: [.plainText], delegate: dropDelegate(.init(column: column.id, before: nil)))
+    }
+
+    private func collapse(_ column: String) {
+        // Folding a column ends adding to it, keeping what was typed as a card.
+        if addingIn == column { addCard(to: column, keepsAdding: false) }
+        withAnimation(.easeInOut(duration: 0.18)) { settings.setCollapsed(column, true) }
+    }
+
+    private func expand(_ column: String) {
+        withAnimation(.easeInOut(duration: 0.18)) { settings.setCollapsed(column, false) }
     }
 
     @ViewBuilder
@@ -1120,5 +1223,40 @@ private struct SessionBoardIconPicker: View {
             }
         }
         .padding(10)
+    }
+}
+
+/// Text read downwards, as a collapsed column's name: it takes as much height as the
+/// text is wide, and as much width as it is tall.
+struct VerticalText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Turned {
+            Text(text)
+                .lineLimit(1)
+                .fixedSize()
+                .rotationEffect(.degrees(90))
+        }
+    }
+
+    /// Lays its one child out with its width and height swapped, so a child turned a
+    /// quarter by `rotationEffect`, which doesn't change its layout, fits where it shows.
+    private struct Turned: Layout {
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            guard let child = subviews.first else { return .zero }
+            let size = child.sizeThatFits(ProposedViewSize(width: proposal.height, height: proposal.width))
+            return CGSize(width: size.height, height: size.width)
+        }
+
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            guard let child = subviews.first else { return }
+            let size = child.sizeThatFits(ProposedViewSize(width: proposal.height, height: proposal.width))
+            child.place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: ProposedViewSize(size))
+        }
     }
 }
