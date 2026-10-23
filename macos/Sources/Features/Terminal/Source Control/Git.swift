@@ -131,16 +131,19 @@ enum Git {
 
     /// Reads the status of a repository. Returns nil if git fails.
     static func status(of repository: Repository) -> GitStatus? {
-        guard let output = run(
-            ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],
-            in: repository.root
-        ) else { return nil }
+        try? readStatus(of: repository).get()
+    }
 
-        var status = parseStatus(output)
-        if status.upstream == nil, repository.isLinkedWorktree {
-            compare(&status, withMainCheckoutOf: repository)
-        }
-        return status
+    /// Reads the status of a repository, or why git couldn't.
+    static func readStatus(of repository: Repository) -> Result<GitStatus, Failure> {
+        read(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], in: repository.root)
+            .map { output in
+                var status = parseStatus(output)
+                if status.upstream == nil, repository.isLinkedWorktree {
+                    compare(&status, withMainCheckoutOf: repository)
+                }
+                return status
+            }
     }
 
     /// Counts a worktree's commits against the branch of the main checkout, which they
@@ -453,16 +456,31 @@ enum Git {
             isLinkedWorktree: isLinkedWorktree)
     }
 
+    /// Why git couldn't do what was asked, in its own words where it had any.
+    struct Failure: Error, Hashable {
+        let message: String
+    }
+
+    /// How long a read of the repository may take. Reads finish in well under a second;
+    /// one that takes this long is stuck, and giving up on it keeps whatever waits on it
+    /// going, such as the source control panel.
+    static let readTimeout: TimeInterval = 60
+
     /// Runs git and returns its output, or nil if it fails.
     ///
     /// `--no-optional-locks` stops `git status` from rewriting the index, so reading
     /// the status never changes the repository (and never triggers our own watcher).
     private static func run(_ arguments: [String], in directory: URL) -> String? {
-        let result = execute(arguments, in: directory, writes: false)
-        return result.succeeded ? result.output : nil
+        try? read(arguments, in: directory).get()
     }
 
-    private struct Execution {
+    /// Runs git and returns its output, or why it failed.
+    private static func read(_ arguments: [String], in directory: URL) -> Result<String, Failure> {
+        let result = execute(arguments, in: directory, writes: false)
+        return result.succeeded ? .success(result.output) : .failure(Failure(message: result.message))
+    }
+
+    struct Execution {
         let succeeded: Bool
         let output: String
         let error: String
@@ -479,11 +497,6 @@ enum Git {
     private static func execute(_ arguments: [String], in directory: URL, writes: Bool) -> Execution {
         guard let executableURL else { return Execution(succeeded: false, output: "", error: "git not found") }
 
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = (writes ? [] : ["--no-optional-locks"]) + arguments
-        process.currentDirectoryURL = directory
-
         var environment = ProcessInfo.processInfo.environment
         if writes {
             environment["GIT_EDITOR"] = "true"
@@ -495,37 +508,89 @@ enum Git {
         for key in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
             environment[key] = nil
         }
-        process.environment = environment
 
-        let output = Pipe()
-        process.standardOutput = output
-        // What a write says when it fails is shown to the user. It goes to a file, as a
-        // second pipe could fill up while the first is read.
-        let errorFile = writes
-            ? FileManager.default.temporaryDirectory.appendingPathComponent("ghostty-git-\(UUID().uuidString).err")
-            : nil
-        defer { errorFile.map { try? FileManager.default.removeItem(at: $0) } }
-        let errorHandle = errorFile.flatMap { file -> FileHandle? in
-            FileManager.default.createFile(atPath: file.path, contents: nil)
-            return try? FileHandle(forWritingTo: file)
-        }
-        process.standardError = errorHandle ?? FileHandle.nullDevice
+        return execute(
+            executableURL,
+            arguments: (writes ? [] : ["--no-optional-locks"]) + arguments,
+            in: directory,
+            environment: environment,
+            timeout: writes ? nil : readTimeout)
+    }
+
+    /// Runs a program and collects what it wrote. A program that doesn't exit within
+    /// `timeout` is killed and counts as failed.
+    ///
+    /// Its output goes to files rather than pipes: a program git starts, such as a hook's
+    /// background process, can inherit a pipe and hold it open long after git exits,
+    /// which a read to the pipe's end would wait on forever.
+    static func execute(
+        _ executableURL: URL,
+        arguments: [String],
+        in directory: URL,
+        environment: [String: String]? = nil,
+        timeout: TimeInterval?
+    ) -> Execution {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        if let environment { process.environment = environment }
+
+        let output = temporaryFile()
+        let error = temporaryFile()
+        process.standardOutput = output ?? FileHandle.nullDevice
+        process.standardError = error ?? FileHandle.nullDevice
+
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
 
         do {
             try process.run()
         } catch {
-            try? errorHandle?.close()
             return Execution(succeeded: false, output: "", error: error.localizedDescription)
         }
 
-        // Read before waiting so a large output can't fill the pipe and block git.
-        let data = output.fileHandleForReading.readDataToEndOfFile()
+        var timedOut = false
+        let deadline = timeout.map { DispatchTime.now() + $0 } ?? .distantFuture
+        if exited.wait(timeout: deadline) == .timedOut {
+            timedOut = true
+            kill(process.processIdentifier, SIGTERM)
+            if exited.wait(timeout: .now() + 2) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                exited.wait()
+            }
+        }
+        // The handler fires as the process ends; this settles its status.
         process.waitUntilExit()
-        try? errorHandle?.close()
-        let errorText = errorFile.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+
+        // Names the command for the user: `git status`, from the first argument that
+        // isn't an option.
+        let subcommand = arguments.first { !$0.hasPrefix("-") && !$0.contains(" ") }.map { " " + $0 } ?? ""
+        let command = executableURL.lastPathComponent + subcommand
+        let errorText = timedOut
+            ? "\(command) took more than \(Int((timeout ?? 0).rounded(.up)))s and was stopped"
+            : error.map(contents) ?? ""
+        let succeeded = !timedOut && process.terminationStatus == 0
         return Execution(
-            succeeded: process.terminationStatus == 0,
-            output: String(decoding: data, as: UTF8.self),
-            error: errorText)
+            succeeded: succeeded,
+            output: output.map(contents) ?? "",
+            error: !succeeded && errorText.isEmpty
+                ? "\(command) exited with status \(process.terminationStatus)"
+                : errorText)
+    }
+
+    /// An unnamed temporary file, gone when its handle is.
+    private static func temporaryFile() -> FileHandle? {
+        var template = Array(FileManager.default.temporaryDirectory.appendingPathComponent("ghostty-git-XXXXXX").path.utf8CString)
+        let descriptor = mkstemp(&template)
+        guard descriptor >= 0 else { return nil }
+        unlink(template)
+        return FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+    }
+
+    /// Everything written to a temporary file so far.
+    private static func contents(of file: FileHandle) -> String {
+        guard (try? file.seek(toOffset: 0)) != nil, let data = try? file.readToEnd() else { return "" }
+        return String(decoding: data, as: UTF8.self)
     }
 }

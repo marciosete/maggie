@@ -49,7 +49,15 @@ final class SourceControlPanelModel: ObservableObject {
         /// Waiting for the first `git status`.
         case loading(Git.Repository)
 
+        /// The first `git status` failed, for the reason git gave. It is retried.
+        case unavailable(Git.Repository, reason: String)
+
         case ready(Git.Repository, GitStatus)
+
+        var isReady: Bool {
+            if case .ready = self { return true }
+            return false
+        }
     }
 
     @Published private(set) var state: State = .noDirectory
@@ -75,7 +83,7 @@ final class SourceControlPanelModel: ObservableObject {
 
     private var isVisible = false
     private var monitor: GitRepositoryMonitor?
-    private var monitorCancellable: AnyCancellable?
+    private var monitorCancellables: Set<AnyCancellable> = []
     private var hookWatch: AnyCancellable?
     private var sessionCheckTimer: Timer?
 
@@ -180,12 +188,24 @@ final class SourceControlPanelModel: ObservableObject {
         let hookTracker = GitHookTracker.tracker(for: repository)
         self.hookTracker = hookTracker
         hookWatch = hookTracker.watch()
-        state = monitor.status.map { .ready(repository, $0) } ?? .loading(repository)
-        monitorCancellable = monitor.$status
+        state = monitor.status.map { .ready(repository, $0) }
+            ?? monitor.failure.map { .unavailable(repository, reason: $0.message) }
+            ?? .loading(repository)
+        monitorCancellables = []
+        monitor.$status
             .compactMap { $0 }
             .sink { [weak self] status in
                 self?.state = .ready(repository, status)
             }
+            .store(in: &monitorCancellables)
+        // Once a status has been read, it stays up while a later read fails.
+        monitor.$failure
+            .compactMap { $0 }
+            .sink { [weak self] failure in
+                guard let self, !self.state.isReady else { return }
+                self.state = .unavailable(repository, reason: failure.message)
+            }
+            .store(in: &monitorCancellables)
 
         // A shared monitor may already have a status, but check again in case the
         // panel was hidden while things changed.
@@ -193,7 +213,7 @@ final class SourceControlPanelModel: ObservableObject {
     }
 
     private func stopMonitoring() {
-        monitorCancellable = nil
+        monitorCancellables = []
         monitor = nil
         hookWatch = nil
         hookTracker = nil

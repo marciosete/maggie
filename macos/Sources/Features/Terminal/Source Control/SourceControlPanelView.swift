@@ -67,6 +67,9 @@ struct SourceControlPanelView: View {
                 .padding(.top, 20)
             Spacer(minLength: 0)
 
+        case .unavailable(let repository, let reason):
+            message("Can't read \(repository.root.lastPathComponent)", detail: reason)
+
         case .ready(_, let status):
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {

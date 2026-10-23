@@ -1,6 +1,7 @@
 import Combine
 import CoreServices
 import Foundation
+import OSLog
 
 /// Keeps the status of one repository up to date by watching its files.
 ///
@@ -14,6 +15,18 @@ final class GitRepositoryMonitor {
     /// The latest status, or nil until the first `git status` finishes.
     @Published private(set) var status: GitStatus?
 
+    /// Why the last `git status` failed, or nil once one succeeds. `status` keeps the
+    /// last one read.
+    @Published private(set) var failure: Git.Failure?
+
+    /// How long to wait before trying again after a `git status` fails: longer each
+    /// time, until it succeeds.
+    static let retryDelays: [TimeInterval] = [2, 5, 15, 30]
+
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.mitchellh.ghostty",
+        category: String(describing: GitRepositoryMonitor.self))
+
     private let queue = DispatchQueue(label: "com.mitchellh.ghostty.git-monitor", qos: .utility)
     private let queueKey = DispatchSpecificKey<Void>()
     private var stream: FSEventStreamRef?
@@ -21,6 +34,12 @@ final class GitRepositoryMonitor {
 
     private let lock = NSLock()
     private var refreshScheduled = false
+
+    /// How many times in a row `git status` has failed. Only touched on `queue`.
+    private var failures = 0
+
+    /// A retry is waiting to run. Only touched on `queue`.
+    private var retryScheduled = false
 
     // MARK: Shared Monitors
 
@@ -80,11 +99,39 @@ final class GitRepositoryMonitor {
             self.refreshScheduled = false
             self.lock.unlock()
 
-            guard let status = Git.status(of: self.repository) else { return }
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.status != status else { return }
-                self.status = status
+            switch Git.readStatus(of: self.repository) {
+            case .success(let status):
+                self.failures = 0
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if self.failure != nil { self.failure = nil }
+                    if self.status != status { self.status = status }
+                }
+
+            case .failure(let failure):
+                // A failure is usually passing, such as a lock or a worktree being
+                // moved, and nothing else may change in the repository to prompt
+                // another look, so keep trying.
+                let delay = Self.retryDelays[min(self.failures, Self.retryDelays.count - 1)]
+                self.failures += 1
+                Self.logger.error("git status of \(self.repository.root.path, privacy: .public) failed: \(failure.message, privacy: .public)")
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.failure != failure else { return }
+                    self.failure = failure
+                }
+                self.scheduleRetry(after: delay)
             }
+        }
+    }
+
+    /// Runs another `git status` after `delay`, unless one is already waiting to.
+    private func scheduleRetry(after delay: TimeInterval) {
+        guard !retryScheduled else { return }
+        retryScheduled = true
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            self.retryScheduled = false
+            self.setNeedsRefresh()
         }
     }
 
