@@ -421,6 +421,159 @@ struct VoiceAudioFormatTests {
     }
 }
 
+/// Apple's voice processing unit turns the rest of the Mac's sound down and takes over the
+/// microphone's gain for as long as it exists, not only while audio flows. v0.28 kept one
+/// engine for the life of the app and only stopped it on hang-up, so the Mac stayed at
+/// call volume, music and all, until the app quit. These hold the engine to letting go.
+///
+/// The tests that open the microphone need the test host allowed it. A Mac that hasn't
+/// decided is asked once, by whoever is running the tests; denied, they fail and say
+/// where to allow it, rather than skip and let a regression through unseen. The host is
+/// signed with the Apple Development identity so the answer outlives a rebuild.
+@Suite(.serialized)
+struct VoiceAudioEngineTests {
+    static func requireMicrophone() async throws {
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+        }
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        try #require(
+            status == .authorized,
+            "the test host (\(Bundle.main.bundleIdentifier ?? "?")) needs the microphone: allow it in System Settings › Privacy & Security › Microphone, then run the tests again")
+    }
+
+    @available(macOS 14.0, *)
+    @Test func otherAudioIsDuckedAsLittleAsAppleAllows() {
+        let config = VoiceAudioEngine.duckingConfiguration
+        #expect(config.duckingLevel == .min)
+        #expect(!config.enableAdvancedDucking.boolValue)
+    }
+
+    @Test func aMicrophoneGainThatMovedIsPutBackAndOneThatDidntIsLeftAlone() {
+        // Rounding in the HAL's float isn't a move; what voice processing or the user did is.
+        #expect(!VoiceAudioEngine.microphoneLevelMoved(from: 0.5, to: 0.5))
+        #expect(!VoiceAudioEngine.microphoneLevelMoved(from: 0.5, to: 0.505))
+        #expect(VoiceAudioEngine.microphoneLevelMoved(from: 0.5, to: 0.3))
+        #expect(VoiceAudioEngine.microphoneLevelMoved(from: 0.5, to: 0.75))
+        #expect(VoiceAudioEngine.microphoneLevelMoved(from: 1, to: 0))
+    }
+
+    @Test func theDefaultMicrophonesGainCanBeRead() throws {
+        // What the call remembers and puts back has to be readable on this Mac's input.
+        let device = try #require(VoiceDevices.defaultDevice(input: true))
+        let volume = try #require(VoiceDevices.inputVolume(of: device))
+        #expect((0...1).contains(volume))
+    }
+
+    @Test func stoppingWithoutACallIsHarmless() {
+        let audio = VoiceAudioEngine()
+        audio.stop()
+        audio.stop()
+        #expect(!audio.isCapturing)
+        #expect(!audio.isVoiceProcessing)
+        #expect(audio.engineForTesting == nil)
+        // Speech with no engine to play it is dropped, not crashed on.
+        audio.play(Data(count: 4800))
+        audio.flush()
+        audio.stopPlayback()
+        #expect(!audio.isPlaying)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func hangingUpLetsGoOfTheEngineAndItsVoiceProcessing() async throws {
+        try await Self.requireMicrophone()
+        let microphone = try #require(VoiceDevices.defaultDevice(input: true))
+        let gainBefore = VoiceDevices.inputVolume(of: microphone)
+        let audio = VoiceAudioEngine()
+        weak var engine: AVAudioEngine?
+        try autoreleasepool {
+            try audio.start(echoCancellation: true) { _ in }
+            engine = audio.engineForTesting
+        }
+        #expect(engine != nil)
+        #expect(audio.isCapturing)
+        if #available(macOS 14.0, *), audio.isVoiceProcessing {
+            #expect(audio.duckingLevel == .min)
+        }
+
+        autoreleasepool { audio.stop() }
+
+        #expect(!audio.isCapturing)
+        #expect(!audio.isVoiceProcessing)
+        #expect(audio.engineForTesting == nil)
+        for _ in 0..<100 where engine != nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(engine == nil, "the engine, and the voice processing unit it holds, outlived the call")
+
+        // The user's microphone gain is as it was: whatever the call did to it is undone.
+        if let gainBefore {
+            let gainAfter = try #require(VoiceDevices.inputVolume(of: microphone))
+            #expect(!VoiceAudioEngine.microphoneLevelMoved(from: gainBefore, to: gainAfter), "microphone gain \(gainBefore) became \(gainAfter)")
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func everyCallGetsAnEngineOfItsOwn() async throws {
+        try await Self.requireMicrophone()
+        let audio = VoiceAudioEngine()
+        var engines: [AVAudioEngine] = []
+        for _ in 0..<3 {
+            try audio.start(echoCancellation: true) { _ in }
+            let engine = try #require(audio.engineForTesting)
+            #expect(engines.allSatisfy { $0 !== engine })
+            #expect(engine.isRunning)
+            engines.append(engine)
+            audio.stop()
+            #expect(!engine.isRunning)
+            #expect(!engine.inputNode.isVoiceProcessingEnabled, "a hung-up engine must not keep voice processing")
+        }
+        #expect(engines.count == 3)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func startingAgainReplacesTheRunningEngine() async throws {
+        // Settings changes restart the engine mid-call; the one before must not linger.
+        try await Self.requireMicrophone()
+        let audio = VoiceAudioEngine()
+        try audio.start(echoCancellation: true) { _ in }
+        let first = try #require(audio.engineForTesting)
+        try audio.start(echoCancellation: false) { _ in }
+        let second = try #require(audio.engineForTesting)
+        #expect(first !== second)
+        #expect(!first.isRunning)
+        #expect(!first.inputNode.isVoiceProcessingEnabled)
+        #expect(second.isRunning)
+        #expect(!audio.isVoiceProcessing)
+
+        // And back on: the plain engine goes the same way.
+        try audio.start(echoCancellation: true) { _ in }
+        let third = try #require(audio.engineForTesting)
+        #expect(third !== second)
+        #expect(!second.isRunning)
+        #expect(third.isRunning)
+        audio.stop()
+        #expect(!third.isRunning)
+        #expect(!third.inputNode.isVoiceProcessingEnabled)
+    }
+}
+
+@Suite
+@MainActor
+struct LocalVoiceEndpointTests {
+    @Test(.timeLimit(.minutes(1)))
+    func hangingUpStopsTheMacsAudio() async throws {
+        // What the agent calls when the GPT-Live session ends, by request or not.
+        try await VoiceAudioEngineTests.requireMicrophone()
+        let endpoint = LocalVoiceEndpoint()
+        try endpoint.startCapture(muted: false) { _ in }
+        #expect(endpoint.isCapturing)
+        endpoint.stopCapture()
+        #expect(!endpoint.isCapturing)
+        #expect(!endpoint.isVoiceProcessing)
+    }
+}
+
 // MARK: - Previews
 
 @Suite

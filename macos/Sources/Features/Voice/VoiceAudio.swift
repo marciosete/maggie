@@ -50,19 +50,38 @@ enum VoiceAudioFormat {
 /// The microphone comes out as GPT-Live wants it: mono 16-bit PCM at 24 kHz, a tenth of
 /// a second at a time, on an audio thread. Speech goes in as the same PCM and plays as it
 /// arrives.
+///
+/// Each call gets an engine of its own, built by `start` and destroyed, whole, by `stop`.
+/// Apple's voice processing unit turns the rest of the Mac's sound down and takes over the
+/// microphone's gain for as long as the unit exists, not only while audio flows: an engine
+/// that is merely stopped keeps the unit, and the Mac stayed at call volume after the
+/// voice was hung up, until the app quit (v0.28). Nothing survives a hang-up now.
 final class VoiceAudioEngine: @unchecked Sendable {
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier!,
         category: String(describing: VoiceAudioEngine.self)
     )
 
-    private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
+    /// One call's audio: the engine and the nodes attached to it.
+    private struct Graph {
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
 
-    /// Where the microphone goes in the graph: nowhere audible. Voice processing wants
-    /// the microphone and the speaker on the same client-side format, and this gives the
-    /// microphone one (mono at the hardware rate) that the output is given too.
-    private let sink = AVAudioMixerNode()
+        /// Where the microphone goes in the graph: nowhere audible. Voice processing wants
+        /// the microphone and the speaker on the same client-side format, and this gives
+        /// the microphone one (mono at the hardware rate) that the output is given too.
+        let sink = AVAudioMixerNode()
+
+        init() {
+            engine.attach(player)
+            engine.attach(sink)
+            sink.outputVolume = 0
+        }
+    }
+
+    /// Only under `lock`; nil between calls.
+    private var graph: Graph?
+
     private let playerFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32, sampleRate: Double(VoiceAudioFormat.sampleRate), channels: 1, interleaved: false)!
     private var converter: AVAudioConverter?
@@ -106,10 +125,10 @@ final class VoiceAudioEngine: @unchecked Sendable {
     /// Called on the main thread when `isPlaying` changes.
     var onPlayingChanged: (@MainActor (Bool) -> Void)?
 
-    init() {
-        engine.attach(player)
-        engine.attach(sink)
-        sink.outputVolume = 0
+    init() {}
+
+    deinit {
+        if let graph = takeGraph() { Self.tearDown(graph) }
     }
 
     /// Whether the user has let the app use the microphone, asking if they haven't been.
@@ -117,8 +136,61 @@ final class VoiceAudioEngine: @unchecked Sendable {
         await VoicePermission.microphone.request() == .allowed
     }
 
+    /// A call's engine is running.
+    var isCapturing: Bool { currentGraph?.engine.isRunning ?? false }
+
+    /// A call's engine has Apple's voice processing on it. Between calls there is no engine,
+    /// so this is false, and the rest of the Mac's sound is its own again.
+    var isVoiceProcessing: Bool { currentGraph?.engine.inputNode.isVoiceProcessingEnabled ?? false }
+
+    /// How far the call's voice processing turns the rest of the Mac down; nil between
+    /// calls or without voice processing.
+    @available(macOS 14.0, *)
+    var duckingLevel: AVAudioVoiceProcessingOtherAudioDuckingConfiguration.Level? {
+        guard let input = currentGraph?.engine.inputNode, input.isVoiceProcessingEnabled else { return nil }
+        return input.voiceProcessingOtherAudioDuckingConfiguration.duckingLevel
+    }
+
+    /// The call's engine, for tests to hold weakly and see let go of.
+    var engineForTesting: AVAudioEngine? { currentGraph?.engine }
+
+    private var currentGraph: Graph? {
+        lock.lock(); defer { lock.unlock() }
+        return graph
+    }
+
+    private func takeGraph() -> Graph? {
+        lock.lock(); defer { lock.unlock() }
+        let taken = graph
+        graph = nil
+        return taken
+    }
+
     /// The aggregate device made for a microphone and speaker that aren't one device.
     private var aggregate: AudioDeviceID?
+
+    /// The microphone's gain as the user had it before the call, put back after it should
+    /// anything have moved it meanwhile. Voice processing may drive the input device's
+    /// gain for its own ends; the user's setting is theirs. Main thread only.
+    private var microphoneLevel: (device: AudioDeviceID, volume: Float)?
+
+    /// Whether a gain that was `before` the call and is `after` it has been moved: more
+    /// than a rounding error, as System Settings shows it.
+    static func microphoneLevelMoved(from before: Float, to after: Float) -> Bool {
+        abs(before - after) > 0.01
+    }
+
+    private static func rememberMicrophoneLevel(of input: AudioDeviceID?) -> (device: AudioDeviceID, volume: Float)? {
+        guard let device = input ?? VoiceDevices.defaultDevice(input: true),
+              let volume = VoiceDevices.inputVolume(of: device) else { return nil }
+        return (device, volume)
+    }
+
+    private static func restoreMicrophoneLevel(_ level: (device: AudioDeviceID, volume: Float)) {
+        guard let now = VoiceDevices.inputVolume(of: level.device), microphoneLevelMoved(from: level.volume, to: now) else { return }
+        let restored = VoiceDevices.setInputVolume(level.volume, of: level.device)
+        logger.notice("microphone gain moved from \(level.volume) to \(now) during the call; put back: \(restored)")
+    }
 
     /// Starts the engine both ways, on the given devices (nil for the system's defaults),
     /// calling `onChunk` off the main thread with each chunk of microphone audio.
@@ -131,7 +203,6 @@ final class VoiceAudioEngine: @unchecked Sendable {
         } catch where echoCancellation {
             // Voice processing refused this hardware; the plain engine is better than none.
             Self.logger.warning("voice processing couldn't start (\(String(describing: error), privacy: .public)); going without")
-            stop()
             try start(voiceProcessing: false, inputDevice: inputDevice, outputDevice: outputDevice, onChunk: onChunk)
         }
     }
@@ -140,15 +211,50 @@ final class VoiceAudioEngine: @unchecked Sendable {
         voiceProcessing: Bool, inputDevice: AudioDeviceID?, outputDevice: AudioDeviceID?,
         onChunk: @escaping @Sendable (Data) -> Void
     ) throws {
-        let input = engine.inputNode
-        if voiceProcessing != input.isVoiceProcessingEnabled {
+        // Never two engines: the one before, if any, goes first, voice processing and all.
+        stop()
+        for attempt in 1...Self.startAttempts {
+            let graph = Graph()
+            lock.lock()
+            self.graph = graph
+            lock.unlock()
             do {
-                try input.setVoiceProcessingEnabled(voiceProcessing)
+                try build(graph, voiceProcessing: voiceProcessing, inputDevice: inputDevice, outputDevice: outputDevice, onChunk: onChunk)
+                return
+            } catch {
+                // Half-built, the engine would still hold the voice processing unit.
+                stop()
+                guard attempt < Self.startAttempts else { throw error }
+                Self.logger.notice("audio engine wouldn't start (\(String(describing: error), privacy: .public)); trying again")
+                Thread.sleep(forTimeInterval: Self.startRetryInterval)
+            }
+        }
+    }
+
+    /// Right after an engine is torn down, CoreAudio can report the hardware's format as
+    /// nothing for a moment while it lets the old units go, and a new engine refuses to
+    /// start (-10875, "IsFormatSampleRateAndChannelCountValid(outputHWFormat)", seen when
+    /// echo cancellation was switched off mid-call). A few tries, a moment apart, see it
+    /// through; a Mac with no microphone at all fails after a second, as before.
+    static let startAttempts = 10
+    static let startRetryInterval: TimeInterval = 0.1
+
+    private func build(
+        _ graph: Graph, voiceProcessing: Bool, inputDevice: AudioDeviceID?, outputDevice: AudioDeviceID?,
+        onChunk: @escaping @Sendable (Data) -> Void
+    ) throws {
+        let engine = graph.engine
+        let input = engine.inputNode
+        if voiceProcessing {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+                Self.limitDucking(on: input)
             } catch {
                 Self.logger.warning("voice processing unavailable: \(String(describing: error), privacy: .public)")
             }
         }
-        applyDevices(input: inputDevice, output: outputDevice, voiceProcessing: input.isVoiceProcessingEnabled)
+        applyDevices(engine, input: inputDevice, output: outputDevice, voiceProcessing: input.isVoiceProcessingEnabled)
+        microphoneLevel = Self.rememberMicrophoneLevel(of: inputDevice)
 
         let hardware = input.outputFormat(forBus: 0)
         guard hardware.sampleRate > 0, hardware.channelCount > 0 else { throw Failure.noInput }
@@ -158,9 +264,9 @@ final class VoiceAudioEngine: @unchecked Sendable {
 
         // Microphone, mono, into a silent sink; speech into the mixer; both out in mono at
         // the microphone's rate, which is what voice processing insists on.
-        engine.connect(input, to: sink, format: mono)
-        engine.connect(sink, to: engine.mainMixerNode, format: mono)
-        engine.connect(player, to: engine.mainMixerNode, format: playerFormat)
+        engine.connect(input, to: graph.sink, format: mono)
+        engine.connect(graph.sink, to: engine.mainMixerNode, format: mono)
+        engine.connect(graph.player, to: engine.mainMixerNode, format: playerFormat)
         engine.connect(engine.mainMixerNode, to: engine.outputNode, format: mono)
         Self.logger.info("microphone \(hardware.sampleRate)Hz x\(hardware.channelCount), voice processing \(input.isVoiceProcessingEnabled)")
 
@@ -168,18 +274,27 @@ final class VoiceAudioEngine: @unchecked Sendable {
             self?.convert(buffer, with: converter, onChunk: onChunk)
         }
         engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            input.removeTap(onBus: 0)
-            throw error
-        }
-        player.play()
+        try engine.start()
+        graph.player.play()
+    }
+
+    /// How far voice processing may turn the rest of the Mac's sound down during a call:
+    /// as little as Apple allows. Its default is tuned for a phone call, and halved the
+    /// user's music and videos for as long as the voice was on (v0.28). Nothing is
+    /// settable before macOS 14; there the default stands.
+    static func limitDucking(on input: AVAudioInputNode) {
+        guard #available(macOS 14.0, *) else { return }
+        input.voiceProcessingOtherAudioDuckingConfiguration = duckingConfiguration
+    }
+
+    @available(macOS 14.0, *)
+    static var duckingConfiguration: AVAudioVoiceProcessingOtherAudioDuckingConfiguration {
+        AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
     }
 
     /// Voice processing is its own aggregate of an input device and an output device,
     /// set one each; the plain I/O unit takes one device, an aggregate when they differ.
-    private func applyDevices(input: AudioDeviceID?, output: AudioDeviceID?, voiceProcessing: Bool) {
+    private func applyDevices(_ engine: AVAudioEngine, input: AudioDeviceID?, output: AudioDeviceID?, voiceProcessing: Bool) {
         let size = UInt32(MemoryLayout<AudioDeviceID>.size)
         func set(_ unit: AudioUnit?, element: AudioUnitElement, _ device: AudioDeviceID) {
             guard let unit else { return }
@@ -198,13 +313,18 @@ final class VoiceAudioEngine: @unchecked Sendable {
         }
     }
 
+    /// Ends the call's audio and lets go of everything it held: the engine, Apple's voice
+    /// processing unit, and the aggregate device; and puts the microphone's gain back where
+    /// the user had it. Safe to call at any time, as often as wanted.
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        player.stop()
-        engine.stop()
+        if let graph = takeGraph() { Self.tearDown(graph) }
         if let aggregate {
             VoiceDevices.destroy(aggregate: aggregate)
             self.aggregate = nil
+        }
+        if let microphoneLevel {
+            self.microphoneLevel = nil
+            Self.restoreMicrophoneLevel(microphoneLevel)
         }
         lock.lock()
         pending.removeAll()
@@ -213,6 +333,31 @@ final class VoiceAudioEngine: @unchecked Sendable {
         playGeneration += 1
         lock.unlock()
         setPlaying(false)
+    }
+
+    /// Takes a call's engine apart so nothing of it outlives the call. Each step is one
+    /// more way the voice processing unit is let go of, should the one before it not be
+    /// enough: the unit is switched off on the stopped engine, the engine's graph is
+    /// reset and its nodes detached, and the engine itself is dropped on return.
+    private static func tearDown(_ graph: Graph) {
+        let engine = graph.engine
+        let input = engine.inputNode
+        input.removeTap(onBus: 0)
+        graph.player.stop()
+        engine.stop()
+        if input.isVoiceProcessingEnabled {
+            do {
+                try input.setVoiceProcessingEnabled(false)
+            } catch {
+                logger.warning("voice processing wouldn't switch off: \(String(describing: error), privacy: .public)")
+            }
+        }
+        engine.reset()
+        engine.disconnectNodeInput(engine.mainMixerNode)
+        engine.disconnectNodeInput(engine.outputNode)
+        engine.detach(graph.player)
+        engine.detach(graph.sink)
+        logger.info("audio engine torn down, voice processing \(input.isVoiceProcessingEnabled)")
     }
 
     /// The one device the engine runs on, or nil to leave it on the system's defaults.
@@ -272,7 +417,7 @@ final class VoiceAudioEngine: @unchecked Sendable {
     /// Plays `pcm` after what is already playing. The first of an utterance waits for a
     /// little more to arrive, so playback keeps ahead of the network.
     func play(_ pcm: Data) {
-        guard engine.isRunning, !pcm.isEmpty else { return }
+        guard let graph = currentGraph, graph.engine.isRunning, !pcm.isEmpty else { return }
         lock.lock()
         held.append(pcm)
         let starting = queued == 0
@@ -297,7 +442,8 @@ final class VoiceAudioEngine: @unchecked Sendable {
     }
 
     private func schedule(_ pcm: Data) {
-        guard let buffer = VoiceAudioFormat.buffer(from: pcm, format: playerFormat) else { return }
+        guard let graph = currentGraph, let buffer = VoiceAudioFormat.buffer(from: pcm, format: playerFormat) else { return }
+        let player = graph.player
         lock.lock()
         queued += 1
         bytesPlayed += pcm.count
@@ -324,8 +470,10 @@ final class VoiceAudioEngine: @unchecked Sendable {
         queued = 0
         held = Data()
         lock.unlock()
-        player.stop()
-        if engine.isRunning { player.play() }
+        if let graph = currentGraph {
+            graph.player.stop()
+            if graph.engine.isRunning { graph.player.play() }
+        }
         setPlaying(false)
     }
 

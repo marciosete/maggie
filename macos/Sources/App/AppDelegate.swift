@@ -501,6 +501,9 @@ class AppDelegate: NSObject,
 
         // The Mac only stays awake while we run, so it can't be left sleepless unseen.
         Caffeine.shared.stop()
+
+        // A voice call ends with the app: its microphone and voice processing go now.
+        VoiceAgent.shared.quit()
     }
 
     /// This is called when the application is already open and someone double-clicks the icon

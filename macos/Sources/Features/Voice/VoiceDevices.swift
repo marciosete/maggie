@@ -100,6 +100,37 @@ enum VoiceDevices {
         AudioHardwareDestroyAggregateDevice(aggregate)
     }
 
+    // MARK: Microphone level
+
+    /// The input device's gain, 0...1 as System Settings › Sound shows it; nil for a
+    /// device whose gain can't be read (one with no such control, or one that is gone).
+    static func inputVolume(of id: AudioDeviceID) -> Float? {
+        var address = inputVolumeAddress
+        guard AudioObjectHasProperty(id, &address) else { return nil }
+        var value: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value
+    }
+
+    /// Sets the input device's gain, 0...1. False when the device won't take it.
+    @discardableResult
+    static func setInputVolume(_ volume: Float, of id: AudioDeviceID) -> Bool {
+        var address = inputVolumeAddress
+        var settable: DarwinBoolean = false
+        guard AudioObjectHasProperty(id, &address),
+              AudioObjectIsPropertySettable(id, &address, &settable) == noErr, settable.boolValue else { return false }
+        var value = Float32(max(0, min(1, volume)))
+        let size = UInt32(MemoryLayout<Float32>.size)
+        return AudioObjectSetPropertyData(id, &address, 0, nil, size, &value) == noErr
+    }
+
+    private static var inputVolumeAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar, mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain)
+    }
+
     // MARK: Properties
 
     private static func string(of id: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {

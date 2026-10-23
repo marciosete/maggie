@@ -68,6 +68,10 @@ final class LocalVoiceEndpoint: VoiceAudioEndpoint {
 
     func setMuted(_ muted: Bool) { audio.isMuted = muted }
     func stopCapture() { audio.stop() }
+
+    /// The Mac's engine is running, and so may be holding Apple's voice processing.
+    var isCapturing: Bool { audio.isCapturing }
+    var isVoiceProcessing: Bool { audio.isVoiceProcessing }
     func play(_ pcm: Data) { audio.play(pcm) }
     func flushPlayback() { audio.flush() }
     func stopPlayback() { audio.stopPlayback() }
@@ -507,6 +511,15 @@ final class VoiceAgent: ObservableObject {
     func stop() {
         guard phase != .off else { return }
         closeSession(then: .off)
+    }
+
+    /// The app is quitting this instant: no goodbye, no socket close to wait on. The Mac's
+    /// audio is let go of now, so the microphone's gain is put back and nothing of Apple's
+    /// voice processing is left to the process's death.
+    func quit() {
+        endpoint.stopCapture()
+        localEndpoint.stopCapture()
+        wake.stop()
     }
 
     func toggleMute() {
