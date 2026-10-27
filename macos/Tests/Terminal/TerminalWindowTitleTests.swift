@@ -35,13 +35,13 @@ struct TerminalWindowTitleTests {
         #expect(window.title == "Fix the usage panel")
     }
 
-    @Test func inAFolderShowsTheFolderGroupThenTheFolderThenTheGroup() {
+    @Test func inAFolderShowsTheFoldersGroupThenTheFolderThenTheGroup() {
         let group = UserTabGroupStore.shared.create(name: "Sidebar")
         defer { UserTabGroupStore.shared.remove(group.id) }
         let folder = UserTabFolderStore.shared.create(path: "/Users/me/projects/ghostty")
         defer { UserTabFolderStore.shared.remove(folder.id) }
-        let folderGroup = UserTabFolderGroupStore.shared.create(name: "Work")
-        defer { UserTabFolderGroupStore.shared.remove(folderGroup.id) }
+        let folderGroup = UserTabGroupStore.shared.create(name: "Work")
+        defer { UserTabGroupStore.shared.remove(folderGroup.id) }
 
         let window = window()
         window.sessionTitle = "Fix the usage panel"

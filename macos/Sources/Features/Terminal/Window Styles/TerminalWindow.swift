@@ -284,9 +284,9 @@ class TerminalWindow: NSWindow {
         // The titlebar shows the folder's and the group's names, so it follows them being
         // renamed.
         groupNamesCancellable = UserTabGroupStore.shared.$groups
-            .combineLatest(UserTabFolderStore.shared.$folders, UserTabFolderGroupStore.shared.$groups)
-            .sink { [weak self] groups, folders, folderGroups in
-                self?.applySessionTitle(groups: groups, folders: folders, folderGroups: folderGroups)
+            .combineLatest(UserTabFolderStore.shared.$folders)
+            .sink { [weak self] groups, folders in
+                self?.applySessionTitle(groups: groups, folders: folders)
             }
 
         // This is fragile, but there doesn't seem to be an official API for customizing
@@ -664,19 +664,18 @@ class TerminalWindow: NSWindow {
 
     private var groupNamesCancellable: AnyCancellable?
 
-    /// Sets the window's title to the session's title, after the names of its folder
-    /// groups, its folder and its groups when it's in them, outermost first. The stores'
-    /// contents are passed while they are about to change to them.
+    /// Sets the window's title to the session's title, after the names of the groups its
+    /// folder is in, its folder and its own groups when it's in them, outermost first.
+    /// The stores' contents are passed while they are about to change to them.
     private func applySessionTitle(
         groups: [UUID: UserTabGroup] = UserTabGroupStore.shared.groups,
-        folders: [UUID: UserTabFolder] = UserTabFolderStore.shared.folders,
-        folderGroups: [UUID: UserTabFolderGroup] = UserTabFolderGroupStore.shared.groups
+        folders: [UUID: UserTabFolder] = UserTabFolderStore.shared.folders
     ) {
         guard let sessionTitle else { return }
         var parts: [String] = []
         let folder = userTabFolderID.flatMap { folders[$0] }
-        for id in UserTabFolderGroupStore.path(of: folder?.groupID, in: folderGroups) {
-            if let name = folderGroups[id]?.name, !name.isEmpty { parts.append(name) }
+        for id in UserTabGroupStore.path(of: folder?.groupID, in: groups) {
+            if let name = groups[id]?.name, !name.isEmpty { parts.append(name) }
         }
         if let folderName = folder?.name, !folderName.isEmpty {
             parts.append(folderName)

@@ -103,7 +103,6 @@ final class RemoteSessionFeed {
         .store(in: &cancellables)
         UserTabGroupStore.shared.$groups.sink { [weak self] _ in self?.setNeedsUpdate() }.store(in: &cancellables)
         UserTabFolderStore.shared.$folders.sink { [weak self] _ in self?.setNeedsUpdate() }.store(in: &cancellables)
-        UserTabFolderGroupStore.shared.$groups.sink { [weak self] _ in self?.setNeedsUpdate() }.store(in: &cancellables)
 
         // Titles and lights change without telling the sidebar's notifications; a cheap
         // poll catches them. Only changes are sent.
@@ -295,12 +294,6 @@ final class RemoteSessionFeed {
                     rows: sidebarRows(section.rows, context: context)))
             case .folder(let section):
                 return .folder(folder(section, context: context))
-            case .folderGroup(let section):
-                return .folderGroup(SidebarFolderGroup(
-                    id: section.group.id.uuidString,
-                    name: section.group.name,
-                    collapsed: section.group.isCollapsed,
-                    rows: sidebarRows(section.rows, context: context)))
             }
         }
     }

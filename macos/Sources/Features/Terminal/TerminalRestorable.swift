@@ -166,8 +166,9 @@ final class TerminalRestorableState: TerminalRestorable {
 
         // Restore the folders of the tab's sidebar with their groups, and the tab's own
         // folder. The sidebar model joins the folders of the tabs restored into one window.
+        // Folder groups from before a group could hold folders come back as groups.
         for group in sidebarFolderGroups {
-            UserTabFolderGroupStore.shared.register(group)
+            UserTabGroupStore.shared.register(group.group)
         }
         for folder in sidebarFolders {
             UserTabFolderStore.shared.register(folder)

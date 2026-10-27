@@ -30,7 +30,9 @@ extension TerminalRestorableState {
         let userTabFolder: UserTabFolder?
         let sidebarFolders: [UserTabFolder]?
 
-        // The folder groups those folders are in. Optional, like the folders.
+        // The folder groups those folders were in, from before a group could hold
+        // folders; they come back as groups. Optional, like the folders, and no longer
+        // written: `sidebarGroups` carries the groups now.
         let sidebarFolderGroups: [UserTabFolderGroup]?
 
         // MARK: - Session board
@@ -48,8 +50,9 @@ extension TerminalRestorableState {
         var windowID: UUID?
 
         // MARK: - Nested groups
-        // The groups the tab's group is in, outermost first, so a group of groups comes
-        // back whole. Optional, like the group; state saved before groups nested has none.
+        // The groups the tab's group is in, outermost first, and the groups the sidebar's
+        // folders are in, so a group of groups and a group of folders come back whole.
+        // Optional, like the group; state saved before groups nested has none.
         var sidebarGroups: [UserTabGroup]?
     }
 }
@@ -60,13 +63,13 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
         let folders = UserTabFolderStore.shared
         let sidebarFolders = window.map { $0.folderSpace.folderIDs.compactMap { folders[$0] } }
 
-        // Every folder's group and the groups that is in, so a group of folder groups
-        // comes back whole.
-        let folderGroups = UserTabFolderGroupStore.shared
-        var folderGroupIDs: [UUID] = []
+        // The groups the tab's group is in, and every folder's group with the groups that
+        // is in, so a group of groups and a group of folders come back whole.
+        let groups = UserTabGroupStore.shared
+        var groupIDs = groups.path(of: window?.userTabGroupID).dropLast().map { $0 }
         for folder in sidebarFolders ?? [] {
-            for groupID in folderGroups.path(of: folder.groupID) where !folderGroupIDs.contains(groupID) {
-                folderGroupIDs.append(groupID)
+            for groupID in groups.path(of: folder.groupID) where !groupIDs.contains(groupID) {
+                groupIDs.append(groupID)
             }
         }
         self.init(
@@ -79,12 +82,12 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
             speechVoiceID: window?.speechVoiceID,
             userTabFolder: folders[window?.userTabFolderID],
             sidebarFolders: sidebarFolders,
-            sidebarFolderGroups: folderGroupIDs.compactMap { UserTabFolderGroupStore.shared[$0] },
+            sidebarFolderGroups: nil,
             boardPlace: window?.boardPlace,
             workItemID: window?.workItemID,
             windowName: window?.folderSpace.name,
             windowID: window?.folderSpace.id,
-            sidebarGroups: UserTabGroupStore.shared.ancestors(of: window?.userTabGroupID),
+            sidebarGroups: groupIDs.compactMap { groups[$0] },
         )
     }
 }

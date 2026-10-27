@@ -132,12 +132,12 @@ struct RemoteSessionFeedTests {
         let group = UserTabGroup(name: "Reviews", color: .purple, isCollapsed: true)
         let folder = UserTabFolder(name: "ghostty", path: "/Users/me/ghostty")
         let empty = UserTabFolder(name: "notes", path: "/Users/me/notes")
-        let folderGroup = UserTabFolderGroup(name: "Work")
+        let folderGroup = UserTabGroup(name: "Work")
         let rows: [TabSidebarModel.Row] = [
             .tab(tab(0, title: "loose", light: .working)),
             .group(.init(group: group, tabs: [tab(1, title: "grouped", light: .waiting, groupID: group.id)])),
             .folder(.init(folder: folder, rows: [.tab(tab(2, title: "in folder", light: .pending, folderID: folder.id))])),
-            .folderGroup(.init(group: folderGroup, folders: [.init(folder: empty, rows: [])])),
+            .group(.init(group: folderGroup, rows: [.folder(.init(folder: empty, rows: []))])),
         ]
 
         var info = TabSidebarSessionInfo()
@@ -146,7 +146,7 @@ struct RemoteSessionFeedTests {
         info.checkout = Git.parseCheckout("/Users/me/ghostty\n/Users/me/ghostty/.git\n/Users/me/ghostty/.git\nmain")
         let snapshot = RemoteSessionFeed.snapshot(rows: rows, context: context(info: [2: info], git: ["/Users/me/ghostty"]))
 
-        #expect(snapshot.rows.map(\.id) == ["session-session-0", "group-\(group.id.uuidString)", "folder-\(folder.id.uuidString)", "folders-\(folderGroup.id.uuidString)"])
+        #expect(snapshot.rows.map(\.id) == ["session-session-0", "group-\(group.id.uuidString)", "folder-\(folder.id.uuidString)", "group-\(folderGroup.id.uuidString)"])
         #expect(snapshot.sessions.map(\.title) == ["loose", "grouped", "in folder"])
         #expect(snapshot.folders.map(\.name) == ["ghostty", "notes"])
         #expect(snapshot.folders.map(\.hasGit) == [true, false])

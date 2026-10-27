@@ -3,7 +3,8 @@ import Combine
 
 /// A directory opened in the tab sidebar. Sessions and groups of sessions live in it,
 /// and every session opened in it starts in its directory. Each `TerminalWindow` refers
-/// to its folder by `id`; a group is in the folder its members are in.
+/// to its folder by `id`; a group is in the folder its members are in. A folder can be
+/// in a group, which it refers to by `groupID`: a session in it is in that group too.
 struct UserTabFolder: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
@@ -12,7 +13,7 @@ struct UserTabFolder: Codable, Equatable, Identifiable {
     let path: String
     var isCollapsed: Bool
 
-    /// The folder group the folder is in, if any.
+    /// The group the folder is in, if any.
     var groupID: UUID?
 
     init(id: UUID = UUID(), name: String? = nil, path: String, isCollapsed: Bool = false, groupID: UUID? = nil) {
@@ -101,9 +102,14 @@ final class UserTabFolderStore: ObservableObject {
         folders[id] = nil
     }
 
+    /// The folders in the group, those in the groups inside it too.
+    func folders(inGroup groupID: UUID) -> [UserTabFolder] {
+        folders.values.filter { UserTabGroupStore.shared.isGroup($0.groupID, within: groupID) }
+    }
+
     /// Folder metadata is saved with each window's restorable state, so whenever it
     /// changes the windows showing the folder need to re-save.
-    fileprivate static func invalidateRestorableState(forFolder id: UUID) {
+    static func invalidateRestorableState(forFolder id: UUID) {
         for window in NSApp.windows {
             guard let window = window as? TerminalWindow, window.folderSpace.folderIDs.contains(id) else { continue }
             window.invalidateRestorableState()
@@ -111,16 +117,14 @@ final class UserTabFolderStore: ObservableObject {
     }
 }
 
-/// A named group of folders in the tab sidebar: a label the folders in it share, with
-/// nothing else to it. Each `UserTabFolder` refers to its group by `groupID`. A folder
-/// group can be in another folder group, which it refers to by `parentID`: a folder in it
-/// is in the group's parents too.
+/// A group of folders, as the sidebar had them before a group could hold folders. Saved
+/// state from then still carries them; each comes back as a group of the same id.
 struct UserTabFolderGroup: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
     var isCollapsed: Bool
 
-    /// The folder group this folder group is in, if any.
+    /// The folder group this folder group was in, if any.
     var parentID: UUID?
 
     init(id: UUID = UUID(), name: String, isCollapsed: Bool = false, parentID: UUID? = nil) {
@@ -129,104 +133,9 @@ struct UserTabFolderGroup: Codable, Equatable, Identifiable {
         self.isCollapsed = isCollapsed
         self.parentID = parentID
     }
-}
 
-/// The shared registry of all folder groups, like `UserTabGroupStore` for groups.
-final class UserTabFolderGroupStore: ObservableObject {
-    static let shared = UserTabFolderGroupStore()
-
-    @Published private(set) var groups: [UUID: UserTabFolderGroup] = [:]
-
-    private init() {}
-
-    subscript(id: UUID?) -> UserTabFolderGroup? {
-        guard let id else { return nil }
-        return groups[id]
-    }
-
-    /// Creates and registers a folder group, in `parentID`'s group when given.
-    func create(name: String, parentID: UUID? = nil) -> UserTabFolderGroup {
-        let group = UserTabFolderGroup(name: name, parentID: parentID)
-        groups[group.id] = group
-        return group
-    }
-
-    /// Registers a folder group decoded from saved state; the first registered wins.
-    func register(_ group: UserTabFolderGroup) {
-        guard groups[group.id] == nil else { return }
-        groups[group.id] = group
-    }
-
-    func update(_ id: UUID, _ body: (inout UserTabFolderGroup) -> Void) {
-        guard var group = groups[id] else { return }
-        body(&group)
-        guard group != groups[id] else { return }
-        groups[id] = group
-        // A folder in a group is in its parents too, so a change to a parent is saved by
-        // every folder under it.
-        for folder in UserTabFolderStore.shared.folders.values where isGroup(folder.groupID, within: id) {
-            UserTabFolderStore.invalidateRestorableState(forFolder: folder.id)
-        }
-    }
-
-    func remove(_ id: UUID) {
-        groups[id] = nil
-    }
-
-    /// Returns a default name for a new folder group that isn't already in use.
-    func nextDefaultName() -> String {
-        let existing = Set(groups.values.map(\.name))
-        var index = 1
-        while existing.contains("Folders \(index)") { index += 1 }
-        return "Folders \(index)"
-    }
-
-    /// The folder group `id` and the folder groups it is in, outermost first. Empty for
-    /// one the store doesn't know, and cut short at one it doesn't know or has seen already.
-    func path(of id: UUID?) -> [UUID] {
-        Self.path(of: id, in: groups)
-    }
-
-    /// `path(of:)` on `groups`, for a caller holding what the store is about to hold.
-    static func path(of id: UUID?, in groups: [UUID: UserTabFolderGroup]) -> [UUID] {
-        var path: [UUID] = []
-        var next = id
-        while let id = next, let group = groups[id], !path.contains(id) {
-            path.insert(id, at: 0)
-            next = group.parentID
-        }
-        return path
-    }
-
-    /// Whether `id` is `ancestorID`'s folder group or in it.
-    func isGroup(_ id: UUID?, within ancestorID: UUID) -> Bool {
-        path(of: id).contains(ancestorID)
-    }
-
-    /// The folder groups directly in `id`'s folder group.
-    func children(of id: UUID) -> [UserTabFolderGroup] {
-        groups.values.filter { $0.parentID == id }
-    }
-
-    /// Whether anything is in the folder group: a folder, or a folder group.
-    func isEmpty(_ id: UUID) -> Bool {
-        !UserTabFolderStore.shared.folders.values.contains(where: { $0.groupID == id })
-            && !groups.values.contains(where: { $0.parentID == id })
-    }
-
-    /// Takes out the folder group when nothing is in it, and then its parent when that
-    /// leaves nothing in it either.
-    func removeIfEmpty(_ id: UUID?) {
-        var next = id
-        while let id = next, let group = groups[id], isEmpty(id) {
-            groups[id] = nil
-            next = group.parentID
-        }
-    }
-
-    /// The names of the folder group and the folder groups it is in, outermost first,
-    /// joined as a path: `Clients › Acme`.
-    func pathName(of id: UUID) -> String {
-        path(of: id).compactMap { groups[$0]?.name }.joined(separator: " › ")
+    /// The group it is now.
+    var group: UserTabGroup {
+        UserTabGroup(id: id, name: name, isCollapsed: isCollapsed, parentID: parentID)
     }
 }

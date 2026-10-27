@@ -1,13 +1,14 @@
 import AppKit
 import Combine
 
-/// A user-created, named group of tabs shown in the tab sidebar.
+/// A user-created, named group in the tab sidebar, of tabs, of groups and of folders.
 ///
 /// This is unrelated to `NSWindowTabGroup`, which is AppKit's native grouping of
 /// windows into tabs. A `UserTabGroup` is a label that a subset of the tabs within
-/// a native tab group share. Each `TerminalWindow` refers to its group by `id`. A
-/// group can be in another group, which it refers to by `parentID`: a tab in it is in
-/// the group's parents too.
+/// a native tab group share. Each `TerminalWindow` refers to its group by `id`, and
+/// each `UserTabFolder` to the group it is in by `groupID`. A group can be in another
+/// group, which it refers to by `parentID`: a tab in it is in the group's parents too.
+/// A group that holds folders stays outside every folder.
 struct UserTabGroup: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
@@ -114,11 +115,15 @@ final class UserTabGroupStore: ObservableObject {
     }
 
     /// Group metadata is saved with each window's restorable state, so whenever it
-    /// changes the member windows need to re-save. A tab in a group is in its parents
-    /// too, so a change to a parent is saved by every tab under it.
+    /// changes the member windows need to re-save: the tabs in the group, and the tabs
+    /// whose sidebar shows a folder in it. A tab in a group is in its parents too, so a
+    /// change to a parent is saved by every tab under it.
     private static func invalidateRestorableState(forGroup id: UUID) {
+        let folders = UserTabFolderStore.shared
         for window in NSApp.windows {
-            guard let window = window as? TerminalWindow, shared.isGroup(window.userTabGroupID, within: id) else { continue }
+            guard let window = window as? TerminalWindow else { continue }
+            guard shared.isGroup(window.userTabGroupID, within: id)
+                || window.folderSpace.folderIDs.contains(where: { shared.isGroup(folders[$0]?.groupID, within: id) }) else { continue }
             window.invalidateRestorableState()
         }
     }

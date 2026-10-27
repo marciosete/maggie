@@ -142,13 +142,10 @@ struct TabSidebarView: View {
                 TabSidebarSession(model: model, tab: tab, group: nil, indent: 0)
 
             case .group(let section):
-                TabSidebarGroupSection(model: model, section: section, indent: 0)
+                TabSidebarGroupSection(model: model, section: section, indent: 0, insideFolder: false)
 
             case .folder(let section):
                 TabSidebarFolderSection(model: model, section: section, indent: 0)
-
-            case .folderGroup(let section):
-                TabSidebarFolderGroupSection(model: model, section: section, indent: 0)
             }
         }
     }
@@ -540,193 +537,6 @@ private struct TabSidebarFilterButton: View {
     }
 }
 
-// MARK: - Folder Group
-
-private struct TabSidebarFolderGroupSection: View {
-    @ObservedObject var model: TabSidebarModel
-    @ObservedObject private var settings = TabSidebarSettings.shared
-    let section: TabSidebarModel.FolderGroupSection
-
-    /// How far the folder group is set in, inside a folder group.
-    let indent: CGFloat
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: TabSidebarStyle.rowSpacing(settings.rowStyle)) {
-            TabSidebarFolderGroupHeader(model: model, section: section)
-                .padding(.leading, indent)
-
-            if !section.group.isCollapsed {
-                ForEach(section.rows) { row in
-                    switch row {
-                    case .folder(let folder):
-                        TabSidebarFolderSection(model: model, section: folder, indent: indent + TabSidebarStyle.indent)
-
-                    case .folderGroup(let group):
-                        TabSidebarFolderGroupSection(model: model, section: group, indent: indent + TabSidebarStyle.indent)
-
-                    case .tab, .group:
-                        // A folder group holds folders and folder groups only.
-                        EmptyView()
-                    }
-                }
-            }
-        }
-        .padding(.top, 4)
-    }
-}
-
-private struct TabSidebarFolderGroupHeader: View {
-    @ObservedObject var model: TabSidebarModel
-    let section: TabSidebarModel.FolderGroupSection
-
-    @State private var isHovering = false
-    @State private var placement: TabSidebarDropPlacement?
-    @FocusState private var fieldFocused: Bool
-
-    private var group: UserTabFolderGroup { section.group }
-    private var isEditing: Bool { model.editingFolderGroupID == group.id }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .bold))
-                .rotationEffect(.degrees(group.isCollapsed ? 0 : 90))
-                .foregroundStyle(.secondary)
-                .frame(width: 10)
-
-            Image(systemName: "rectangle.stack")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-
-            if isEditing {
-                TextField("Folder Group Name", text: $model.editingDraft)
-                    .textFieldStyle(.plain)
-                    .font(TabSidebarStyle.titleFont)
-                    .focused($fieldFocused)
-                    .onAppear { DispatchQueue.main.async { fieldFocused = true } }
-                    .onSubmit { model.commitEditing() }
-                    .onExitCommand { model.cancelEditing() }
-                    .onChange(of: fieldFocused) { focused in
-                        if !focused && isEditing { model.commitEditing() }
-                    }
-            } else {
-                Text(group.name)
-                    .font(TabSidebarStyle.titleFont.weight(.semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(Color.primary.opacity(0.85))
-            }
-
-            // The sessions in its folders, not the folders: empty ones count for nothing.
-            if group.isCollapsed {
-                Text("(\(section.tabs.count))")
-                    .font(TabSidebarStyle.titleFont)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 0)
-
-            // A collapsed folder group still says what its sessions are doing.
-            if group.isCollapsed && !(isHovering && !isEditing) {
-                if section.hasFinishedUnseen {
-                    TabSidebarUnseenDot()
-                }
-                if let light = section.claudeCodeLight, let color = light.tabColor.displayColor {
-                    Circle()
-                        .fill(Color(nsColor: color))
-                        .frame(width: 8, height: 8)
-                        .help(light.label)
-                }
-            }
-
-            if isHovering && !isEditing {
-                Button {
-                    model.presentOpenFolderPanel(inFolderGroup: group.id)
-                } label: {
-                    Image(systemName: "folder.badge.plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 16, height: 16)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Open Folder in Group…")
-            }
-        }
-        .padding(.horizontal, 6)
-        .frame(height: TabSidebarStyle.rowHeight)
-        .background(RoundedRectangle(cornerRadius: 6).fill(background))
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .onTapGesture {
-            guard !isEditing else { return }
-            withAnimation(.easeOut(duration: 0.15)) { model.toggleCollapsed(folderGroup: group.id) }
-        }
-        .overlay {
-            // A folder dropped on the group joins it.
-            if placement == .into {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
-            }
-        }
-        .overlay(alignment: placement == .after ? .bottom : .top) {
-            if placement == .before || placement == .after {
-                TabSidebarDropIndicator()
-            }
-        }
-        // Dragging the header moves the group with all its folders.
-        .onDrag {
-            NSItemProvider(object: TabSidebarDragState.shared.begin(folderGroup: group.id) as NSString)
-        }
-        .onDrop(of: [.plainText], delegate: TabSidebarDropDelegate(
-            model: model,
-            target: .folderGroup(group.id),
-            height: TabSidebarStyle.rowHeight,
-            placement: $placement))
-        .onReceive(TabSidebarDragState.shared.$endedDrags.dropFirst()) { _ in placement = nil }
-        .contextMenu { contextMenu }
-    }
-
-    private var background: Color {
-        if group.isCollapsed && section.containsSelectedTab { return Color.primary.opacity(0.14) }
-        if isHovering { return Color.primary.opacity(0.06) }
-        return .clear
-    }
-
-    @ViewBuilder
-    private var contextMenu: some View {
-        Button("Open Folder in Group…") { model.presentOpenFolderPanel(inFolderGroup: group.id) }
-        Button("Rename Folder Group…") { model.beginRename(folderGroup: group.id) }
-        Button(group.isCollapsed ? "Expand Folder Group" : "Collapse Folder Group") {
-            model.toggleCollapsed(folderGroup: group.id)
-        }
-        Divider()
-        // A folder group goes in another: not itself, the one it is in, or one inside it.
-        Button("Add Folder Group to New Group") { model.createFolderGroup(around: group.id) }
-            .help("Put the folder group in a new folder group where it is")
-        let store = UserTabFolderGroupStore.shared
-        let otherGroups = model.folderGroupsInWindow.filter {
-            $0.id != group.id && $0.id != group.parentID && !store.isGroup($0.id, within: group.id)
-        }
-        if !otherGroups.isEmpty {
-            Menu("Add Folder Group to Group") {
-                ForEach(otherGroups) { other in
-                    Button(store.pathName(of: other.id)) { model.add(folderGroup: group.id, toFolderGroup: other.id) }
-                }
-            }
-        }
-        if group.parentID != nil {
-            Button("Remove Folder Group from Group") { model.removeFolderGroupFromGroup(group.id) }
-        }
-        Divider()
-        TabSidebarMoveToWindowMenu(model: model, payload: .folderGroup(group.id), noun: "Folder Group")
-        Divider()
-        Button("Ungroup Folders") { model.ungroupFolders(group.id) }
-            .help("Dissolve the group, leaving what is in it where it is")
-        Button("Close Folder Group") { model.closeFolderGroup(group.id) }
-            .help("Close every folder in the group with its sessions")
-    }
-}
-
 // MARK: - Folder
 
 private struct TabSidebarFolderSection: View {
@@ -757,9 +567,9 @@ private struct TabSidebarFolderSection: View {
                         TabSidebarSession(model: model, tab: tab, group: nil, indent: indent + TabSidebarStyle.indent)
 
                     case .group(let group):
-                        TabSidebarGroupSection(model: model, section: group, indent: indent + TabSidebarStyle.indent)
+                        TabSidebarGroupSection(model: model, section: group, indent: indent + TabSidebarStyle.indent, insideFolder: true)
 
-                    case .folder, .folderGroup:
+                    case .folder:
                         // Folders don't nest.
                         EmptyView()
                     }
@@ -904,13 +714,14 @@ private struct TabSidebarFolderHeader: View {
             NSPasteboard.general.setString(folder.path, forType: .string)
         }
         Divider()
-        Button("Add Folder to New Group") { model.createFolderGroup(with: folder.id) }
-        let otherGroups = model.folderGroupsInWindow.filter { $0.id != folder.groupID }
+        // A folder goes in a group that is in no folder.
+        Button("Add Folder to New Group") { model.createGroup(withFolder: folder.id) }
+        let otherGroups = model.groupsForFoldersInWindow.filter { $0.id != folder.groupID }
         if !otherGroups.isEmpty {
             Menu("Add Folder to Group") {
                 ForEach(otherGroups) { group in
-                    Button(UserTabFolderGroupStore.shared.pathName(of: group.id)) {
-                        model.add(folder: folder.id, toFolderGroup: group.id)
+                    Button(UserTabGroupStore.shared.pathName(of: group.id)) {
+                        model.add(folder: folder.id, toGroup: group.id)
                     }
                 }
             }
@@ -938,9 +749,12 @@ private struct TabSidebarGroupSection: View {
     /// How far the group is set in, inside a folder or a group.
     let indent: CGFloat
 
+    /// Whether the group is in a folder, which is when it can't hold folders.
+    let insideFolder: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: TabSidebarStyle.rowSpacing(settings.rowStyle)) {
-            TabSidebarGroupHeader(model: model, section: section)
+            TabSidebarGroupHeader(model: model, section: section, insideFolder: insideFolder)
                 .padding(.leading, indent)
 
             if !section.group.isCollapsed {
@@ -950,11 +764,10 @@ private struct TabSidebarGroupSection: View {
                         TabSidebarSession(model: model, tab: tab, group: section.group, indent: indent + TabSidebarStyle.indent)
 
                     case .group(let group):
-                        TabSidebarGroupSection(model: model, section: group, indent: indent + TabSidebarStyle.indent)
+                        TabSidebarGroupSection(model: model, section: group, indent: indent + TabSidebarStyle.indent, insideFolder: insideFolder)
 
-                    case .folder, .folderGroup:
-                        // A group holds sessions and groups only.
-                        EmptyView()
+                    case .folder(let folder):
+                        TabSidebarFolderSection(model: model, section: folder, indent: indent + TabSidebarStyle.indent)
                     }
                 }
             }
@@ -966,6 +779,7 @@ private struct TabSidebarGroupSection: View {
 private struct TabSidebarGroupHeader: View {
     @ObservedObject var model: TabSidebarModel
     let section: TabSidebarModel.GroupSection
+    let insideFolder: Bool
 
     @State private var isHovering = false
     @State private var placement: TabSidebarDropPlacement?
@@ -1042,8 +856,8 @@ private struct TabSidebarGroupHeader: View {
             withAnimation(.easeOut(duration: 0.15)) { model.toggleCollapsed(group.id) }
         }
         .overlay {
-            // A tab or group dropped on the group joins it; a folder or folder group goes
-            // next to it.
+            // A tab or group dropped on the group joins it, and a folder too while the
+            // group is in no folder; otherwise it goes next to it.
             if placement == .into {
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(Color.accentColor, lineWidth: 2)
@@ -1054,13 +868,14 @@ private struct TabSidebarGroupHeader: View {
                 TabSidebarDropIndicator()
             }
         }
-        // Dragging the header moves the group with all its sessions.
+        // Dragging the header moves the group with everything in it.
         .onDrag {
-            NSItemProvider(object: TabSidebarDragState.shared.begin(group: group.id) as NSString)
+            NSItemProvider(object: TabSidebarDragState.shared.begin(
+                group: group.id, holdsFolders: model.holdsFolders(group: group.id)) as NSString)
         }
         .onDrop(of: [.plainText], delegate: TabSidebarDropDelegate(
             model: model,
-            target: .group(group.id),
+            target: .group(group.id, insideFolder: insideFolder),
             height: TabSidebarStyle.rowHeight,
             placement: $placement))
         .onReceive(TabSidebarDragState.shared.$endedDrags.dropFirst()) { _ in placement = nil }
@@ -1095,6 +910,9 @@ private struct TabSidebarGroupHeader: View {
     private var contextMenu: some View {
         Button("New Session in Group") { model.newTab(inGroup: group.id) }
         Button("New Group in Group") { model.createGroup(inGroup: group.id) }
+        if !insideFolder {
+            Button("Open Folder in Group…") { model.presentOpenFolderPanel(inGroup: group.id) }
+        }
         Button("Rename Group…") { model.beginRename(group: group.id) }
         TabSidebarColorMenu(title: "Group Color", choices: TerminalTabColor.groupChoices, selected: group.color) { color in
             model.setColor(color, forGroup: group.id)
@@ -1103,12 +921,15 @@ private struct TabSidebarGroupHeader: View {
             model.toggleCollapsed(group.id)
         }
         Divider()
-        // A group goes in another: not itself, the one it is in, or one inside it.
+        // A group goes in another: not itself, the one it is in, or one inside it; and
+        // one with folders in it not in a group in a folder.
         Button("Add Group to New Group") { model.createGroup(around: group.id) }
             .help("Put the group in a new group where it is")
         let store = UserTabGroupStore.shared
+        let holdsFolders = model.holdsFolders(group: group.id)
         let otherGroups = model.groupsInWindow.filter {
             $0.id != group.id && $0.id != group.parentID && !store.isGroup($0.id, within: group.id)
+                && !(holdsFolders && model.isInsideFolder(group: $0.id))
         }
         if !otherGroups.isEmpty {
             Menu("Add Group to Group") {
@@ -1121,19 +942,22 @@ private struct TabSidebarGroupHeader: View {
             Button("Remove Group from Group") { model.removeGroupFromGroup(group.id) }
         }
         Divider()
-        let folderID = model.folder(ofGroup: group.id)
-        let otherFolders = model.foldersInWindow.filter { $0.id != folderID }
-        if !otherFolders.isEmpty {
-            Menu("Add Group to Folder") {
-                ForEach(otherFolders) { folder in
-                    Button(folder.name) { model.add(group: group.id, toFolder: folder.id) }
+        // A group with folders in it stays outside folders.
+        if !holdsFolders {
+            let folderID = model.folder(ofGroup: group.id)
+            let otherFolders = model.foldersInWindow.filter { $0.id != folderID }
+            if !otherFolders.isEmpty {
+                Menu("Add Group to Folder") {
+                    ForEach(otherFolders) { folder in
+                        Button(folder.name) { model.add(group: group.id, toFolder: folder.id) }
+                    }
                 }
             }
+            if folderID != nil {
+                Button("Remove Group from Folder") { model.removeGroupFromFolder(group.id) }
+            }
+            Divider()
         }
-        if folderID != nil {
-            Button("Remove Group from Folder") { model.removeGroupFromFolder(group.id) }
-        }
-        Divider()
         TabSidebarMoveToWindowMenu(model: model, payload: .group(group.id), noun: "Group")
         Divider()
         Button("Ungroup") { model.ungroup(group.id) }
@@ -2263,46 +2087,44 @@ final class TabSidebarDragState: ObservableObject {
     private static let endCheckInterval: TimeInterval = 0.25
     private var endCheck: Timer?
 
-    /// What is dragged: a tab, or a group, folder or folder group with everything in it.
+    /// What is dragged: a tab, or a group or folder with everything in it.
     enum Payload {
         case tab(TerminalWindow)
         case group(UUID)
         case folder(UUID)
-        case folderGroup(UUID)
     }
 
     private(set) weak var window: TerminalWindow?
     private(set) var groupID: UUID?
     private(set) var folderID: UUID?
-    private(set) var folderGroupID: UUID?
+
+    /// Whether the dragged group has folders in it.
+    private(set) var groupHoldsFolders = false
     private var token: String?
 
     /// Whether anything that can be dropped is being dragged.
     var isDragging: Bool { window != nil || isDraggingBlock }
 
-    /// Whether a group, folder or folder group is dragged.
-    var isDraggingBlock: Bool { groupID != nil || isDraggingFolderOrGroupOfThem }
+    /// Whether a group or folder is dragged.
+    var isDraggingBlock: Bool { groupID != nil || folderID != nil }
 
-    /// Whether a folder or folder group is dragged, which go next to a folder or a
-    /// group rather than into it.
-    var isDraggingFolderOrGroupOfThem: Bool { folderID != nil || isDraggingFolderGroup }
-
-    var isDraggingFolderGroup: Bool { folderGroupID != nil }
+    /// Whether a folder, or a group with folders in it, is dragged: what can't go in a
+    /// folder, nor in a group in one, so goes next to those rather than into them.
+    var isDraggingFolderLike: Bool { folderID != nil || groupHoldsFolders }
 
     func begin(_ window: TerminalWindow) -> String {
         begin { $0.window = window }
     }
 
-    func begin(group groupID: UUID) -> String {
-        begin { $0.groupID = groupID }
+    func begin(group groupID: UUID, holdsFolders: Bool) -> String {
+        begin {
+            $0.groupID = groupID
+            $0.groupHoldsFolders = holdsFolders
+        }
     }
 
     func begin(folder folderID: UUID) -> String {
         begin { $0.folderID = folderID }
-    }
-
-    func begin(folderGroup groupID: UUID) -> String {
-        begin { $0.folderGroupID = groupID }
     }
 
     private func begin(_ set: (TabSidebarDragState) -> Void) -> String {
@@ -2318,7 +2140,7 @@ final class TabSidebarDragState: ObservableObject {
         window = nil
         groupID = nil
         folderID = nil
-        folderGroupID = nil
+        groupHoldsFolders = false
     }
 
     /// Ends the drag once the mouse button is up. The timer runs in the drag's own run
@@ -2343,7 +2165,6 @@ final class TabSidebarDragState: ObservableObject {
         guard token == self.token else { return nil }
         self.token = nil
         defer { clear() }
-        if let folderGroupID { return .folderGroup(folderGroupID) }
         if let folderID { return .folder(folderID) }
         if let groupID { return .group(groupID) }
         return window.map(Payload.tab)
@@ -2353,9 +2174,10 @@ final class TabSidebarDragState: ObservableObject {
 private struct TabSidebarDropDelegate: DropDelegate {
     enum Target {
         case tab(TerminalWindow?)
-        case group(UUID)
+
+        /// A group's header, and whether the group is in a folder.
+        case group(UUID, insideFolder: Bool)
         case folder(UUID)
-        case folderGroup(UUID)
         case end
     }
 
@@ -2425,7 +2247,7 @@ private struct TabSidebarDropDelegate: DropDelegate {
                 case (.tab(let window), .tab(let targetWindow)):
                     guard let targetWindow else { return }
                     model.drop(window, relativeTo: targetWindow, after: after)
-                case (.tab(let window), .group(let groupID)):
+                case (.tab(let window), .group(let groupID, _)):
                     if finalPlacement == .into {
                         model.drop(window, ontoGroup: groupID)
                     } else {
@@ -2437,15 +2259,13 @@ private struct TabSidebarDropDelegate: DropDelegate {
                     } else {
                         model.drop(window, beside: .folder(folderID), after: after)
                     }
-                case (.tab(let window), .folderGroup(let groupID)):
-                    model.drop(window, beside: .folderGroup(groupID), after: after)
                 case (.tab(let window), .end):
                     model.dropAtEnd(window)
 
                 case (.group(let groupID), .tab(let targetWindow)):
                     guard let targetWindow else { return }
                     model.moveGroup(groupID, to: .tab(targetWindow), after: after)
-                case (.group(let groupID), .group(let targetID)):
+                case (.group(let groupID), .group(let targetID, _)):
                     if finalPlacement == .into {
                         model.drop(group: groupID, ontoGroup: targetID)
                     } else {
@@ -2457,42 +2277,22 @@ private struct TabSidebarDropDelegate: DropDelegate {
                     } else {
                         model.moveGroup(groupID, to: .folder(folderID), after: after)
                     }
-                case (.group(let groupID), .folderGroup(let targetID)):
-                    model.moveGroup(groupID, to: .folderGroup(targetID), after: after)
                 case (.group(let groupID), .end):
                     model.moveGroup(groupID, to: .end, after: false)
 
                 case (.folder(let folderID), .tab(let targetWindow)):
                     guard let targetWindow else { return }
                     model.moveFolder(folderID, to: .tab(targetWindow), after: after)
-                case (.folder(let folderID), .group(let targetID)):
-                    model.moveFolder(folderID, to: .group(targetID), after: after)
+                case (.folder(let folderID), .group(let targetID, _)):
+                    if finalPlacement == .into {
+                        model.drop(folder: folderID, ontoGroup: targetID)
+                    } else {
+                        model.moveFolder(folderID, to: .group(targetID), after: after)
+                    }
                 case (.folder(let folderID), .folder(let targetID)):
                     model.moveFolder(folderID, to: .folder(targetID), after: after)
-                case (.folder(let folderID), .folderGroup(let groupID)):
-                    if finalPlacement == .into {
-                        model.drop(folder: folderID, ontoFolderGroup: groupID)
-                    } else {
-                        model.moveFolder(folderID, to: .folderGroup(groupID), after: after)
-                    }
                 case (.folder(let folderID), .end):
                     model.moveFolder(folderID, to: .end, after: false)
-
-                case (.folderGroup(let groupID), .tab(let targetWindow)):
-                    guard let targetWindow else { return }
-                    model.moveFolderGroup(groupID, to: .tab(targetWindow), after: after)
-                case (.folderGroup(let groupID), .group(let targetID)):
-                    model.moveFolderGroup(groupID, to: .group(targetID), after: after)
-                case (.folderGroup(let groupID), .folder(let targetID)):
-                    model.moveFolderGroup(groupID, to: .folder(targetID), after: after)
-                case (.folderGroup(let groupID), .folderGroup(let targetID)):
-                    if finalPlacement == .into {
-                        model.drop(folderGroup: groupID, ontoFolderGroup: targetID)
-                    } else {
-                        model.moveFolderGroup(groupID, to: .folderGroup(targetID), after: after)
-                    }
-                case (.folderGroup(let groupID), .end):
-                    model.moveFolderGroup(groupID, to: .end, after: false)
                 }
             }
         }
@@ -2519,15 +2319,14 @@ private struct TabSidebarDropDelegate: DropDelegate {
         switch target {
         case .tab:
             return info.location.y < height / 2 ? .before : .after
-        case .group:
-            // A tab or group can go in a group; a folder or folder group goes beside it.
-            return zone(info, canEnter: !drag.isDraggingFolderOrGroupOfThem)
+        case .group(_, let insideFolder):
+            // A tab or group can go in a group; a folder, or a group with folders in it,
+            // only while the group is in no folder, and otherwise goes beside it.
+            return zone(info, canEnter: !(drag.isDraggingFolderLike && insideFolder))
         case .folder:
-            // A tab or group can go in a folder; a folder or folder group goes beside it.
-            return zone(info, canEnter: !drag.isDraggingFolderOrGroupOfThem)
-        case .folderGroup:
-            // A folder or folder group can go in a folder group.
-            return zone(info, canEnter: drag.isDraggingFolderOrGroupOfThem)
+            // A tab or group can go in a folder; a folder, or a group with folders in it,
+            // goes beside it.
+            return zone(info, canEnter: !drag.isDraggingFolderLike)
         case .end:
             return .before
         }

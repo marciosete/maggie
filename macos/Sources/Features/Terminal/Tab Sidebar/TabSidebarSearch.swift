@@ -10,25 +10,23 @@ enum TabSidebarSearch {
         return words.allSatisfy { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
     }
 
-    /// What a session is found by: its title, the names of its groups, its folder and
-    /// its folder groups, its folder's path, and its project, branch and directory.
+    /// What a session is found by: its title, the names of its groups and its folder,
+    /// its folder's path, and its project, branch and directory.
     static func fields(
         of tab: TabSidebarModel.Tab,
         groups: [UserTabGroup],
         folder: UserTabFolder? = nil,
-        folderGroups: [UserTabFolderGroup] = [],
         info: TabSidebarSessionInfo?
     ) -> [String?] {
         [tab.title]
             + groups.map(\.name)
             + [folder?.name, folder?.abbreviatedPath]
-            + folderGroups.map(\.name)
             + [info?.checkout?.project, info?.branch, info?.abbreviatedDirectory]
     }
 
-    /// The rows showing only the sessions matching `query`. A group, folder or folder
-    /// group whose name matches keeps all its sessions. Those with a match are shown
-    /// open, whatever their state.
+    /// The rows showing only the sessions matching `query`. A group or folder whose
+    /// name matches keeps all its sessions. Those with a match are shown open, whatever
+    /// their state.
     static func filter(
         _ rows: [TabSidebarModel.Row],
         query: String,
@@ -42,7 +40,6 @@ enum TabSidebarSearch {
     private struct Context {
         var groups: [UserTabGroup] = []
         var folder: UserTabFolder?
-        var folderGroups: [UserTabFolderGroup] = []
     }
 
     private static func filter(
@@ -54,8 +51,7 @@ enum TabSidebarSearch {
         rows.compactMap { row in
             switch row {
             case .tab(let tab):
-                let fields = Self.fields(
-                    of: tab, groups: context.groups, folder: context.folder, folderGroups: context.folderGroups, info: infos[tab.id])
+                let fields = Self.fields(of: tab, groups: context.groups, folder: context.folder, info: infos[tab.id])
                 return matches(query, fields) ? row : nil
 
             case .group(let section):
@@ -79,17 +75,6 @@ enum TabSidebarSearch {
                 guard !rows.isEmpty else { return nil }
                 folder.isCollapsed = false
                 return .folder(.init(folder: folder, rows: rows))
-
-            case .folderGroup(let section):
-                var group = section.group
-                var inner = context
-                inner.folderGroups.append(group)
-                let rows = matches(query, [group.name])
-                    ? section.rows
-                    : filter(section.rows, query: query, within: inner, infos: infos)
-                guard !rows.isEmpty else { return nil }
-                group.isCollapsed = false
-                return .folderGroup(.init(group: group, rows: rows))
             }
         }
     }
@@ -101,7 +86,6 @@ enum TabSidebarSearch {
             case .tab(let tab): return [tab]
             case .group(let section): return section.group.isCollapsed ? [] : tabs(in: section.rows)
             case .folder(let section): return section.folder.isCollapsed ? [] : tabs(in: section.rows)
-            case .folderGroup(let section): return section.group.isCollapsed ? [] : tabs(in: section.rows)
             }
         }
     }

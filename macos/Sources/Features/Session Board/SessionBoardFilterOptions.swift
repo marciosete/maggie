@@ -79,8 +79,8 @@ struct SessionBoardFilterOptions {
         var seen = Set<UUID?>()
         var options: [SessionBoardFilterOption<UUID?>] = []
         for tab in tabs {
-            if tab.groupPath.isEmpty { seen.insert(nil) }
-            for id in tab.groupPath where seen.insert(id).inserted {
+            if tab.allGroupIDs.isEmpty { seen.insert(nil) }
+            for id in tab.allGroupIDs where seen.insert(id).inserted {
                 guard let group = store[id] else { continue }
                 options.append(.init(value: id, label: store.pathName(of: id), image: group.color.swatchImage(selected: false)))
             }

@@ -57,17 +57,17 @@ struct TabSidebarSearchTests {
 
         #expect(TabSidebarSearch.filter(rows, query: "nothing", infos: infos).isEmpty)
 
-        // Sessions are found by their folder's name and path, and by their folder group's
-        // name; a match opens the collapsed folder and folder group around it.
+        // Sessions are found by their folder's name and path, and by the name of the
+        // group the folder is in; a match opens the collapsed folder and group around it.
         let ghostty = UserTabFolder(path: "/Users/me/projects/ghostty", isCollapsed: true)
         let empty = UserTabFolder(path: "/Users/me/projects/empty", isCollapsed: true)
-        let work = UserTabFolderGroup(name: "Work", isCollapsed: true)
+        let work = UserTabGroup(name: "Work", isCollapsed: true)
         var openKinetic = kinetic
         openKinetic.isCollapsed = false
         let nested: [TabSidebarModel.Row] = [
-            .folderGroup(.init(group: work, folders: [
-                .init(folder: ghostty, rows: [.group(.init(group: openKinetic, tabs: [voice, retry])), .tab(email)]),
-                .init(folder: empty, rows: []),
+            .group(.init(group: work, rows: [
+                .folder(.init(folder: ghostty, rows: [.group(.init(group: openKinetic, tabs: [voice, retry])), .tab(email)])),
+                .folder(.init(folder: empty, rows: [])),
             ])),
             .tab(plain),
         ]
@@ -79,14 +79,14 @@ struct TabSidebarSearchTests {
             == ["Voice"])
         #expect(TabSidebarSearch.filter(nested, query: "empty", infos: infos).isEmpty)
 
-        // A session is found by the name of a group its group is in, and of a folder group
-        // its folder's group is in; a match opens every collapsed group around it.
+        // A session is found by the name of a group its group is in, and of a group its
+        // folder's group is in; a match opens every collapsed group around it.
         let clients = UserTabGroup(name: "Clients", isCollapsed: true)
         let acme = UserTabGroup(name: "Acme", isCollapsed: true)
-        let personal = UserTabFolderGroup(name: "Personal", isCollapsed: true)
+        let personal = UserTabGroup(name: "Personal", isCollapsed: true)
         let deep: [TabSidebarModel.Row] = [
-            .folderGroup(.init(group: personal, rows: [
-                .folderGroup(.init(group: work, rows: [
+            .group(.init(group: personal, rows: [
+                .group(.init(group: work, rows: [
                     .folder(.init(folder: ghostty, rows: [
                         .group(.init(group: clients, rows: [
                             .group(.init(group: acme, tabs: [voice])),

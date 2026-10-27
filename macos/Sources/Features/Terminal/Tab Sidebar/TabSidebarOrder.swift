@@ -2,34 +2,67 @@ import Foundation
 
 /// Something the sidebar orders: a tab, with what it is nested in.
 protocol TabSidebarOrderItem: Equatable {
-    /// What the tab is in, outermost first: its folder groups, each in the one before,
-    /// then its folder, then its groups, each in the one before. Empty for a tab in
-    /// nothing. Items in the same block have the same path up to it.
+    /// What the tab is in, outermost first: the groups its folder is in, each in the one
+    /// before, then its folder, then its groups, each in the one before. Empty for a tab
+    /// in nothing. Items in the same block have the same path up to it.
     var path: [TabSidebarOrder.Block] { get }
 }
 
 /// The order the sidebar keeps the native tabs in, on items that stand for the tabs so
-/// it can be checked without windows. At every depth, the members of a block (a folder
-/// group, a folder, a group) are next to each other, where its first member is, and the
-/// blocks inside it are too. A block is in at most one outer block: the caller keeps the
-/// paths consistent, giving a group the folder of its first member.
+/// it can be checked without windows. At every depth, the members of a block (a group,
+/// a folder) are next to each other, where its first member is, and the blocks inside
+/// it are too. A block is in at most one outer block: the caller keeps the paths
+/// consistent, giving a group the folder of its first member.
 enum TabSidebarOrder {
-    /// The kinds of block, by what they hold: a folder group holds folders and folder
-    /// groups; a folder holds tabs and groups; a group holds tabs and groups.
+    /// The kinds of block, by what they hold: a group holds tabs, groups and folders,
+    /// though not a folder once it is in a folder itself; a folder holds tabs and groups.
     enum Kind: Hashable {
-        case folderGroup
-        case folder
         case group
+        case folder
     }
 
-    /// A folder group, a folder or a group.
+    /// A group or a folder.
     struct Block: Hashable {
         let kind: Kind
         let id: UUID
 
         static func group(_ id: UUID) -> Block { Block(kind: .group, id: id) }
         static func folder(_ id: UUID) -> Block { Block(kind: .folder, id: id) }
-        static func folderGroup(_ id: UUID) -> Block { Block(kind: .folderGroup, id: id) }
+    }
+
+    /// What is dropped: a tab, a group, a folder, or a group with folders in it, which,
+    /// like a folder, can't go in a folder.
+    struct Dropped: Equatable {
+        /// Nil for a tab.
+        let kind: Kind?
+
+        /// Whether it holds folders, or is one, so it stays outside every folder.
+        let staysOutsideFolders: Bool
+
+        static let tab = Dropped(kind: nil, staysOutsideFolders: false)
+        static let group = Dropped(kind: .group, staysOutsideFolders: false)
+        static let folder = Dropped(kind: .folder, staysOutsideFolders: true)
+        static let groupOfFolders = Dropped(kind: .group, staysOutsideFolders: true)
+
+        /// The block as it is dropped, by its members: a group with a folder in it, in
+        /// any member's path after it, holds folders.
+        init<Item: TabSidebarOrderItem>(_ block: Block, members: [Item]) {
+            switch block.kind {
+            case .folder:
+                self = .folder
+            case .group:
+                let holdsFolders = members.contains { member in
+                    guard let depth = member.path.firstIndex(of: block) else { return false }
+                    return member.path[(depth + 1)...].contains { $0.kind == .folder }
+                }
+                self = holdsFolders ? .groupOfFolders : .group
+            }
+        }
+
+        private init(kind: Kind?, staysOutsideFolders: Bool) {
+            self.kind = kind
+            self.staysOutsideFolders = staysOutsideFolders
+        }
     }
 
     /// Where a block is dropped.
@@ -74,32 +107,32 @@ enum TabSidebarOrder {
         return result
     }
 
-    /// What a block of `container` holds directly: a group holds tabs and groups; a
-    /// folder holds tabs and groups; a folder group holds folders and folder groups.
-    /// `kind` is nil for a tab.
-    static func canHold(container: Kind, kind: Kind?) -> Bool {
-        switch container {
-        case .group, .folder: return kind == nil || kind == .group
-        case .folderGroup: return kind == .folder || kind == .folderGroup
-        }
+    /// Whether the innermost of `containers` holds `dropped` directly: the top (no
+    /// containers) holds everything; a folder holds a tab or a group without folders; a
+    /// group holds a tab or a group, and a folder or a group of folders while it is in
+    /// no folder itself.
+    static func canHold(containers: ArraySlice<Block>, _ dropped: Dropped) -> Bool {
+        guard let container = containers.last else { return true }
+        guard dropped.staysOutsideFolders else { return true }
+        return container.kind == .group && !containers.contains { $0.kind == .folder }
     }
 
-    /// Where something of `kind` (nil for a tab) lands when dropped beside `target`,
-    /// from the block at `startDepth` of its path out (`target` itself when `startDepth`
-    /// is the path's count): the items it moves past, and the path it takes. Beside a tab
-    /// in a group, a tab joins the group; beside a group, a tab goes in whatever the group
-    /// is in, next to all of the group. Beside a folder that is in a folder group, a tab or
-    /// a group can't stay in the folder group, so it goes next to the whole folder group,
-    /// in nothing. The anchor widens until its container can hold what is dropped.
+    /// Where `dropped` lands when dropped beside `target`, from the block at `startDepth`
+    /// of its path out (`target` itself when `startDepth` is the path's count): the items
+    /// it moves past, and the path it takes. Beside a tab in a group, a tab joins the
+    /// group; beside a group, a tab goes in whatever the group is in, next to all of the
+    /// group. Beside a tab in a folder, a folder can't stay in the folder, so it goes next
+    /// to the whole folder, in whatever that is. The anchor widens until its container
+    /// can hold what is dropped.
     static func landing<Item: TabSidebarOrderItem>(
         beside target: Item,
         from startDepth: Int,
-        of kind: Kind?,
+        of dropped: Dropped,
         among others: [Item]
     ) -> (anchors: [Item], path: [Block]) {
         let depth = target.path.count
         var anchorDepth = min(startDepth, depth)
-        while anchorDepth > 0, !canHold(container: target.path[anchorDepth - 1].kind, kind: kind) {
+        while anchorDepth > 0, !canHold(containers: target.path.prefix(anchorDepth), dropped) {
             anchorDepth -= 1
         }
 
@@ -113,20 +146,20 @@ enum TabSidebarOrder {
         return (anchors, Array(target.path.prefix(anchorDepth)))
     }
 
-    /// The path something of `kind` takes when dropped at `destination`: nil when there
-    /// is nothing there to take it from (the end, or a block with no tabs).
+    /// The path `dropped` takes when dropped at `destination`: nil when there is nothing
+    /// there to take it from (the end, or a block with no tabs).
     static func path<Item: TabSidebarOrderItem>(
-        of kind: Kind?,
+        of dropped: Dropped,
         droppedAt destination: Destination<Item>,
         among others: [Item]
     ) -> [Block]? {
         switch destination {
         case .item(let target):
-            return landing(beside: target, from: target.path.count, of: kind, among: others).path
+            return landing(beside: target, from: target.path.count, of: dropped, among: others).path
         case .block(let target):
             guard let first = others.first(where: { $0.path.contains(target) }),
                   let depth = first.path.firstIndex(of: target) else { return nil }
-            return landing(beside: first, from: depth, of: kind, among: others).path
+            return landing(beside: first, from: depth, of: dropped, among: others).path
         case .into(let target):
             guard let first = others.first(where: { $0.path.contains(target) }),
                   let depth = first.path.firstIndex(of: target) else { return nil }
@@ -149,6 +182,7 @@ enum TabSidebarOrder {
         let members = items.filter { $0.path.contains(block) }
         guard !members.isEmpty else { return nil }
         let others = items.filter { !$0.path.contains(block) }
+        let dropped = Dropped(block, members: members)
 
         // Whether `target` is inside the moving block: in some member's path, after it.
         func isInside(_ target: Block) -> Bool {
@@ -163,19 +197,25 @@ enum TabSidebarOrder {
         switch destination {
         case .item(let target):
             guard !target.path.contains(block) else { return nil }
-            anchors = landing(beside: target, from: target.path.count, of: block.kind, among: others).anchors
+            anchors = landing(beside: target, from: target.path.count, of: dropped, among: others).anchors
 
         case .block(let target):
             guard target != block, !isInside(target) else { return nil }
             if let first = others.first(where: { $0.path.contains(target) }),
                let depth = first.path.firstIndex(of: target) {
-                anchors = landing(beside: first, from: depth, of: block.kind, among: others).anchors
+                anchors = landing(beside: first, from: depth, of: dropped, among: others).anchors
             } else {
                 anchors = []
             }
 
         case .into(let target):
             guard target != block, !isInside(target) else { return nil }
+            // What can't go in a folder doesn't go into one, or into a group in one.
+            if let first = others.first(where: { $0.path.contains(target) }),
+               let depth = first.path.firstIndex(of: target),
+               !canHold(containers: first.path.prefix(through: depth), dropped) {
+                return nil
+            }
             anchors = others.filter { $0.path.contains(target) }
 
         case .end:
@@ -203,10 +243,20 @@ extension Array where Element == TabSidebarOrder.Block {
     /// The folder in the path, if any.
     var folderID: UUID? { first { $0.kind == .folder }?.id }
 
-    /// The innermost group in the path, if any: what a tab or a group dropped here is in.
-    var groupID: UUID? { last { $0.kind == .group }?.id }
+    /// The innermost group inside the folder, or the innermost group when there is no
+    /// folder: what a tab or a group dropped here is in. Nil in a folder directly.
+    var groupID: UUID? {
+        let start = firstIndex { $0.kind == .folder }.map { $0 + 1 } ?? 0
+        return self[start...].last { $0.kind == .group }?.id
+    }
 
-    /// The innermost folder group in the path, if any: what a folder or a folder group
-    /// dropped here is in.
-    var folderGroupID: UUID? { last { $0.kind == .folderGroup }?.id }
+    /// The innermost group before the folder, or the innermost group when there is no
+    /// folder: what a folder dropped here is in.
+    var outerGroupID: UUID? {
+        let end = firstIndex { $0.kind == .folder } ?? count
+        return self[..<end].last { $0.kind == .group }?.id
+    }
+
+    /// Every group in the path, outermost first.
+    var groupIDs: [UUID] { filter { $0.kind == .group }.map(\.id) }
 }

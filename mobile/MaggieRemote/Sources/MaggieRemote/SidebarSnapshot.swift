@@ -88,12 +88,13 @@ public enum SidebarRow: Equatable, Sendable, Identifiable {
         }
     }
 
-    /// The folders the row is or holds.
+    /// The folders the row is or holds, those of the groups in it too.
     public var folders: [SidebarFolder] {
         switch self {
         case .folder(let folder): return [folder]
         case .folderGroup(let group): return group.folders
-        case .session, .group: return []
+        case .group(let group): return group.rows.flatMap(\.folders)
+        case .session: return []
         }
     }
 
@@ -329,8 +330,9 @@ public struct SidebarFolder: Codable, Equatable, Sendable, Identifiable {
     public var light: SessionLight? { SessionLight.mostUrgent(rows.flatMap(\.sessions).compactMap(\.light)) }
 }
 
-/// A group of folders. A folder group can hold folder groups, so its rows are folders
-/// and folder groups.
+/// A group of folders, as a Mac sent one before its groups could hold folders; a Mac
+/// since sends such a group as a `SidebarGroup` with folders among its rows. Its rows
+/// are folders and folder groups.
 public struct SidebarFolderGroup: Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
