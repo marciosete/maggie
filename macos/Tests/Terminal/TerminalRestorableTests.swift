@@ -145,6 +145,42 @@ struct TerminalRestorableTests {
         #expect(decoded.sidebarFolderGroups == [work])
         #expect(decoded.sidebarFolders?.last?.name == "empty")
         #expect(decoded.sidebarFolders?.last?.isCollapsed == true)
+
+        // State saved before groups nested has no group of groups, and no parents.
+        #expect(decoded.sidebarGroups == nil)
+        #expect(decoded.sidebarFolderGroups?.first?.parentID == nil)
+    }
+
+    /// A group of groups and a group of folder groups come back whole: the tab's group
+    /// with the groups it is in, and every folder group with the ones it is in.
+    @MainActor
+    @Test func nestedGroupsRoundTrip() throws {
+        let tree = try SplitTreeTests.makeHorizontalSplit()
+        let clients = UserTabGroup(name: "Clients", isCollapsed: true)
+        let acme = UserTabGroup(name: "Acme", color: .purple, parentID: clients.id)
+        let personal = UserTabFolderGroup(name: "Personal")
+        let work = UserTabFolderGroup(name: "Work", isCollapsed: true, parentID: personal.id)
+        let ghostty = UserTabFolder(name: "Ghostty", path: "/Users/me/ghostty", groupID: work.id)
+        let state = TerminalRestorableState.InternalState<MockView>(
+            focusedSurface: nil,
+            surfaceTree: tree.0,
+            effectiveFullscreenMode: nil,
+            tabColor: nil,
+            titleOverride: nil,
+            userTabGroup: acme,
+            speechVoiceID: nil,
+            userTabFolder: ghostty,
+            sidebarFolders: [ghostty],
+            sidebarFolderGroups: [personal, work],
+            sidebarGroups: [clients])
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(TerminalRestorableState.InternalState<MockView>.self, from: data)
+        #expect(decoded.userTabGroup == acme)
+        #expect(decoded.userTabGroup?.parentID == clients.id)
+        #expect(decoded.sidebarGroups == [clients])
+        #expect(decoded.sidebarFolderGroups == [personal, work])
+        #expect(decoded.sidebarFolderGroups?.last?.parentID == personal.id)
     }
 
     /// A window's name comes back with each of its tabs.

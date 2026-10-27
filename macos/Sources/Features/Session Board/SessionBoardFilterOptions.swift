@@ -70,14 +70,20 @@ struct SessionBoardFilterOptions {
         return options
     }
 
-    /// The groups the sessions are in, in sidebar order, then the sessions in none.
+    /// The groups the sessions are in, the groups those are in too, in sidebar order,
+    /// then the sessions in none. A group inside another is named with it: `Clients ›
+    /// Acme`.
     @MainActor
     private static func groups(of tabs: [TabSidebarModel.Tab]) -> [SessionBoardFilterOption<UUID?>] {
+        let store = UserTabGroupStore.shared
         var seen = Set<UUID?>()
         var options: [SessionBoardFilterOption<UUID?>] = []
-        for tab in tabs where seen.insert(tab.groupID).inserted {
-            guard let id = tab.groupID, let group = UserTabGroupStore.shared[id] else { continue }
-            options.append(.init(value: id, label: group.name, image: group.color.swatchImage(selected: false)))
+        for tab in tabs {
+            if tab.groupPath.isEmpty { seen.insert(nil) }
+            for id in tab.groupPath where seen.insert(id).inserted {
+                guard let group = store[id] else { continue }
+                options.append(.init(value: id, label: store.pathName(of: id), image: group.color.swatchImage(selected: false)))
+            }
         }
         if seen.contains(nil), !options.isEmpty {
             options.append(.init(

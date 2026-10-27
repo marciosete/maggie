@@ -79,6 +79,9 @@ final class TerminalRestorableState: TerminalRestorable {
     var userTabGroup: UserTabGroup? {
         internalState.userTabGroup
     }
+    var sidebarGroups: [UserTabGroup] {
+        internalState.sidebarGroups ?? []
+    }
     var speechVoiceID: String? {
         internalState.speechVoiceID
     }
@@ -152,7 +155,10 @@ final class TerminalRestorableState: TerminalRestorable {
         (window as? TerminalWindow)?.boardPlace = boardPlace
         (window as? TerminalWindow)?.workItemID = workItemID
 
-        // Restore the tab's group in the tab sidebar
+        // Restore the tab's group in the tab sidebar, with the groups it is in.
+        for group in sidebarGroups {
+            UserTabGroupStore.shared.register(group)
+        }
         if let userTabGroup {
             UserTabGroupStore.shared.register(userTabGroup)
             (window as? TerminalWindow)?.userTabGroupID = userTabGroup.id

@@ -204,8 +204,17 @@ struct SessionBoardFilter: Equatable {
     }
 
     func shows(folder: UUID?, group: UUID?, color: TerminalTabColor) -> Bool {
-        (folders.isEmpty || folders.contains(folder))
-            && (groups.isEmpty || groups.contains(group))
+        shows(folder: folder, groups: group.map { [$0] } ?? [], color: color)
+    }
+
+    /// Whether a session in `folder` and in `groups` (its group and the groups that is
+    /// in, so a picked group shows the sessions of the groups inside it too) with
+    /// `color` is shown.
+    func shows(folder: UUID?, groups: [UUID], color: TerminalTabColor) -> Bool {
+        let inGroups = self.groups.isEmpty
+            || (groups.isEmpty ? self.groups.contains(nil) : groups.contains { self.groups.contains($0) })
+        return (folders.isEmpty || folders.contains(folder))
+            && inGroups
             && (colors.isEmpty || colors.contains(color))
     }
 

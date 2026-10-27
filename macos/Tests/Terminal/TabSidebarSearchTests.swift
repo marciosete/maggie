@@ -23,7 +23,7 @@ struct TabSidebarSearchTests {
                 id: ObjectIdentifier(window), window: nil, index: windows.count, title: title,
                 color: .none, assignedColor: .none, claudeCodeState: nil, claudeCodeActivity: ClaudeCodeActivity(),
                 canSpeak: false, isSpeaking: false, speechVoiceID: nil,
-                keyEquivalent: nil, isSelected: false, isZoomed: false, groupID: nil, folderID: nil, folderGroupID: nil)
+                keyEquivalent: nil, isSelected: false, isZoomed: false)
         }
 
         let voice = tab("Voice")
@@ -78,5 +78,35 @@ struct TabSidebarSearchTests {
         #expect(TabSidebarSearch.tabs(in: TabSidebarSearch.filter(nested, query: "work voice", infos: infos)).map(\.title)
             == ["Voice"])
         #expect(TabSidebarSearch.filter(nested, query: "empty", infos: infos).isEmpty)
+
+        // A session is found by the name of a group its group is in, and of a folder group
+        // its folder's group is in; a match opens every collapsed group around it.
+        let clients = UserTabGroup(name: "Clients", isCollapsed: true)
+        let acme = UserTabGroup(name: "Acme", isCollapsed: true)
+        let personal = UserTabFolderGroup(name: "Personal", isCollapsed: true)
+        let deep: [TabSidebarModel.Row] = [
+            .folderGroup(.init(group: personal, rows: [
+                .folderGroup(.init(group: work, rows: [
+                    .folder(.init(folder: ghostty, rows: [
+                        .group(.init(group: clients, rows: [
+                            .group(.init(group: acme, tabs: [voice])),
+                            .tab(retry),
+                        ])),
+                    ])),
+                ])),
+            ])),
+            .tab(plain),
+        ]
+        let byOuterGroup = TabSidebarSearch.filter(deep, query: "clients voice", infos: infos)
+        #expect(TabSidebarSearch.tabs(in: byOuterGroup).map(\.title) == ["Voice"])
+        #expect(TabSidebarSearch.tabs(in: TabSidebarSearch.filter(deep, query: "acme", infos: infos)).map(\.title)
+            == ["Voice"])
+
+        // A matching name keeps everything in it, as it is: the groups inside stay folded.
+        let byName = TabSidebarSearch.filter(deep, query: "personal", infos: infos)
+        #expect(byName.flatMap(\.allTabs).map(\.title) == ["Voice", "Retry"])
+        #expect(TabSidebarSearch.tabs(in: byName).isEmpty)
+        #expect(TabSidebarSearch.filter(deep, query: "clients", infos: infos).flatMap(\.allTabs).map(\.title)
+            == ["Voice", "Retry"])
     }
 }

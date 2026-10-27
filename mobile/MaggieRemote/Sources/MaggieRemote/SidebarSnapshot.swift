@@ -101,9 +101,9 @@ public enum SidebarRow: Equatable, Sendable, Identifiable {
     public var sessions: [SidebarSession] {
         switch self {
         case .session(let session): return [session]
-        case .group(let group): return group.sessions
+        case .group(let group): return group.rows.flatMap(\.sessions)
         case .folder(let folder): return folder.rows.flatMap(\.sessions)
-        case .folderGroup(let group): return group.folders.flatMap { $0.rows.flatMap(\.sessions) }
+        case .folderGroup(let group): return group.rows.flatMap(\.sessions)
         }
     }
 }
@@ -227,23 +227,66 @@ public enum SidebarTime {
     }
 }
 
-public struct SidebarGroup: Codable, Equatable, Sendable, Identifiable {
+/// A group of sessions. A group can hold groups, so its rows are sessions and groups.
+public struct SidebarGroup: Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var collapsed: Bool
     public var color: TabColorName?
-    public var sessions: [SidebarSession]
 
-    public init(id: String, name: String, collapsed: Bool = false, color: TabColorName? = nil, sessions: [SidebarSession]) {
+    /// Its sessions and the groups in it, in sidebar order.
+    public var rows: [SidebarRow]
+
+    public init(id: String, name: String, collapsed: Bool = false, color: TabColorName? = nil, rows: [SidebarRow]) {
         self.id = id
         self.name = name
         self.collapsed = collapsed
         self.color = color
-        self.sessions = sessions
+        self.rows = rows
     }
+
+    /// A group of sessions alone.
+    public init(id: String, name: String, collapsed: Bool = false, color: TabColorName? = nil, sessions: [SidebarSession]) {
+        self.init(id: id, name: name, collapsed: collapsed, color: color, rows: sessions.map(SidebarRow.session))
+    }
+
+    /// Every session in the group, those of the groups in it too.
+    public var sessions: [SidebarSession] { rows.flatMap(\.sessions) }
 
     /// The light of the member that needs attention most.
     public var light: SessionLight? { SessionLight.mostUrgent(sessions.compactMap(\.light)) }
+}
+
+extension SidebarGroup: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, collapsed, color, rows, sessions
+    }
+
+    /// The rows go as they are, and every session flat too, for a device from before
+    /// groups nested, which reads only the sessions.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(collapsed, forKey: .collapsed)
+        try container.encodeIfPresent(color, forKey: .color)
+        try container.encode(rows, forKey: .rows)
+        try container.encode(sessions, forKey: .sessions)
+    }
+
+    /// From a Mac from before groups nested, the sessions are the rows.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        collapsed = try container.decode(Bool.self, forKey: .collapsed)
+        color = try container.decodeIfPresent(TabColorName.self, forKey: .color)
+        if let rows = try container.decodeIfPresent([SidebarRow].self, forKey: .rows) {
+            self.rows = rows
+        } else {
+            rows = try container.decode([SidebarSession].self, forKey: .sessions).map(SidebarRow.session)
+        }
+    }
 }
 
 /// A folder opened in the sidebar. New Session opens a session in it.
@@ -286,17 +329,62 @@ public struct SidebarFolder: Codable, Equatable, Sendable, Identifiable {
     public var light: SessionLight? { SessionLight.mostUrgent(rows.flatMap(\.sessions).compactMap(\.light)) }
 }
 
-public struct SidebarFolderGroup: Codable, Equatable, Sendable, Identifiable {
+/// A group of folders. A folder group can hold folder groups, so its rows are folders
+/// and folder groups.
+public struct SidebarFolderGroup: Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var collapsed: Bool
-    public var folders: [SidebarFolder]
 
-    public init(id: String, name: String, collapsed: Bool = false, folders: [SidebarFolder]) {
+    /// Its folders and the folder groups in it, in sidebar order.
+    public var rows: [SidebarRow]
+
+    public init(id: String, name: String, collapsed: Bool = false, rows: [SidebarRow]) {
         self.id = id
         self.name = name
         self.collapsed = collapsed
-        self.folders = folders
+        self.rows = rows
+    }
+
+    /// A folder group of folders alone.
+    public init(id: String, name: String, collapsed: Bool = false, folders: [SidebarFolder]) {
+        self.init(id: id, name: name, collapsed: collapsed, rows: folders.map(SidebarRow.folder))
+    }
+
+    /// Every folder in the group, those of the folder groups in it too.
+    public var folders: [SidebarFolder] { rows.flatMap(\.folders) }
+
+    /// The light of the session that needs attention most.
+    public var light: SessionLight? { SessionLight.mostUrgent(rows.flatMap(\.sessions).compactMap(\.light)) }
+}
+
+extension SidebarFolderGroup: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, collapsed, rows, folders
+    }
+
+    /// The rows go as they are, and every folder flat too, for a device from before
+    /// folder groups nested, which reads only the folders.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(collapsed, forKey: .collapsed)
+        try container.encode(rows, forKey: .rows)
+        try container.encode(folders, forKey: .folders)
+    }
+
+    /// From a Mac from before folder groups nested, the folders are the rows.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        collapsed = try container.decode(Bool.self, forKey: .collapsed)
+        if let rows = try container.decodeIfPresent([SidebarRow].self, forKey: .rows) {
+            self.rows = rows
+        } else {
+            rows = try container.decode([SidebarFolder].self, forKey: .folders).map(SidebarRow.folder)
+        }
     }
 }
 

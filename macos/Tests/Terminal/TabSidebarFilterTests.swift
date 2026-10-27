@@ -31,7 +31,8 @@ struct TabSidebarFilterTests {
                 id: ObjectIdentifier(window), window: nil, index: windows.count, title: title,
                 color: color, assignedColor: color, claudeCodeState: nil, claudeCodeActivity: ClaudeCodeActivity(),
                 canSpeak: false, isSpeaking: false, speechVoiceID: nil,
-                keyEquivalent: nil, isSelected: false, isZoomed: false, groupID: group, folderID: folder, folderGroupID: nil,
+                keyEquivalent: nil, isSelected: false, isZoomed: false,
+                groupPath: group.map { [$0] } ?? [], folderID: folder,
                 boardPlace: column.map { SessionBoardPlace(column: $0, order: 0) })
         }
 
@@ -131,7 +132,7 @@ struct TabSidebarFilterTests {
                 id: ObjectIdentifier(window), window: nil, index: 0, title: title,
                 color: shown, assignedColor: assigned, claudeCodeState: nil, claudeCodeActivity: ClaudeCodeActivity(),
                 canSpeak: false, isSpeaking: false, speechVoiceID: nil,
-                keyEquivalent: nil, isSelected: false, isZoomed: false, groupID: nil, folderID: nil, folderGroupID: nil)
+                keyEquivalent: nil, isSelected: false, isZoomed: false)
         }
 
         // Sessions all one color, none following Claude Code: nothing to choose between.
@@ -156,7 +157,7 @@ struct TabSidebarFilterTests {
                 id: ObjectIdentifier(window), window: nil, index: 0, title: "t",
                 color: shown, assignedColor: assigned, claudeCodeState: state, claudeCodeActivity: ClaudeCodeActivity(),
                 canSpeak: false, isSpeaking: false, speechVoiceID: nil,
-                keyEquivalent: nil, isSelected: false, isZoomed: false, groupID: nil, folderID: nil, folderGroupID: nil)
+                keyEquivalent: nil, isSelected: false, isZoomed: false)
         }
 
         // A hand-picked color, and a session following its state, fill the row with it.
@@ -168,5 +169,66 @@ struct TabSidebarFilterTests {
         #expect(tab(.green, .attention, light: .clean).fillColor == .none)
         #expect(tab(.red, .attention, light: .waiting).fillColor == .red)
         #expect(tab(.yellow, .attention, light: .pending).fillColor == .yellow)
+    }
+
+    /// A picked group shows the sessions of the groups inside it, and a group left with
+    /// none goes, at every depth. The filter offers the inner groups by their path.
+    @Test func aPickedGroupShowsTheGroupsInsideIt() {
+        let settings = settings()
+        let store = UserTabGroupStore.shared
+        let clients = store.create(name: "Clients")
+        let acme = store.create(name: "Acme", parentID: clients.id)
+        let globex = store.create(name: "Globex", parentID: clients.id)
+        defer { [clients, acme, globex].forEach { store.remove($0.id) } }
+
+        var windows: [TerminalWindow] = []
+        func tab(_ title: String, groups: [UUID] = [], color: TerminalTabColor = .none) -> TabSidebarModel.Tab {
+            let window = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+            windows.append(window)
+            return TabSidebarModel.Tab(
+                id: ObjectIdentifier(window), window: nil, index: windows.count, title: title,
+                color: color, assignedColor: color, claudeCodeState: nil, claudeCodeActivity: ClaudeCodeActivity(),
+                canSpeak: false, isSpeaking: false, speechVoiceID: nil,
+                keyEquivalent: nil, isSelected: false, isZoomed: false, groupPath: groups)
+        }
+        let brief = tab("Brief", groups: [clients.id])
+        let site = tab("Site", groups: [clients.id, acme.id], color: .purple)
+        let api = tab("API", groups: [clients.id, acme.id])
+        let audit = tab("Audit", groups: [clients.id, globex.id])
+        let plain = tab("plain shell")
+        let rows: [TabSidebarModel.Row] = [
+            .group(.init(group: clients, rows: [
+                .tab(brief),
+                .group(.init(group: acme, tabs: [site, api])),
+                .group(.init(group: globex, tabs: [audit])),
+            ])),
+            .tab(plain),
+        ]
+
+        // The outer group shows everything in it.
+        var filter = SessionBoardFilter(groups: [clients.id])
+        #expect(titles(TabSidebarFilter.filter(rows, by: filter, settings: settings)) == ["Brief", "Site", "API", "Audit"])
+
+        // An inner group shows its own, inside the outer group's row, and the sibling
+        // group left with none goes.
+        filter = SessionBoardFilter(groups: [acme.id])
+        let acmeOnly = TabSidebarFilter.filter(rows, by: filter, settings: settings)
+        #expect(titles(acmeOnly) == ["Site", "API"])
+        guard case .group(let outer)? = acmeOnly.first else {
+            Issue.record("the outer group is kept")
+            return
+        }
+        #expect(outer.rows.count == 1)
+
+        filter = SessionBoardFilter(groups: [acme.id], colors: [.purple])
+        #expect(titles(TabSidebarFilter.filter(rows, by: filter, settings: settings)) == ["Site"])
+        filter = SessionBoardFilter(groups: [nil])
+        #expect(titles(TabSidebarFilter.filter(rows, by: filter, settings: settings)) == ["plain shell"])
+
+        // The groups are offered outer first, the inner ones by their path.
+        let host = TerminalWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        let model = TabSidebarModel(hostWindow: host)
+        let options = SessionBoardFilterOptions(model: model, tabs: [brief, site, api, audit, plain], board: settings).groups
+        #expect(options.map(\.label) == ["Clients", "Clients › Acme", "Clients › Globex", "No Group"])
     }
 }

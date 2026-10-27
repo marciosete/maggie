@@ -22,9 +22,6 @@ struct RemoteBoardTests {
             keyEquivalent: nil,
             isSelected: false,
             isZoomed: false,
-            groupID: nil,
-            folderID: nil,
-            folderGroupID: nil,
             boardPlace: column.map { SessionBoardPlace(column: $0, order: order ?? 0) },
             workItemID: workItem)
     }

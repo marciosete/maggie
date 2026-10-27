@@ -5,18 +5,24 @@ import Combine
 ///
 /// This is unrelated to `NSWindowTabGroup`, which is AppKit's native grouping of
 /// windows into tabs. A `UserTabGroup` is a label that a subset of the tabs within
-/// a native tab group share. Each `TerminalWindow` refers to its group by `id`.
+/// a native tab group share. Each `TerminalWindow` refers to its group by `id`. A
+/// group can be in another group, which it refers to by `parentID`: a tab in it is in
+/// the group's parents too.
 struct UserTabGroup: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
     var color: TerminalTabColor
     var isCollapsed: Bool
 
-    init(id: UUID = UUID(), name: String, color: TerminalTabColor = .none, isCollapsed: Bool = false) {
+    /// The group this group is in, if any.
+    var parentID: UUID?
+
+    init(id: UUID = UUID(), name: String, color: TerminalTabColor = .none, isCollapsed: Bool = false, parentID: UUID? = nil) {
         self.id = id
         self.name = name
         self.color = color
         self.isCollapsed = isCollapsed
+        self.parentID = parentID
     }
 }
 
@@ -34,9 +40,9 @@ final class UserTabGroupStore: ObservableObject {
         return groups[id]
     }
 
-    /// Creates and registers a new group.
-    func create(name: String, color: TerminalTabColor = .none) -> UserTabGroup {
-        let group = UserTabGroup(name: name, color: color)
+    /// Creates and registers a new group, in `parentID`'s group when given.
+    func create(name: String, color: TerminalTabColor = .none, parentID: UUID? = nil) -> UserTabGroup {
+        let group = UserTabGroup(name: name, color: color, parentID: parentID)
         groups[group.id] = group
         return group
     }
@@ -69,11 +75,50 @@ final class UserTabGroupStore: ObservableObject {
         return "Group \(index)"
     }
 
+    /// The group `id` and the groups it is in, outermost first. Empty for a group the
+    /// store doesn't know, and cut short at one it doesn't know or has seen already.
+    func path(of id: UUID?) -> [UUID] {
+        Self.path(of: id, in: groups)
+    }
+
+    /// `path(of:)` on `groups`, for a caller holding what the store is about to hold.
+    static func path(of id: UUID?, in groups: [UUID: UserTabGroup]) -> [UUID] {
+        var path: [UUID] = []
+        var next = id
+        while let id = next, let group = groups[id], !path.contains(id) {
+            path.insert(id, at: 0)
+            next = group.parentID
+        }
+        return path
+    }
+
+    /// The groups `id`'s group is in, outermost first.
+    func ancestors(of id: UUID?) -> [UserTabGroup] {
+        path(of: id).dropLast().compactMap { groups[$0] }
+    }
+
+    /// Whether `id` is `ancestorID`'s group or in it.
+    func isGroup(_ id: UUID?, within ancestorID: UUID) -> Bool {
+        path(of: id).contains(ancestorID)
+    }
+
+    /// The groups directly in `id`'s group.
+    func children(of id: UUID) -> [UserTabGroup] {
+        groups.values.filter { $0.parentID == id }
+    }
+
+    /// The names of the group and the groups it is in, outermost first, joined as a
+    /// path: `Clients › Acme`.
+    func pathName(of id: UUID) -> String {
+        path(of: id).compactMap { groups[$0]?.name }.joined(separator: " › ")
+    }
+
     /// Group metadata is saved with each window's restorable state, so whenever it
-    /// changes the member windows need to re-save.
+    /// changes the member windows need to re-save. A tab in a group is in its parents
+    /// too, so a change to a parent is saved by every tab under it.
     private static func invalidateRestorableState(forGroup id: UUID) {
         for window in NSApp.windows {
-            guard let window = window as? TerminalWindow, window.userTabGroupID == id else { continue }
+            guard let window = window as? TerminalWindow, shared.isGroup(window.userTabGroupID, within: id) else { continue }
             window.invalidateRestorableState()
         }
     }

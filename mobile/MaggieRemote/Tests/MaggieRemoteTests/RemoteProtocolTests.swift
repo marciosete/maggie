@@ -35,6 +35,21 @@ struct RemoteProtocolTests {
         .folderGroup(SidebarFolderGroup(id: "fg1", name: "Work", folders: [
             SidebarFolder(id: "f2", name: "notes", path: "/Users/me/notes", abbreviatedPath: "~/notes", hasGit: false, groupID: "fg1"),
         ])),
+        // A group of groups, and a folder group of folder groups.
+        .group(SidebarGroup(id: "g2", name: "Clients", rows: [
+            .session(SidebarSession(id: "s4", title: "brief")),
+            .group(SidebarGroup(id: "g3", name: "Acme", color: .blue, sessions: [
+                SidebarSession(id: "s5", title: "site", light: .pending, badge: 2),
+            ])),
+        ])),
+        .folderGroup(SidebarFolderGroup(id: "fg2", name: "Personal", rows: [
+            .folderGroup(SidebarFolderGroup(id: "fg3", name: "Side", folders: [
+                SidebarFolder(id: "f3", name: "blog", path: "/Users/me/blog", abbreviatedPath: "~/blog", hasGit: true, groupID: "fg3", rows: [
+                    .session(SidebarSession(id: "s6", title: "post")),
+                ]),
+            ])),
+            .folder(SidebarFolder(id: "f4", name: "recipes", path: "/Users/me/recipes", abbreviatedPath: "~/recipes", hasGit: false, groupID: "fg2")),
+        ])),
     ])
 
     static let clientMessages: [ClientMessage] = [
@@ -128,6 +143,60 @@ struct RemoteProtocolTests {
         #expect(try RemoteCoding.decode(HostMessage.self, from: data) == message)
     }
 
+    /// A group's sessions are every session in it, the inner groups' too, and a folder
+    /// group's folders every folder in it, so a device reads a nested sidebar flat where
+    /// it lists sessions or folders.
+    @Test func nestedGroupsFlattenToTheirSessionsAndFolders() {
+        let sidebar = Self.sidebar
+        guard case .group(let clients)? = sidebar.rows.first(where: { $0.id == "group-g2" }),
+              case .folderGroup(let personal)? = sidebar.rows.first(where: { $0.id == "folders-fg2" }) else {
+            Issue.record("the nested rows are in the fixture")
+            return
+        }
+        #expect(clients.sessions.map(\.id) == ["s4", "s5"])
+        #expect(clients.light == .pending)
+        #expect(personal.folders.map(\.id) == ["f3", "f4"])
+        #expect(personal.rows.flatMap(\.sessions).map(\.id) == ["s6"])
+        #expect(sidebar.sessions.map(\.id) == ["s1", "s2", "s3", "s4", "s5", "s6"])
+        #expect(sidebar.folders.map(\.id) == ["f1", "f2", "f3", "f4"])
+    }
+
+    /// A device from before groups nested reads a group's sessions and a folder group's
+    /// folders, which a newer Mac still sends flat beside the rows; and a Mac from before
+    /// sends only those, which read as the rows.
+    @Test func nestedGroupsReadAcrossVersions() throws {
+        let group = SidebarGroup(id: "g", name: "Clients", rows: [
+            .session(SidebarSession(id: "a", title: "a")),
+            .group(SidebarGroup(id: "h", name: "Acme", sessions: [SidebarSession(id: "b", title: "b")])),
+        ])
+        let data = try JSONEncoder().encode(group)
+        let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect((json["sessions"] as? [[String: Any]])?.compactMap { $0["id"] as? String } == ["a", "b"])
+        #expect((json["rows"] as? [Any])?.count == 2)
+        #expect(try JSONDecoder().decode(SidebarGroup.self, from: data) == group)
+
+        let old = try JSONDecoder().decode(SidebarGroup.self, from: Data("""
+        {"id":"g","name":"Clients","collapsed":false,"sessions":[{"id":"a","title":"a","finishedUnseen":false,"isWorktree":false,"bell":false,"isSelected":false}]}
+        """.utf8))
+        #expect(old.rows == [.session(SidebarSession(id: "a", title: "a"))])
+
+        let folders = SidebarFolderGroup(id: "p", name: "Personal", rows: [
+            .folderGroup(SidebarFolderGroup(id: "s", name: "Side", folders: [
+                SidebarFolder(id: "f", name: "blog", path: "/b", abbreviatedPath: "~/b", hasGit: true, groupID: "s"),
+            ])),
+        ])
+        let folderData = try JSONEncoder().encode(folders)
+        let folderJSON = try #require(try JSONSerialization.jsonObject(with: folderData) as? [String: Any])
+        #expect((folderJSON["folders"] as? [[String: Any]])?.compactMap { $0["id"] as? String } == ["f"])
+        #expect(try JSONDecoder().decode(SidebarFolderGroup.self, from: folderData) == folders)
+
+        let oldFolders = try JSONDecoder().decode(SidebarFolderGroup.self, from: Data("""
+        {"id":"p","name":"Personal","collapsed":true,"folders":[{"id":"f","name":"blog","path":"/b","abbreviatedPath":"~/b","hasGit":true,"collapsed":false,"rows":[]}]}
+        """.utf8))
+        #expect(oldFolders.folders.map(\.id) == ["f"])
+        #expect(oldFolders.rows.count == 1)
+    }
+
     @Test func envelopeCarriesVersionAndKind() throws {
         let data = try RemoteCoding.encode(ClientMessage.openSession(SessionRef(id: "s1")))
         let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -205,10 +274,10 @@ struct RemoteProtocolTests {
 
     @Test func sidebarFlattensFoldersAndSessions() {
         let sidebar = Self.sidebar
-        #expect(sidebar.folders.map(\.id) == ["f1", "f2"])
-        #expect(sidebar.sessions.map(\.id) == ["s1", "s2", "s3"])
+        #expect(sidebar.folders.map(\.id) == ["f1", "f2", "f3", "f4"])
+        #expect(sidebar.sessions.map(\.id) == ["s1", "s2", "s3", "s4", "s5", "s6"])
         #expect(sidebar.session(id: "s3")?.branch == "main")
-        #expect(sidebar.folders.map(\.hasGit) == [true, false])
+        #expect(sidebar.folders.map(\.hasGit) == [true, false, true, false])
     }
 
     @Test func statusTextMatchesTheSidebar() {

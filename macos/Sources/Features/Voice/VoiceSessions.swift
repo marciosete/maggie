@@ -123,19 +123,10 @@ final class VoiceSessionDirectory {
 
     /// The folder a session sits in, by the sidebar's rows.
     func folderName(of sessionID: String) -> String? {
-        for row in snapshot.rows {
-            switch row {
-            case .folder(let folder) where folder.rows.flatMap(\.sessions).contains(where: { $0.id == sessionID }):
-                return folder.name
-            case .folderGroup(let group):
-                if let folder = group.folders.first(where: { $0.rows.flatMap(\.sessions).contains { $0.id == sessionID } }) {
-                    return folder.name
-                }
-            default:
-                continue
-            }
-        }
-        return nil
+        // Every folder, in and out of folder groups, however deep.
+        snapshot.rows.flatMap(\.folders)
+            .first { $0.rows.flatMap(\.sessions).contains { $0.id == sessionID } }?
+            .name
     }
 
     var candidates: [VoiceSessionReference.Candidate] {

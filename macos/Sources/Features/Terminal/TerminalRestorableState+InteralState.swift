@@ -46,6 +46,11 @@ extension TerminalRestorableState {
 
         // The id of the window the tab is in. Optional, like the name.
         var windowID: UUID?
+
+        // MARK: - Nested groups
+        // The groups the tab's group is in, outermost first, so a group of groups comes
+        // back whole. Optional, like the group; state saved before groups nested has none.
+        var sidebarGroups: [UserTabGroup]?
     }
 }
 
@@ -54,10 +59,15 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
         let window = controller.window as? TerminalWindow
         let folders = UserTabFolderStore.shared
         let sidebarFolders = window.map { $0.folderSpace.folderIDs.compactMap { folders[$0] } }
+
+        // Every folder's group and the groups that is in, so a group of folder groups
+        // comes back whole.
+        let folderGroups = UserTabFolderGroupStore.shared
         var folderGroupIDs: [UUID] = []
         for folder in sidebarFolders ?? [] {
-            guard let groupID = folder.groupID, !folderGroupIDs.contains(groupID) else { continue }
-            folderGroupIDs.append(groupID)
+            for groupID in folderGroups.path(of: folder.groupID) where !folderGroupIDs.contains(groupID) {
+                folderGroupIDs.append(groupID)
+            }
         }
         self.init(
             focusedSurface: controller.focusedSurface?.id.uuidString,
@@ -74,6 +84,7 @@ extension TerminalRestorableState.InternalState where ViewType == Ghostty.Surfac
             workItemID: window?.workItemID,
             windowName: window?.folderSpace.name,
             windowID: window?.folderSpace.id,
+            sidebarGroups: UserTabGroupStore.shared.ancestors(of: window?.userTabGroupID),
         )
     }
 }

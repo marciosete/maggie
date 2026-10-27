@@ -3,10 +3,11 @@ import Foundation
 /// Narrows the sidebar to the sessions the board's filter shows: those in the picked
 /// folders and groups, with the picked colors, in the picked statuses.
 enum TabSidebarFilter {
-    /// Whether `filter` shows `tab`: by its folder, group and the color its row is
-    /// filled with, and by its column on the board.
+    /// Whether `filter` shows `tab`: by its folder, its groups and the color its row is
+    /// filled with, and by its column on the board. A picked group shows the sessions
+    /// of the groups inside it too.
     static func shows(_ tab: TabSidebarModel.Tab, filter: SessionBoardFilter, settings: SessionBoardSettings) -> Bool {
-        filter.shows(folder: tab.folderID, group: tab.groupID, color: tab.fillColor)
+        filter.shows(folder: tab.folderID, groups: tab.groupPath, color: tab.fillColor)
             && filter.shows(column: settings.column(for: tab.boardPlace?.column))
     }
 
@@ -26,28 +27,20 @@ enum TabSidebarFilter {
                 return shows(tab, filter: filter, settings: settings) ? row : nil
 
             case .group(let section):
-                let tabs = section.tabs.filter { shows($0, filter: filter, settings: settings) }
-                guard !tabs.isEmpty else { return nil }
-                return .group(.init(group: section.group, tabs: tabs))
+                let rows = self.filter(section.rows, by: filter, settings: settings)
+                guard !rows.isEmpty else { return nil }
+                return .group(.init(group: section.group, rows: rows))
 
             case .folder(let section):
-                return folder(section, by: filter, settings: settings).map(TabSidebarModel.Row.folder)
+                let rows = self.filter(section.rows, by: filter, settings: settings)
+                guard !rows.isEmpty || filter.folders.contains(section.folder.id) else { return nil }
+                return .folder(.init(folder: section.folder, rows: rows))
 
             case .folderGroup(let section):
-                let folders = section.folders.compactMap { folder($0, by: filter, settings: settings) }
-                guard !folders.isEmpty else { return nil }
-                return .folderGroup(.init(group: section.group, folders: folders))
+                let rows = self.filter(section.rows, by: filter, settings: settings)
+                guard !rows.isEmpty else { return nil }
+                return .folderGroup(.init(group: section.group, rows: rows))
             }
         }
-    }
-
-    private static func folder(
-        _ section: TabSidebarModel.FolderSection,
-        by filter: SessionBoardFilter,
-        settings: SessionBoardSettings
-    ) -> TabSidebarModel.FolderSection? {
-        let rows = self.filter(section.rows, by: filter, settings: settings)
-        guard !rows.isEmpty || filter.folders.contains(section.folder.id) else { return nil }
-        return .init(folder: section.folder, rows: rows)
     }
 }

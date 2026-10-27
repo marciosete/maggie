@@ -665,8 +665,8 @@ class TerminalWindow: NSWindow {
     private var groupNamesCancellable: AnyCancellable?
 
     /// Sets the window's title to the session's title, after the names of its folder
-    /// group, its folder and its group when it's in them. The stores' contents are passed
-    /// while they are about to change to them.
+    /// groups, its folder and its groups when it's in them, outermost first. The stores'
+    /// contents are passed while they are about to change to them.
     private func applySessionTitle(
         groups: [UUID: UserTabGroup] = UserTabGroupStore.shared.groups,
         folders: [UUID: UserTabFolder] = UserTabFolderStore.shared.folders,
@@ -675,14 +675,14 @@ class TerminalWindow: NSWindow {
         guard let sessionTitle else { return }
         var parts: [String] = []
         let folder = userTabFolderID.flatMap { folders[$0] }
-        if let folderGroupName = folder?.groupID.flatMap({ folderGroups[$0]?.name }), !folderGroupName.isEmpty {
-            parts.append(folderGroupName)
+        for id in UserTabFolderGroupStore.path(of: folder?.groupID, in: folderGroups) {
+            if let name = folderGroups[id]?.name, !name.isEmpty { parts.append(name) }
         }
         if let folderName = folder?.name, !folderName.isEmpty {
             parts.append(folderName)
         }
-        if let groupName = userTabGroupID.flatMap({ groups[$0]?.name }), !groupName.isEmpty {
-            parts.append(groupName)
+        for id in UserTabGroupStore.path(of: userTabGroupID, in: groups) {
+            if let name = groups[id]?.name, !name.isEmpty { parts.append(name) }
         }
         parts.append(sessionTitle)
         title = parts.joined(separator: " › ")

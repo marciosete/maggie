@@ -292,7 +292,7 @@ final class RemoteSessionFeed {
                     name: section.group.name,
                     collapsed: section.group.isCollapsed,
                     color: TabColorName(section.group.color),
-                    sessions: section.tabs.map { session($0, context: context) }))
+                    rows: sidebarRows(section.rows, context: context)))
             case .folder(let section):
                 return .folder(folder(section, context: context))
             case .folderGroup(let section):
@@ -300,7 +300,7 @@ final class RemoteSessionFeed {
                     id: section.group.id.uuidString,
                     name: section.group.name,
                     collapsed: section.group.isCollapsed,
-                    folders: section.folders.map { folder($0, context: context) }))
+                    rows: sidebarRows(section.rows, context: context)))
             }
         }
     }

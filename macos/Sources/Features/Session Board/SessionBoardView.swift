@@ -492,7 +492,7 @@ struct SessionBoardView: View {
     /// A session by the filters, and by what its card shows, so a card never hides for
     /// something not on it.
     private func matches(_ tab: TabSidebarModel.Tab) -> Bool {
-        guard model.boardFilter.shows(folder: tab.folderID, group: tab.groupID, color: tab.fillColor) else { return false }
+        guard model.boardFilter.shows(folder: tab.folderID, groups: tab.groupPath, color: tab.fillColor) else { return false }
         guard !words.isEmpty else { return true }
         let info = model.infos[tab.id]
         let text = [tab.title, SessionBoardCard.folderName(tab), info?.branch, info?.model]

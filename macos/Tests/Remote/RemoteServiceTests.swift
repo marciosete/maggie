@@ -116,9 +116,8 @@ struct RemoteSessionFeedTests {
             keyEquivalent: nil,
             isSelected: index == 0,
             isZoomed: false,
-            groupID: groupID,
-            folderID: folderID,
-            folderGroupID: nil)
+            groupPath: groupID.map { [$0] } ?? [],
+            folderID: folderID)
     }
 
     private func context(info: [Int: TabSidebarSessionInfo] = [:], git: Set<String> = []) -> RemoteSessionFeed.Context {

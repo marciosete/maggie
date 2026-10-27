@@ -139,7 +139,7 @@ struct WorkItemTests {
                 id: ObjectIdentifier(window), window: nil, index: 0, title: title,
                 color: .none, assignedColor: .none, claudeCodeState: nil, claudeCodeActivity: ClaudeCodeActivity(),
                 canSpeak: false, isSpeaking: false, speechVoiceID: nil,
-                keyEquivalent: nil, isSelected: false, isZoomed: false, groupID: nil, folderID: nil, folderGroupID: nil,
+                keyEquivalent: nil, isSelected: false, isZoomed: false,
                 workItemID: id)
         }
         let linked = tab("Controls", linkedTo: item.id)

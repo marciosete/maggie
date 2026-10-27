@@ -112,16 +112,22 @@ final class UserTabFolderStore: ObservableObject {
 }
 
 /// A named group of folders in the tab sidebar: a label the folders in it share, with
-/// nothing else to it. Each `UserTabFolder` refers to its group by `groupID`.
+/// nothing else to it. Each `UserTabFolder` refers to its group by `groupID`. A folder
+/// group can be in another folder group, which it refers to by `parentID`: a folder in it
+/// is in the group's parents too.
 struct UserTabFolderGroup: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
     var isCollapsed: Bool
 
-    init(id: UUID = UUID(), name: String, isCollapsed: Bool = false) {
+    /// The folder group this folder group is in, if any.
+    var parentID: UUID?
+
+    init(id: UUID = UUID(), name: String, isCollapsed: Bool = false, parentID: UUID? = nil) {
         self.id = id
         self.name = name
         self.isCollapsed = isCollapsed
+        self.parentID = parentID
     }
 }
 
@@ -138,8 +144,9 @@ final class UserTabFolderGroupStore: ObservableObject {
         return groups[id]
     }
 
-    func create(name: String) -> UserTabFolderGroup {
-        let group = UserTabFolderGroup(name: name)
+    /// Creates and registers a folder group, in `parentID`'s group when given.
+    func create(name: String, parentID: UUID? = nil) -> UserTabFolderGroup {
+        let group = UserTabFolderGroup(name: name, parentID: parentID)
         groups[group.id] = group
         return group
     }
@@ -155,7 +162,9 @@ final class UserTabFolderGroupStore: ObservableObject {
         body(&group)
         guard group != groups[id] else { return }
         groups[id] = group
-        for folder in UserTabFolderStore.shared.folders.values where folder.groupID == id {
+        // A folder in a group is in its parents too, so a change to a parent is saved by
+        // every folder under it.
+        for folder in UserTabFolderStore.shared.folders.values where isGroup(folder.groupID, within: id) {
             UserTabFolderStore.invalidateRestorableState(forFolder: folder.id)
         }
     }
@@ -170,5 +179,54 @@ final class UserTabFolderGroupStore: ObservableObject {
         var index = 1
         while existing.contains("Folders \(index)") { index += 1 }
         return "Folders \(index)"
+    }
+
+    /// The folder group `id` and the folder groups it is in, outermost first. Empty for
+    /// one the store doesn't know, and cut short at one it doesn't know or has seen already.
+    func path(of id: UUID?) -> [UUID] {
+        Self.path(of: id, in: groups)
+    }
+
+    /// `path(of:)` on `groups`, for a caller holding what the store is about to hold.
+    static func path(of id: UUID?, in groups: [UUID: UserTabFolderGroup]) -> [UUID] {
+        var path: [UUID] = []
+        var next = id
+        while let id = next, let group = groups[id], !path.contains(id) {
+            path.insert(id, at: 0)
+            next = group.parentID
+        }
+        return path
+    }
+
+    /// Whether `id` is `ancestorID`'s folder group or in it.
+    func isGroup(_ id: UUID?, within ancestorID: UUID) -> Bool {
+        path(of: id).contains(ancestorID)
+    }
+
+    /// The folder groups directly in `id`'s folder group.
+    func children(of id: UUID) -> [UserTabFolderGroup] {
+        groups.values.filter { $0.parentID == id }
+    }
+
+    /// Whether anything is in the folder group: a folder, or a folder group.
+    func isEmpty(_ id: UUID) -> Bool {
+        !UserTabFolderStore.shared.folders.values.contains(where: { $0.groupID == id })
+            && !groups.values.contains(where: { $0.parentID == id })
+    }
+
+    /// Takes out the folder group when nothing is in it, and then its parent when that
+    /// leaves nothing in it either.
+    func removeIfEmpty(_ id: UUID?) {
+        var next = id
+        while let id = next, let group = groups[id], isEmpty(id) {
+            groups[id] = nil
+            next = group.parentID
+        }
+    }
+
+    /// The names of the folder group and the folder groups it is in, outermost first,
+    /// joined as a path: `Clients › Acme`.
+    func pathName(of id: UUID) -> String {
+        path(of: id).compactMap { groups[$0]?.name }.joined(separator: " › ")
     }
 }
