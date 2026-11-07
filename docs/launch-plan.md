@@ -1,0 +1,289 @@
+# Maggie launch plan
+
+Written 8 November 2026. Closes every gap found in the 7 November readiness audit, in milestones with dates, owners and a "done when" for each. Uncommitted until you say go (`docs:` commits do not cause a release).
+
+## Decisions so far (8 November)
+
+- **GitHub Sponsors:** application started on 8 November from the Sponsors accounts page for the personal account `marciosete`. GitHub asked for sudo-mode two-factor confirmation at `github.com/sponsors/marciosete/signup`; that step, and what follows it (profile, tiers, Stripe Connect, tax form, submit), is yours. Until approved, the sponsor links in the README and site keep redirecting to the profile.
+- **The phone:** Maggie Mobile, the iPhone and iPad app, is coming. It is a **paid companion app and not open source**. The "coming" route is taken: the pairing UI stays visible (it works today and the app is in testing) and says so in one sentence; README, site and privacy page say "coming, paid".
+- **Open-core statement:** the Mac app, everything in this repository, is MIT and stays MIT, and needs nothing paid to work fully. Maggie Mobile is a paid app, not open source, and is how the project is funded alongside sponsorship. The protocol between the two halves is in this repository. No accounts, analytics or crash reporting in either half.
+- **Contact email:** `marcio.sete@gmail.com` everywhere in this repository (replaces `marcio@ai-foundry.au`).
+- **Force-multiplier skill:** no separate repository (see M2). The README carries a one-liner that installs it from this repository without Maggie.
+- **Still open:** `free-code` (private, archived, or left); the launch date.
+
+## Where we start
+
+Public since 22 September 2026, MIT, v0.31.0 released 27 October. Never announced. Baseline to beat, recorded 7 November:
+
+| Measure | Value |
+|---|---|
+| Stars / forks / watchers | 2 / 0 / 0 |
+| Issues / PRs / Discussions | 0 / 0 / 0 |
+| Repo views, 14 days | 17 (6 unique) |
+| Clones, 14 days | 53 (26 unique, CI included) |
+| Downloads of v0.31.0 DMG | 42 |
+
+Already done and verified: Developer ID signing, notarization with a stapled ticket (checked on the shipped DMG and app), Sparkle appcast, Homebrew cask auto-updated by the release, semver from conventional commits, privacy page, trademark notice, AI policy, contributing guide, security policy, issue templates, Discussions enabled, custom social card, topics and description.
+
+## The date
+
+**Show HN on Tuesday 1 December 2026, 6–7am US Eastern** (7–8pm Perth, 10–11pm Sydney). **LinkedIn post on Thursday 3 December.**
+
+Why not sooner: the aggressive option was Tuesday 17 November, nine days from now, with the LinkedIn series starting on the 10th and comms sign-off still pending. The quality of the recording and the README is the launch; a week more is cheap. Why not the week after the 17th: Thursday 26 November is US Thanksgiving and that whole week is soft on Hacker News. 1 December is the first clean Tuesday.
+
+Working rhythm assumed: evenings and weekends, as the commit history shows (70 of 176 fork commits landed between 7pm and midnight). Effort below is in evenings. Tasks marked **[A]** can be handed to a Claude Code session in this repo; **[M]** needs you (accounts, recordings, people, decisions).
+
+## Milestones at a glance
+
+| # | Milestone | Done by | Evenings |
+|---|---|---|---|
+| M0 | Decide and unblock | Mon 9 Nov | ½ |
+| M1 | Trust gate: tests in CI, release waits for them | Wed 11 Nov | 1–2 |
+| M2 | Force-multiplier skill installable on its own | Wed 11 Nov | 1 |
+| M3 | Repository housekeeping | Sun 15 Nov | 1 |
+| M4 | Product truth: README, open-core, phone, privacy, site | Fri 20 Nov | 2 |
+| M5 | Assets: demo workspace, screenshots, recording | Sun 22 Nov | 2 |
+| M6 | Community scaffolding | Wed 25 Nov | 1 |
+| M7 | Launch content, heads-up to Ghostty, release freeze | Fri 27 Nov | 1 |
+| M8 | Launch | Tue 1 – Thu 3 Dec | launch day online |
+| M9 | The week after | Fri 11 Dec | ½ a day, spread |
+
+Roughly eleven evenings over three weeks, about half of them delegable.
+
+---
+
+## M0 — Decide and unblock (by Mon 9 Nov)
+
+Decisions that gate later milestones, and two applications with lead times.
+
+- [x] **[M] Apply for GitHub Sponsors today.** Started 8 November; stopped at GitHub's two-factor confirmation, which is yours to enter. Finish at `github.com/sponsors/marciosete/signup`. Approval needs identity and Stripe Connect and can take days to weeks. If it is not approved by 27 November, M4 removes the sponsor asks from README and site and keeps Buy Me a Coffee.
+- [x] **[M] The phone: "coming".** Maggie Mobile is a paid companion app, not open source, not yet released. The Mac side of pairing stays visible and says so. Revisit if TestFlight opens before launch.
+- [x] **[M] Open-core statement** decided; see "Decisions so far". In the README ("What is open and what is not") and both site footers.
+- [ ] **[M] `free-code`.** The public repo described as Claude Code with "security-prompt guardrails stripped" is one click from Maggie's README. Private, archived, or left. Recommendation: private before M8.
+- [ ] **[M] Confirm the date** above, or pick the aggressive one and drop M6's optional items.
+
+**Done when:** Sponsors application submitted; the three decisions written at the top of this file.
+
+---
+
+## M1 — Trust gate (by Wed 11 Nov)
+
+The only workflow is `release.yml`, which builds, signs and publishes every `feat:`/`fix:` push to `main` without running the 65 Swift test files. Ghostty's own workflows were removed in the fork (4,638 lines of YAML deleted). Put back the one that matters.
+
+Written 8 November, modelled on the KIT agent-harness workflows (their shape only: `contents: read`, `persist-credentials: false`, a `ci-<ref>` concurrency group with cancel-in-progress, named jobs, release depending on the gate; nothing project-specific carried over). `actionlint` passes all three files; the one note is a pre-existing shellcheck info in `release.yml`. **Verified locally on 8 November:** the exact CI invocation (unsigned Debug host, UI tests skipped) ran 765 tests, 762 passed, 0 failed, 3 skipped by the tests themselves, 52 seconds for the test phase; `zig fmt --check build.zig src` and `swiftlint lint --strict` pass; a fresh Zig cache after one build is 2.8 GB, which is why the cache limit is 6 GiB. Not verified locally: typos (no binary), the runner's cold build time, Homebrew's SwiftLint install on the macos-26 image.
+
+- [x] **[A] `.github/workflows/test.yml`**, reusable (`workflow_call`), one job on `macos-26`, 60-minute timeout for a cold cache: `mlugg/setup-zig@v2` at **0.17.0** (what the release builds with and what `build.zig.zon` requires; the README said 0.16 and is now corrected), with the action's own cache and a 6 GiB limit; quick checks first (`zig fmt --check build.zig src`, `crate-ci/typos@v1.52.0` with `typos.toml`, SwiftLint `--strict` from Homebrew); then `zig build -Demit-macos-app=false -Dxcframework-target=native` and `xcodebuild test` on the `Ghostty` scheme, UI tests skipped, signing off, with the `.xcresult` bundle uploaded on failure.
+- [x] **[A] `.github/workflows/ci.yml`**: `pull_request` and `push` to every branch but `main`, calling `test.yml`. `main` is covered by the release.
+- [x] **[A] `release.yml`**: a `test` job calling `test.yml`; the release job now `needs: [test, version]`, so a red test produces no release. Nothing else changed.
+- [x] **[A] README**: a badge for the release workflow on `main` (it includes the gate; `ci.yml` never runs on `main`, so its badge would mislead).
+- [ ] **[M] Prove it**: push a branch with a deliberately failing test and watch CI fail; then a `fix:` to `main` and watch release wait for green. Watch the first run's time with a cold Zig cache; if it is well over 15 minutes, consider a weekly warm-up or a smaller build.
+
+**Done when:** a red test blocks a release, the badge is green on `main`, and CI runs on pull requests.
+
+---
+
+## M2 — Force-multiplier skill, installable without Maggie (by Wed 11 Nov)
+
+The 46× LinkedIn post goes out Thursday 12 November and its first comment says "run it on your own repos". The skill is built into Maggie: it lives at `macos/ClaudePlugin/skills/force-multiplier/` and every session Maggie starts has it. The gap was for the reader of that post who does not run Maggie, or a Mac: a CTO's engineer on Linux, or anyone who wants the number without installing a terminal app. The skill is three files and runs anywhere Claude Code runs.
+
+**Decided 8 November: no separate repository, no second copy to keep in step.** The README now has a one-liner that copies the three files from this repository into Claude Code's personal skills folder (`~/.claude/skills/force-multiplier/`). One source of truth, zero maintenance.
+
+- [x] **[A] README one-liner** under "The force multiplier", with what the skill measures and its caveats (volume not value; 150 is a convention; the team is the unit).
+- [x] **[A] `loc.sh` finds `loc-report.html` beside itself** through its own `SCRIPT_DIR` (`dirname "${BASH_SOURCE[0]}"`, line 76; the page is read from `$SCRIPT_DIR/loc-report.html`, line 900), so the personal-skill install works wherever the three files sit together. The `${CLAUDE_SKILL_DIR}` in `SKILL.md` is only how Claude Code is told where to run it from.
+- [ ] **[M] Fresh-Mac test**: a clean user account, install by the README one-liner, run on any repository, dashboard opens, no names shown by default. Time it.
+- [ ] **[A] marciosete.com**: link the skill folder from the essay where the measurement system is described (Part II, §5) and from the Research page.
+
+**Done when:** a stranger with Claude Code and no Maggie installs and runs it in under ten minutes from the README alone.
+
+---
+
+## M3 — Repository housekeeping (by Sun 15 Nov)
+
+- [x] **[A] Replace `AGENTS.md`.** Done 8 November: Maggie's own guide, with the build and test commands, the directory map (what is Ghostty's and what is Maggie's), the conventions from `CONTRIBUTING.md`, the every-push-is-a-release and privacy-page rules, and a pointer to Ghostty's guide for changes meant for upstream. The `CLAUDE.md` symlink stays.
+- [ ] **[M] Clean `origin`.** Attempted on 8 November through the GitHub API; the session's permission classifier denied the deletions as destructive, so they are yours. They are reversible: every ref still exists on the `upstream` remote. From the repository:
+
+  ```sh
+  git push origin --delete 1.1.x 1.2.x 1.3.x offset-audit push-tuwykoykluyz setneedle-crash tristan957/gtk-ng
+  git push origin --delete tip v1.0.0 v1.0.1 v1.1.0 v1.1.1 v1.1.2 v1.1.3 v1.2.0 v1.2.1 v1.2.2 v1.2.3 v1.3.0 v1.3.1
+  ```
+
+  The list was checked against `gh release list`: every `v0.x` tag on `origin` is a Maggie release and stays; `tip` and `v1.*` are Ghostty's. The stray local `v2026.10.2-17975` is already deleted. The Tags page should then show v0.31.0 first.
+- [x] **[M] Archive `marciosete/homebrew-tap`.** Done 8 November: its README now points at `marciosete/homebrew-maggie` with `brew untap` and the right install line, and the repository is archived (which also stops its hourly bump workflow). `homebrew-maggie` is updated by `release.yml` and is the one the README and site name.
+- [x] **[A] `CODE_OF_CONDUCT.md`**, Contributor Covenant 2.1, contact `marcio.sete@gmail.com`. Ghostty has none, so this is not an inheritance.
+- [x] **[A] `.github/PULL_REQUEST_TEMPLATE.md`**: what changes for the person, the commit type and scope, tests, AI-assistance statement, a three-line checklist.
+- [x] **[A] Issue template `config.yml`**: contact link to the privacy page for "a network call you did not expect".
+- [x] **[A] `fork/minimum-version`**: confirmed empty (comments only). No mandatory-update hold during launch week.
+- [x] **Contact email** replaced in `SECURITY.md` and the new files.
+
+**Done when:** `git ls-remote origin` lists only `main` and Maggie's tags (the one step left); the four files exist; the duplicate tap is archived.
+
+---
+
+## M4 — Product truth (by Fri 20 Nov)
+
+What the README and site say must match what 0.31 does, and must say what is open and what is not.
+
+**README (`[A]` draft, `[M]` review)**
+
+- [x] Screenshot block at the top: an HTML comment placeholder with the two image paths M5 will fill (`docs/images/sidebar.png`, `docs/images/maggie.gif`).
+- [x] "What it does" catches up with the product (8 November): **A board** (⌘K, columns, work items, colours and labels, folding columns, per window, filters narrow the sidebar), **A status bar** (plan limits, memory, keep-awake, voice), **A voice** ("hey Maggie" via on-device recognition, what it announces, OpenAI live speech with your key, the speaker with Mac voices or ElevenLabs), **A phone** (pairing by QR, same network or Tailscale, terminal drawn by Ghostty's engine, push via your APNs key held while the Mac is in use; app coming, paid), nested groups and folder groups, subagents under the row, ⌘-click Markdown, **Capture and timing**, bundled prices in Usage, **The force multiplier** with the install one-liner. Command palette, App Intents and AppleScript are Ghostty's and stay out. [M] review the voice paragraph against what the voice actually does today.
+- [x] **"What is open and what is not"** section, before "Install".
+- [x] **Comparables** paragraph at the end of "How it works", no names.
+- [x] Sponsor ask kept (application in progress). Revisit 27 November.
+- [x] Release, downloads, licence and tests-and-release badges under the title.
+
+**The phone (`[M]`, per M0: "coming")**
+
+- [x] `Settings › Mobile` footer says, in one sentence, that Maggie Mobile is coming and is a paid companion app and the Mac side stays free (`RemoteSettingsView.swift`; ships as `fix(remote)` or with the next `feat`). The pairing UI is not hidden: it works today and testers use it; hiding it would be a regression for them, and one honest sentence does the job.
+- [x] README and site say "coming, paid"; privacy page says the Mac side ships now and the app is not yet released.
+
+**Website (private repo `maggie-website`, cloned to `/Users/marciosete/projects/maggie-website`; `[A]` draft, `[M]` deploy with `vercel --prod`)**
+
+- [ ] Hero: the real screen recording (MP4, muted, looping) with the HTML mock kept below it or dropped. Waits on M5.
+- [x] Feature parity: the site already had fifteen feature cards covering everything in the README (it was ahead of the README, not behind). The phone card now says coming and paid.
+- [ ] **FAQ section** with the launch FAQ from M7.
+- [x] Privacy page: destinations in the code enumerated on 8 November (getmaggie.dev appcast, the LiteLLM price file on GitHub, OpenAI live speech, ElevenLabs, Apple's push service directly), nothing new since 0.20; phone paragraph reworded (same network or Tailscale, pushes held while the Mac is in use, app not yet released); "last checked" set to 8 November 2026, Maggie 0.31.
+- [x] Open-core sentence in both footers (index and privacy).
+- [ ] Open Graph image: a real screenshot, not the magpie, so the HN and LinkedIn cards show the product. Waits on M5.
+- [ ] **[M] Deploy** the site changes (`vercel --prod` in the clone) once reviewed; they are uncommitted in the clone.
+
+**Done when:** a stranger can list every feature from the README alone, knows what is free, and the site and README agree.
+
+---
+
+## M5 — Assets (by Sun 22 Nov)
+
+The single largest gap: there is no screenshot or recording anywhere. **You are running this milestone in a separate stream.**
+
+**Already in hand (found 8 November):** the website repo has `launch/staging/stage.sh`, which builds three fictional repositories (`lumen-shop`, `atlas-api`, `harbour-books`) with believable trees and histories and refuses to run inside `~/projects`, and `launch/staging/shot-list.md`, a seven-shot, 30–45 second script with the four session prompts that put the rows in four colours. Start there. Fictional repositories are safer than the personal ones suggested below, and the names match the HTML mock on the site.
+
+- [ ] **[M] Demo workspace.** `sh launch/staging/stage.sh ~/Desktop/maggie-demo`, then the four sessions from the shot list. If you prefer real code, personal and open-source repositories only (this repo, marciosete.com, brightkind, rovik); no client names, no Kinetic IT code. Dark theme, a clean font, 1920×1200 window.
+- [ ] **[M] Four screenshots** (PNG, 2× Retina): (1) the sidebar with one session red; (2) the usage panel by project and model; (3) the session board; (4) source control on a worktree with the Auto tab ready to land. Plus (5) a phone notification if TestFlight ships.
+- [ ] **[M] 60–90 second recording**, scripted: six sessions working → one turns red → click, answer the permission → it turns yellow, then teal as it commits → the Auto tab lands the worktree → hover for cost → the board → "hey Maggie, what's waiting on me?" → the phone buzzes (if shipping). No narration; captions if any. Record at 1920×1200 with CleanShot or QuickTime.
+- [ ] **[A] Exports**: MP4 1080p for site, LinkedIn and X; GIF ≤ 10 MB of the first 20–30 seconds for README and the Show HN comment (gifski or ffmpeg palettegen); a poster frame for Open Graph.
+- [ ] **[A] Place them**: README top, site hero, `og:image`, `.github` social preview re-upload.
+- [ ] **[M] Optional, for the LinkedIn components post later**: a 2–3 minute narrated walkthrough on YouTube, which also unlocks the `/videos` page on marciosete.com.
+
+**Done when:** README and site open on a real picture of the product, and the GIF plays in the GitHub README on mobile.
+
+---
+
+## M6 — Community scaffolding (by Wed 25 Nov)
+
+So the Issues tab is not empty on launch day and visitors can see direction.
+
+- [ ] **[M] Two GitHub milestones**: `v0.32 — launch` (the fixes and docs from this plan) and `After launch` (the roadmap).
+- [ ] **[A] Labels** mirroring the commit scopes in `CONTRIBUTING.md`: `sidebar`, `board`, `source-control`, `usage`, `voice`, `remote`, `install`, `release`, plus `upstream` (belongs to Ghostty), `needs-info`. Keep the defaults.
+- [ ] **[M] Six to eight issues** from the roadmap, two labelled `good first issue`, each with context and a "done when". Public, so they are your roadmap; write them as such.
+- [ ] **[M] Three pinned Discussions**: *Roadmap* (Announcements), *What are you running Maggie on?* (Show and tell), *Launch FAQ* (Q&A, from M7).
+- [ ] **[A] Discussions welcome post** template for the first fifty people, short.
+- [ ] Optional: GitHub Project board public view of the two milestones.
+
+**Done when:** the Issues tab shows direction, the Discussions tab has three pinned threads, and milestones exist.
+
+---
+
+## M7 — Launch content, heads-up, freeze (by Fri 27 Nov)
+
+**Separate piece of work, by your call.** Start from what exists: `launch/README.md` in the website repo already holds a Show HN title and first comment, X, LinkedIn and Reddit drafts, a one-line description and a checklist. It predates the 46× framing, the open-core statement and the libghostty answer, so M7 is a revision of that kit, not a blank page. The items below are what the revision has to add.
+
+- [ ] **[A] Show HN title**, under 80 characters. The kit has `Show HN: Maggie – a Mac terminal for running many coding agents in parallel`; the alternative is `Show HN: Maggie – an agent development environment for Mac, built on Ghostty`. Pick one.
+- [ ] **[A] First comment** (you post it immediately after submitting): why you built it (46× moved the bottleneck to attention); what is Ghostty's and what is Maggie's; why a fork of the macOS app and not a libghostty embed (the sidebar, workspace, restore, splits and tabs live in the app layer, and upstream is merged after each Ghostty release); the open-core statement; the privacy page in one line; built with the agents it manages, with the force-multiplier number for this repo. Four short paragraphs, no marketing.
+- [ ] **[A] Launch FAQ**, eight answers, used on HN, Reddit, Discussions and the site: Why macOS only? Why a fork and not a plugin or a libghostty app? What is commercial? Does it work with Gemini CLI, opencode, aider? It reads my `~/.claude` transcripts, what leaves the Mac? Voice needs my OpenAI key, why? Linux or Windows? How does it compare with TUI session managers and cloud agent runners?
+- [ ] **[A] Reddit posts** for r/ClaudeAI, r/macapps, r/commandline, each in that subreddit's register, each linking the site, not the repo.
+- [ ] **[A] X thread**, five posts, GIF on the first.
+- [ ] **[A] LinkedIn post 4** is drafted in `marciosete.com/docs/linkedin-comeback-series.md`; refresh the numbers from the M2 skill run.
+- [ ] **[M] Heads-up to Ghostty.** Ghostty's Discussions have no show-and-tell category and are vouch-gated, so do not post there. Send Mitchell Hashimoto a short direct note 48 hours before: what Maggie is, that it says "built on Ghostty, not affiliated", merges upstream after each release, and that a Show HN is coming on the 1st. No ask.
+- [ ] **[M] Release freeze** from Friday 27 November to Wednesday 2 December: `fix:` only on `main`. No upstream merge in that window. Every push is a release.
+- [ ] **[M] Record the baseline** again on 30 November: stars, views, clones, downloads, site visits.
+
+**Done when:** every text above exists in `docs/launch/` in this repo, Mitchell has been told, and `main` is frozen.
+
+---
+
+## M8 — Launch (Tue 1 Dec – Thu 3 Dec)
+
+**Tuesday 1 December**
+
+- [ ] 6–7am US Eastern: submit the Show HN with the site URL. Post the first comment at once.
+- [ ] Stay online six hours. Answer every substantive comment within 20 minutes; concede what is true; never ask for votes.
+- [ ] Within the hour: X thread; r/ClaudeAI. Reddit's other two the next morning, spaced.
+- [ ] A `fix:` release is allowed the same day for anything that breaks first-run.
+- [ ] Reply to every new Discussion and issue within the day.
+
+**Wednesday 2 December**
+
+- [ ] Morning check at 7am local: triage overnight issues, label, assign to milestone.
+- [ ] Post the HN result in Discussions Announcements (whatever it was, honestly).
+
+**Thursday 3 December**
+
+- [ ] LinkedIn post 4, with the HN result in the first comment if it is good, the GIF as the media.
+- [ ] Kinetic IT comms is not involved in this post; it is personal open source. Say nothing about Kinetic in it.
+
+**Done when:** the posts are live, the first-day issues are triaged, and nothing shipped broken.
+
+---
+
+## M9 — The week after (to Fri 11 Dec)
+
+- [ ] Fix the top three reported problems as `fix:` releases; thank reporters in release notes.
+- [ ] Turn the best HN or Reddit questions into FAQ entries on the site.
+- [ ] Thank-you Discussion with the numbers: before and after.
+- [ ] marciosete.com: the field note "Why I built Maggie", with the launch numbers and what you would do differently; add Maggie to the Lab (`data/projects.ts`, status Active) if not already done in M4.
+- [ ] Unfreeze: merge upstream Ghostty, resume features.
+- [ ] Decide the next milestone from what people actually asked for, not the pre-launch roadmap.
+
+---
+
+## Effect on the LinkedIn calendar
+
+Maggie's beat moves from 19 November to 3 December. The platform posts move up and the sequence still reads proof → discomfort → how → tool → how:
+
+| Week | Day | Post |
+|---|---|---|
+| 1 | Tue 10 Nov | 1. Day 100 |
+| 1 | Thu 12 Nov | 2. 46× (first comment links the standalone skill, M2) |
+| 2 | Tue 17 Nov | 3. Your engineers say 3×. Your CFO sees nothing. |
+| 2 | Thu 19 Nov | 5. Most enterprise agents are a chatbot with SSO |
+| 3 | Tue 24 Nov | 6. The components (+ diagram) |
+| 3 | Thu 26 Nov | 7. You capped Opus and called it governance |
+| 4 | Tue 1 Dec | Show HN (US morning) |
+| 4 | Thu 3 Dec | 4. At 46×, the bottleneck moved. Maggie. |
+| 5 | Tue 8 Dec | 9. Your review queue is now the factory floor (announces the Live) |
+| 5 | Thu 10 Dec | 10. Live: opening the box on 46× |
+
+Post 8 ("Make trust less necessary") becomes an essay chapter, or a January post.
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| Sponsors not approved in time | M4 removes the ask; Buy Me a Coffee stays |
+| TestFlight review slips | "Coming" route is ready as the default; flip when approved |
+| "Why not libghostty?" dominates HN | Answer is in the first comment before anyone asks |
+| A `feat:` push ships a regression on launch day | CI gate (M1) plus the freeze (M7) |
+| Ghostty community feels blindsided | Direct heads-up 48 hours before (M7) |
+| The profile undercuts the privacy story | `free-code` decision in M0 |
+| Launch lands in a dead week | 1 December avoids Thanksgiving; no Australian holidays that week |
+| Evenings run out | M3, M6 optional items and the YouTube walkthrough can slip past launch without harm |
+
+## Definition of launch-ready
+
+All true on Monday 30 November:
+
+- [ ] CI runs tests on PRs and `main`; release waits for green; badge is green.
+- [ ] README opens on a real screenshot and a GIF, lists every shipped feature, states what is open and what is not.
+- [ ] Site hero is the real recording; site and README agree; privacy page says "checked against 0.3x".
+- [ ] Sponsors live, or the ask removed.
+- [ ] The phone is installable or clearly "coming".
+- [ ] `origin` has only `main` and Maggie's tags; duplicate tap archived; `AGENTS.md` is Maggie's; code of conduct present.
+- [ ] Force-multiplier skill installs standalone in under ten minutes.
+- [ ] Issues tab has the roadmap; three Discussions pinned.
+- [ ] Show HN text, first comment, FAQ, Reddit and X drafts written; Mitchell told; `main` frozen.
+- [ ] `free-code` dealt with.
+- [ ] Baseline numbers recorded.
+
+## Working agreement
+
+One Claude Code session per milestone, in this repo, from `main`. Each task: say what will change, wait for "go", change it, confirm, tick it here. Commit types that do not release (`docs:`, `ci:`, `chore:`, `test:`) for everything in M1, M3 and M6; `feat(remote):` only for the phone setting. No push without a go. This file is the checklist; keep it current.
