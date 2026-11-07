@@ -603,8 +603,14 @@ struct VoicePreviewTests {
             Issue.record("expected the sample, got \(step)")
             return
         }
-        #expect(sample.count == (2 + 5 + 2) * 4800)
-        #expect(sample == Data(count: 2 * 4800) + loud + loud + loud + loud + loud + Data(count: 2 * 4800))
+        // Built in steps: a chain of + inside #expect is more than the compiler
+        // will type-check in reasonable time on some toolchains.
+        var expected = Data(count: 2 * 4800)
+        for _ in 0..<5 { expected.append(loud) }
+        expected.append(Data(count: 2 * 4800))
+        let expectedCount = 9 * 4800
+        #expect(sample.count == expectedCount)
+        #expect(sample == expected)
         #expect(collector.take(.closed(reason: "client_closed", seconds: 2)) == .nothing)
     }
 
