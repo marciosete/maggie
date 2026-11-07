@@ -2,7 +2,7 @@
 
 ## Reporting
 
-Email marcio@ai-foundry.au with what you found and how to reproduce it. Please
+Email marcio.sete@gmail.com with what you found and how to reproduce it. Please
 don't open a public issue for a vulnerability. You'll get a reply within a few
 days, and credit in the release that fixes it unless you'd rather not.
 

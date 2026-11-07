@@ -3,6 +3,9 @@ contact_links:
   - name: A question, or something to discuss
     url: https://github.com/marciosete/maggie/discussions
     about: How to do something, whether something is expected, or an idea that isn't ready to be an issue yet.
+  - name: A network call you did not expect
+    url: https://getmaggie.dev/privacy
+    about: That page lists every network call Maggie makes. If you saw one that isn't there, that is a bug; open a bug report and say what you saw.
   - name: A security problem
     url: https://github.com/marciosete/maggie/security/policy
     about: Please don't open a public issue for a vulnerability. The policy says where to send it.
