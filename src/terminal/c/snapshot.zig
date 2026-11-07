@@ -21,9 +21,30 @@ const terminal_c = @import("terminal.zig");
 /// Options configure validation and returned-terminal policy before snapshot
 /// decoding begins.
 pub const DecoderOption = enum(c_int) {
-    max_continuation_bytes = 0,
-    retain_continuation = 1,
-    compress_history = 2,
+    invalid = 0,
+    max_continuation_bytes = 1,
+    retain_continuation = 2,
+    compress_history = 3,
+    kitty_image_storage_limit = 4,
+    _,
+
+    /// The type that a `decoder_set` value points to.
+    pub fn InType(comptime self: DecoderOption) type {
+        return switch (self) {
+            .max_continuation_bytes => usize,
+            .retain_continuation, .compress_history => bool,
+            .kitty_image_storage_limit => u64,
+            .invalid, _ => void,
+        };
+    }
+};
+
+/// C: GhosttySnapshotDecoderProgressKind.
+///
+/// What the most recent successful `decoder_next` call decoded.
+pub const DecoderProgressKind = enum(c_int) {
+    page = 0,
+    image = 1,
     _,
 };
 
@@ -41,10 +62,19 @@ pub const DecoderData = enum(c_int) {
     progress_remaining = 7,
     retain_continuation = 8,
     compress_history = 9,
+    kitty_image_storage_limit = 10,
+    progress_kind = 11,
+    progress_image_id = 12,
+    progress_image_frame = 13,
+    progress_image_bytes = 14,
+    kitty_images_primary = 15,
+    kitty_images_alternate = 16,
+    kitty_pending_bytes_primary = 17,
+    kitty_pending_bytes_alternate = 18,
     _,
 
     /// Return the Zig type stored through the C API output pointer for a key.
-    fn OutType(comptime self: DecoderData) type {
+    pub fn OutType(comptime self: DecoderData) type {
         return switch (self) {
             .invalid => void,
             .max_continuation_bytes, .source_offset => usize,
@@ -53,6 +83,14 @@ pub const DecoderData = enum(c_int) {
             .progress_rows => usize,
             .progress_remaining => u32,
             .retain_continuation, .compress_history => bool,
+            .kitty_image_storage_limit => u64,
+            .progress_kind => DecoderProgressKind,
+            .progress_image_id, .progress_image_frame => u32,
+            .progress_image_bytes => usize,
+            .kitty_images_primary, .kitty_images_alternate => u32,
+            .kitty_pending_bytes_primary,
+            .kitty_pending_bytes_alternate,
+            => u64,
             _ => void,
         };
     }
@@ -85,6 +123,7 @@ const DecoderWrapper = struct {
     /// READY metadata that remains queryable through FINISH or a later error.
     const Metadata = struct {
         history_rows: std.EnumMap(terminal_c.TerminalScreen, u64),
+        kitty: std.EnumArray(terminal_c.TerminalScreen, snapshot_core.kitty.Counts),
     };
 
     /// Decoder lifecycle and the data available in each phase.
@@ -111,6 +150,10 @@ const DecoderWrapper = struct {
     max_continuation_bytes: usize,
     retain_continuation: bool,
     compress_history: bool,
+
+    /// The Kitty graphics image storage limit for restored screens, or null
+    /// for the default limit of a new screen.
+    kitty_image_storage_limit: ?u64,
 };
 
 /// C: GhosttySnapshotDecoder, an opaque nullable decoder handle.
@@ -122,6 +165,10 @@ pub fn decoder_new(
     out_: ?*Decoder,
     reader: io_c.Reader,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) {
+        if (out_) |o| o.* = null;
+        return .unsupported;
+    }
     // Validate C-owned output and callback pointers before allocating anything.
     const out = out_ orelse return .invalid_value;
     out.* = null;
@@ -140,6 +187,10 @@ pub fn decoder_new_buf(
     ptr: ?[*]const u8,
     len: usize,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) {
+        if (out_) |o| o.* = null;
+        return .unsupported;
+    }
     // Normalize the C pointer and length into a borrowed Zig slice.
     const out = out_ orelse return .invalid_value;
     out.* = null;
@@ -175,6 +226,7 @@ fn decoderNewSource(
     wrapper.max_continuation_bytes = default_max_continuation_bytes;
     wrapper.retain_continuation = false;
     wrapper.compress_history = false;
+    wrapper.kitty_image_storage_limit = null;
     wrapper.decoder = .init(wrapper.source.reader());
     out.* = wrapper;
     return .success;
@@ -182,6 +234,7 @@ fn decoderNewSource(
 
 /// Destroy a decoder without taking ownership of any returned terminal.
 pub fn decoder_free(decoder_: Decoder) callconv(lib.calling_conv) void {
+    if (comptime !lib.feature(.snapshot)) return;
     const decoder = decoder_ orelse return;
     const alloc = decoder.alloc;
     alloc.destroy(decoder);
@@ -193,6 +246,15 @@ pub fn decoder_set(
     option: DecoderOption,
     value_: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
+    // Check the key first, so an unknown key returns unsupported whatever
+    // state the decoder is in. Callers use that to check for a key.
+    switch (option) {
+        .invalid => return .invalid_value,
+        _ => return .unsupported,
+        else => {},
+    }
+
     // Options freeze as soon as any decoding attempt starts.
     const decoder = decoder_ orelse return .invalid_value;
     switch (decoder.state) {
@@ -200,16 +262,18 @@ pub fn decoder_set(
         else => return .invalid_value,
     }
 
-    // Interpret the erased C pointer according to the selected option.
-    const value = value_ orelse return .invalid_value;
+    // Interpret the erased C pointer according to the selected option. A
+    // NULL value restores the default decoder_new_buf starts with.
     switch (option) {
         .max_continuation_bytes => decoder.max_continuation_bytes =
-            @as(*const usize, @ptrCast(@alignCast(value))).*,
+            if (value_) |v| @as(*const DecoderOption.max_continuation_bytes.InType(), @ptrCast(@alignCast(v))).* else default_max_continuation_bytes,
         .retain_continuation => decoder.retain_continuation =
-            @as(*const bool, @ptrCast(@alignCast(value))).*,
+            if (value_) |v| @as(*const DecoderOption.retain_continuation.InType(), @ptrCast(@alignCast(v))).* else false,
         .compress_history => decoder.compress_history =
-            @as(*const bool, @ptrCast(@alignCast(value))).*,
-        _ => return .invalid_value,
+            if (value_) |v| @as(*const DecoderOption.compress_history.InType(), @ptrCast(@alignCast(v))).* else false,
+        .kitty_image_storage_limit => decoder.kitty_image_storage_limit =
+            if (value_) |v| @as(*const DecoderOption.kitty_image_storage_limit.InType(), @ptrCast(@alignCast(v))).* else null,
+        .invalid, _ => unreachable,
     }
     return .success;
 }
@@ -220,6 +284,7 @@ pub fn decoder_get(
     data: DecoderData,
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // Enumerate known keys so each branch recovers the correct output type.
     return switch (data) {
         inline .invalid,
@@ -232,12 +297,21 @@ pub fn decoder_get(
         .progress_remaining,
         .retain_continuation,
         .compress_history,
+        .kitty_image_storage_limit,
+        .progress_kind,
+        .progress_image_id,
+        .progress_image_frame,
+        .progress_image_bytes,
+        .kitty_images_primary,
+        .kitty_images_alternate,
+        .kitty_pending_bytes_primary,
+        .kitty_pending_bytes_alternate,
         => |comptime_data| decoderGetTyped(
             decoder_,
             comptime_data,
-            @ptrCast(@alignCast(out)),
+            @ptrCast(@alignCast(out orelse return .invalid_value)),
         ),
-        _ => .invalid_value,
+        _ => .unsupported,
     };
 }
 
@@ -267,6 +341,30 @@ fn decoderGetTyped(
             if (decoderFailed(decoder)) return .no_value;
             out.* = decoder.compress_history;
         },
+        .kitty_image_storage_limit => {
+            if (decoderFailed(decoder)) return .no_value;
+            out.* = decoder.kitty_image_storage_limit orelse
+                defaultKittyImageStorageLimit();
+        },
+
+        // Kitty graphics totals at READY, for screens the snapshot declares.
+        .kitty_images_primary,
+        .kitty_images_alternate,
+        .kitty_pending_bytes_primary,
+        .kitty_pending_bytes_alternate,
+        => {
+            const metadata = decoderMetadata(decoder) orelse return .no_value;
+            const key: terminal_c.TerminalScreen = switch (data) {
+                .kitty_images_primary, .kitty_pending_bytes_primary => .primary,
+                else => .alternate,
+            };
+            if (metadata.history_rows.get(key) == null) return .no_value;
+            const counts = metadata.kitty.get(key);
+            out.* = switch (data) {
+                .kitty_images_primary, .kitty_images_alternate => counts.images,
+                else => counts.pending_bytes,
+            };
+        },
 
         // READY metadata remains available after history decoding completes.
         .history_rows_primary => {
@@ -280,17 +378,46 @@ fn decoderGetTyped(
         },
 
         // Progress describes only the most recent successful `next` call.
+        // The screen and kind apply to both kinds of record. The rest apply
+        // to one kind only, and report no value after the other.
         .progress_screen => {
             const progress = decoderProgress(decoder) orelse return .no_value;
-            out.* = progress.key;
+            out.* = switch (progress) {
+                .page => |page| page.key,
+                .image => |image| image.key,
+            };
+        },
+        .progress_kind => {
+            const progress = decoderProgress(decoder) orelse return .no_value;
+            out.* = switch (progress) {
+                .page => .page,
+                .image => .image,
+            };
         },
         .progress_rows => {
             const progress = decoderProgress(decoder) orelse return .no_value;
-            out.* = progress.rows;
+            if (progress != .page) return .no_value;
+            out.* = progress.page.rows;
         },
         .progress_remaining => {
             const progress = decoderProgress(decoder) orelse return .no_value;
-            out.* = progress.remaining;
+            if (progress != .page) return .no_value;
+            out.* = progress.page.remaining;
+        },
+        .progress_image_id => {
+            const progress = decoderProgress(decoder) orelse return .no_value;
+            if (progress != .image) return .no_value;
+            out.* = progress.image.image_id;
+        },
+        .progress_image_frame => {
+            const progress = decoderProgress(decoder) orelse return .no_value;
+            if (progress != .image) return .no_value;
+            out.* = progress.image.frame;
+        },
+        .progress_image_bytes => {
+            const progress = decoderProgress(decoder) orelse return .no_value;
+            if (progress != .image) return .no_value;
+            out.* = progress.image.bytes;
         },
         else => return .invalid_value,
     }
@@ -317,7 +444,7 @@ fn decoderMetadata(
     };
 }
 
-/// Return page progress only during incremental history decoding.
+/// Return progress only during incremental history decoding.
 fn decoderProgress(
     decoder: *const DecoderWrapper,
 ) ?snapshot_core.Decoder.Progress {
@@ -327,6 +454,14 @@ fn decoderProgress(
     };
 }
 
+/// The Kitty graphics image storage limit a restored screen gets when the
+/// decoder option is not set: the default limit of a new screen.
+fn defaultKittyImageStorageLimit() u64 {
+    return (TerminalScreenOptions{ .cols = 1, .rows = 1 }).kitty_image_storage_limit;
+}
+
+const TerminalScreenOptions = @import("../Screen.zig").Options;
+
 /// Query several typed decoder values in order, stopping at the first error.
 pub fn decoder_get_multi(
     decoder_: Decoder,
@@ -335,6 +470,7 @@ pub fn decoder_get_multi(
     values_: ?[*]?*anyopaque,
     out_written: ?*usize,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // Invalid arrays and first-key failures both report zero completed writes.
     if (out_written) |written| written.* = 0;
     const keys = keys_ orelse return .invalid_value;
@@ -357,6 +493,7 @@ pub fn decoder_ready(
     decoder_: Decoder,
     out_: ?*terminal_c.Terminal,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // Validate the output and require an untouched decoder lifecycle.
     const out = out_ orelse return .invalid_value;
     out.* = null;
@@ -384,6 +521,7 @@ pub fn decoder_ready(
 pub fn decoder_next(
     decoder_: Decoder,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // FINISH is idempotent; every other non-history state rejects `next`.
     const decoder = decoder_ orelse return .invalid_value;
     switch (decoder.state) {
@@ -405,7 +543,7 @@ pub fn decoder_next(
         return decoderMapError(decoder, err);
     };
 
-    // Publish page progress, or transition permanently to validated FINISH.
+    // Publish progress, or transition permanently to validated FINISH.
     if (progress) |value| {
         history.progress = value;
         return .success;
@@ -421,6 +559,7 @@ pub fn decoder_decode(
     decoder_: Decoder,
     out_: ?*terminal_c.Terminal,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // Validate the output and require an untouched decoder lifecycle.
     const out = out_ orelse return .invalid_value;
     out.* = null;
@@ -467,6 +606,10 @@ fn decoderReadyTerminal(decoder: *DecoderWrapper) anyerror!ReadyTerminal {
         .{
             .max_continuation_bytes = decoder.max_continuation_bytes,
             .compress_history = decoder.compress_history,
+            .kitty_image_storage_limit = if (decoder.kitty_image_storage_limit) |limit|
+                std.math.cast(usize, limit) orelse std.math.maxInt(usize)
+            else
+                null,
         },
     );
     defer decoded.deinit(decoder.alloc);
@@ -474,6 +617,7 @@ fn decoderReadyTerminal(decoder: *DecoderWrapper) anyerror!ReadyTerminal {
     // Copy small query metadata before `fromDecoded` consumes the core result.
     const metadata: DecoderWrapper.Metadata = .{
         .history_rows = decoded.history_rows,
+        .kitty = decoded.kitty,
     };
 
     // Move terminal state and I/O into their final C-owned allocation.
@@ -559,6 +703,7 @@ pub fn encode(
     terminal: terminal_c.Terminal,
     writer: io_c.Writer,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // Validate both handles and preflight the terminal continuation.
     const native = terminal_c.zigTerminal(terminal) orelse return .invalid_value;
     if (writer.write == null) return .invalid_value;
@@ -588,6 +733,7 @@ pub fn encode_buf(
     buf_len: usize,
     out_written_: ?*usize,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // Validate output storage and preflight the terminal continuation.
     const out_written = out_written_ orelse return .invalid_value;
     out_written.* = 0;
@@ -634,6 +780,7 @@ pub fn encode_alloc(
     out_ptr_: ?*?[*]u8,
     out_len_: ?*usize,
 ) callconv(lib.calling_conv) Result {
+    if (comptime !lib.feature(.snapshot)) return .unsupported;
     // Initialize outputs before validating terminal state or allocating bytes.
     const out_ptr = out_ptr_ orelse return .invalid_value;
     const out_len = out_len_ orelse return .invalid_value;
@@ -770,6 +917,28 @@ test "decoder option and empty source" {
         &compress,
     ));
     try testing.expect(compress);
+
+    const storage_limit: u64 = 1;
+    try testing.expectEqual(Result.success, decoder_set(
+        decoder,
+        .kitty_image_storage_limit,
+        &storage_limit,
+    ));
+
+    // A NULL value restores each default.
+    inline for (.{
+        DecoderOption.max_continuation_bytes,
+        DecoderOption.retain_continuation,
+        DecoderOption.compress_history,
+        DecoderOption.kitty_image_storage_limit,
+    }) |option| {
+        try testing.expectEqual(Result.success, decoder_set(decoder, option, null));
+    }
+    try testing.expectEqual(default_max_continuation_bytes, decoder.?.max_continuation_bytes);
+    try testing.expect(!decoder.?.retain_continuation);
+    try testing.expect(!decoder.?.compress_history);
+    try testing.expectEqual(null, decoder.?.kitty_image_storage_limit);
+    try testing.expectEqual(Result.unsupported, decoder_set(decoder, @fromBackingInt(@intCast(9999)), null));
 
     var written: usize = 99;
     try testing.expectEqual(Result.invalid_value, decoder_get_multi(
@@ -1392,10 +1561,11 @@ test "snapshot decoder compresses history when requested" {
         2,
     ));
     defer terminal_c.free(source);
+    const unlimited: usize = std.math.maxInt(usize);
     try testing.expectEqual(Result.success, terminal_c.set(
         source,
         .scrollback_max_bytes,
-        null,
+        &unlimited,
     ));
     const source_pages = &terminal_c.zigTerminal(source).?.screens
         .get(.primary).?.pages;
@@ -1483,10 +1653,11 @@ test "snapshot incremental decoder exposes READY and page progress" {
     try testEnableContinuation(source);
     // Keep multiple complete pages. The ordinary C-terminal byte limit keeps
     // at least one page but can evict older ones before snapshot encoding.
+    const unlimited: usize = std.math.maxInt(usize);
     try testing.expectEqual(Result.success, terminal_c.set(
         source,
         .scrollback_max_bytes,
-        null,
+        &unlimited,
     ));
     const first_page_rows = terminal_c.zigTerminal(source).?.screens
         .get(.primary).?.pages.pages.first.?.capacity().rows;
@@ -1647,4 +1818,209 @@ test "snapshot incremental decoder exposes READY and page progress" {
     try testing.expectEqual(@as(usize, 0), dropped_rows);
     while (decoder_next(dropped_decoder) == .success) {}
     try testing.expectEqual(Result.no_value, decoder_next(dropped_decoder));
+}
+
+const build_options = @import("terminal_options");
+const kitty_graphics_c = @import("kitty_graphics.zig");
+const PlacementKey = @import("../kitty/graphics_storage.zig").ImageStorage.PlacementKey;
+
+/// Collect the render info of every Kitty graphics placement on a terminal's
+/// active screen, keyed by image and placement ID.
+fn testPlacementRenderInfo(
+    terminal: terminal_c.Terminal,
+) !std.AutoHashMap(
+    PlacementKey,
+    kitty_graphics_c.PlacementRenderInfo,
+) {
+    var result: std.AutoHashMap(
+        PlacementKey,
+        kitty_graphics_c.PlacementRenderInfo,
+    ) = .init(testing.allocator);
+    errdefer result.deinit();
+
+    var graphics: kitty_graphics_c.KittyGraphics = undefined;
+    try testing.expectEqual(Result.success, terminal_c.get(
+        terminal,
+        .kitty_graphics,
+        @ptrCast(&graphics),
+    ));
+    var iter: kitty_graphics_c.PlacementIterator = null;
+    try testing.expectEqual(Result.success, kitty_graphics_c.placement_iterator_new(
+        &lib.alloc.test_allocator,
+        &iter,
+    ));
+    defer kitty_graphics_c.placement_iterator_free(iter);
+    try testing.expectEqual(Result.success, kitty_graphics_c.get(
+        graphics,
+        .placement_iterator,
+        @ptrCast(&iter),
+    ));
+    while (kitty_graphics_c.placement_iterator_next(iter)) {
+        const key = iter.?.entry.?.key_ptr.*;
+        const img = kitty_graphics_c.image_get_handle(graphics, key.image_id);
+        var info: kitty_graphics_c.PlacementRenderInfo = .{};
+        try testing.expectEqual(Result.success, kitty_graphics_c.placement_render_info(
+            iter,
+            img,
+            terminal,
+            &info,
+        ));
+        try result.put(key, info);
+    }
+    return result;
+}
+
+test "snapshot decoder restores Kitty graphics images and reports their payloads" {
+    if (comptime !build_options.kitty_graphics) return error.SkipZigTest;
+
+    var source: terminal_c.Terminal = null;
+    try testing.expectEqual(Result.success, terminal_c.new(
+        &lib.alloc.test_allocator,
+        &source,
+        20,
+        5,
+    ));
+    defer terminal_c.free(source);
+    try testing.expectEqual(Result.success, terminal_c.resize(source, 20, 5, 10, 20));
+
+    // Two placed images: one scaled to cells, one cropped and offset.
+    const commands =
+        "\x1b_Ga=T,f=24,i=1,p=1,s=1,v=2,c=4,r=2,q=2;////////\x1b\\" ++
+        "\x1b_Ga=T,f=32,i=2,p=3,s=2,v=1,x=1,w=1,X=3,Y=4,z=-1,q=2;AAAA/wAAAP8=\x1b\\";
+    terminal_c.vt_write(source, commands, commands.len);
+
+    var encoded_ptr: ?[*]u8 = null;
+    var encoded_len: usize = 0;
+    try testing.expectEqual(Result.success, encode_alloc(
+        source,
+        &lib.alloc.test_allocator,
+        &encoded_ptr,
+        &encoded_len,
+    ));
+    const encoded = encoded_ptr.?[0..encoded_len];
+    defer lib.alloc.default(&lib.alloc.test_allocator).free(encoded);
+
+    var decoder: Decoder = null;
+    try testing.expectEqual(Result.success, decoder_new_buf(
+        &lib.alloc.test_allocator,
+        &decoder,
+        encoded.ptr,
+        encoded.len,
+    ));
+    defer decoder_free(decoder);
+
+    const limit: u64 = 1024 * 1024;
+    try testing.expectEqual(Result.success, decoder_set(
+        decoder,
+        .kitty_image_storage_limit,
+        &limit,
+    ));
+    var limit_out: u64 = 0;
+    try testing.expectEqual(Result.success, decoder_get(
+        decoder,
+        .kitty_image_storage_limit,
+        &limit_out,
+    ));
+    try testing.expectEqual(limit, limit_out);
+
+    var images: u32 = 0;
+    try testing.expectEqual(Result.no_value, decoder_get(
+        decoder,
+        .kitty_images_primary,
+        &images,
+    ));
+
+    var restored: terminal_c.Terminal = null;
+    try testing.expectEqual(Result.success, decoder_ready(decoder, &restored));
+    defer terminal_c.free(restored);
+
+    // READY restores both images with their placements and render geometry.
+    try testing.expectEqual(Result.success, decoder_get(
+        decoder,
+        .kitty_images_primary,
+        &images,
+    ));
+    try testing.expectEqual(2, images);
+    var pending_bytes: u64 = 0;
+    try testing.expectEqual(Result.success, decoder_get(
+        decoder,
+        .kitty_pending_bytes_primary,
+        &pending_bytes,
+    ));
+    try testing.expectEqual(6 + 8, pending_bytes);
+    try testing.expectEqual(Result.no_value, decoder_get(
+        decoder,
+        .kitty_images_alternate,
+        &images,
+    ));
+    try testing.expectEqual(
+        limit,
+        terminal_c.zigTerminal(restored).?.screens.active.kitty_images.total_limit,
+    );
+
+    var expected = try testPlacementRenderInfo(source);
+    defer expected.deinit();
+    {
+        var actual = try testPlacementRenderInfo(restored);
+        defer actual.deinit();
+        try testing.expectEqual(2, expected.count());
+        try testing.expectEqual(expected.count(), actual.count());
+        var it = expected.iterator();
+        while (it.next()) |entry| try testing.expectEqualDeep(
+            entry.value_ptr.*,
+            actual.get(entry.key_ptr.*).?,
+        );
+    }
+
+    // Each image's pixels are one progress event. The page values report
+    // no value for them.
+    var kind: DecoderProgressKind = undefined;
+    try testing.expectEqual(Result.no_value, decoder_get(decoder, .progress_kind, &kind));
+    var attached: u64 = 0;
+    for (0..2) |_| {
+        try testing.expectEqual(Result.success, decoder_next(decoder));
+        try testing.expectEqual(Result.success, decoder_get(decoder, .progress_kind, &kind));
+        try testing.expectEqual(DecoderProgressKind.image, kind);
+        var screen: terminal_c.TerminalScreen = undefined;
+        var image_id: u32 = 0;
+        var frame: u32 = 0;
+        var bytes: usize = 0;
+        try testing.expectEqual(Result.success, decoder_get(decoder, .progress_screen, &screen));
+        try testing.expectEqual(Result.success, decoder_get(decoder, .progress_image_id, &image_id));
+        try testing.expectEqual(Result.success, decoder_get(decoder, .progress_image_frame, &frame));
+        try testing.expectEqual(Result.success, decoder_get(decoder, .progress_image_bytes, &bytes));
+        try testing.expectEqual(terminal_c.TerminalScreen.primary, screen);
+        try testing.expect(image_id == 1 or image_id == 2);
+        try testing.expectEqual(1, frame);
+        attached += bytes;
+
+        var rows: usize = 0;
+        try testing.expectEqual(Result.no_value, decoder_get(decoder, .progress_rows, &rows));
+    }
+    try testing.expectEqual(pending_bytes, attached);
+
+    // History pages report the page kind and no image details.
+    while (true) {
+        const result = decoder_next(decoder);
+        if (result == .no_value) break;
+        try testing.expectEqual(Result.success, result);
+        try testing.expectEqual(Result.success, decoder_get(decoder, .progress_kind, &kind));
+        try testing.expectEqual(DecoderProgressKind.page, kind);
+        var image_id: u32 = 0;
+        try testing.expectEqual(Result.no_value, decoder_get(decoder, .progress_image_id, &image_id));
+    }
+
+    var graphics: kitty_graphics_c.KittyGraphics = undefined;
+    try testing.expectEqual(Result.success, terminal_c.get(
+        restored,
+        .kitty_graphics,
+        @ptrCast(&graphics),
+    ));
+    var pixels: lib.String = undefined;
+    try testing.expectEqual(Result.success, kitty_graphics_c.image_get(
+        kitty_graphics_c.image_get_handle(graphics, 2),
+        .pixels,
+        @ptrCast(&pixels),
+    ));
+    try testing.expectEqualSlices(u8, &.{ 0, 0, 0, 255, 0, 0, 0, 255 }, pixels.ptr[0..pixels.len]);
 }

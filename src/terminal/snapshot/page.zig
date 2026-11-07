@@ -152,25 +152,34 @@ pub fn encode(
 
 /// Errors possible while decoding and validating a complete PAGE record.
 pub const DecodeError = PayloadDecodeError ||
-    record.Reader.InitError ||
     record.Reader.FinishError ||
     TerminalPage.IntegrityError ||
     error{
-        /// The next record is valid but is not a PAGE.
+        /// The record is valid but is not a PAGE.
         UnexpectedRecordTag,
     };
 
 /// Decode and validate one complete PAGE record into a fresh native page.
 ///
+/// `record_header` is the record's header, already read from `reader`. A
+/// header for any other kind of record returns `error.UnexpectedRecordTag`.
+/// See "Decoding Records" in `record.zig`.
+///
 /// The record tag, payload boundary, CRC32C, payload contents, and final page
 /// integrity are all validated before the page is returned. `alloc` is used
 /// only for temporary decode remaps and integrity-check storage.
+///
+/// ```zig
+/// var decoded = try page.decode(reader, try record.nextHeader(reader), alloc);
+/// defer decoded.deinit();
+/// ```
 pub fn decode(
     reader: *std.Io.Reader,
+    record_header: record.Header,
     alloc: Allocator,
 ) DecodeError!TerminalPage {
     var decoder: Decoder = undefined;
-    try decoder.init(reader);
+    try decoder.init(reader, record_header);
 
     var page = TerminalPage.init(decoder.capacity()) catch
         return error.OutOfMemory;
@@ -190,8 +199,23 @@ pub const Decoder = struct {
     /// Begin decoding one PAGE record and expose its required capacity.
     /// After this, call `capacity` to get the capacity to allocate
     /// the page properly, then `decode` into it.
-    pub fn init(self: *Decoder, reader: *std.Io.Reader) DecodeError!void {
-        try self.record_reader.init(reader);
+    ///
+    /// `record_header` is the record's header, already read from `reader`.
+    /// A header for any other kind of record returns
+    /// `error.UnexpectedRecordTag`. See "Decoding Records" in `record.zig`.
+    ///
+    /// ```zig
+    /// var decoder: page.Decoder = undefined;
+    /// try decoder.init(reader, try record.nextHeader(reader));
+    /// const native_page = try builder.allocatePage(decoder.capacity());
+    /// try decoder.decode(native_page, alloc);
+    /// ```
+    pub fn init(
+        self: *Decoder,
+        reader: *std.Io.Reader,
+        record_header: record.Header,
+    ) DecodeError!void {
+        self.record_reader.initHeader(reader, record_header);
         if (self.record_reader.header.tag != .page) {
             return error.UnexpectedRecordTag;
         }
@@ -289,22 +313,28 @@ pub const Decoder = struct {
 };
 
 /// Errors possible while discarding one PAGE record without decoding it.
-pub const DiscardError = record.Reader.InitError ||
-    record.Reader.FinishError ||
+pub const DiscardError = record.Reader.FinishError ||
     std.Io.Reader.Error ||
     error{
-        /// The next record is valid but is not a PAGE.
+        /// The record is valid but is not a PAGE.
         UnexpectedRecordTag,
     };
 
 /// Consume exactly one complete PAGE record, validating its framing and
 /// CRC32C while discarding the payload without structural validation.
 ///
+/// `record_header` is the record's header, already read from `source`. A
+/// header for any other kind of record returns `error.UnexpectedRecordTag`.
+/// See "Decoding Records" in `record.zig`.
+///
 /// This lets a decoder stay aligned with the record sequence while dropping
 /// page content it can no longer apply.
-pub fn discard(source: *std.Io.Reader) DiscardError!void {
+pub fn discard(
+    source: *std.Io.Reader,
+    record_header: record.Header,
+) DiscardError!void {
     var record_reader: record.Reader = undefined;
-    try record_reader.init(source);
+    record_reader.initHeader(source, record_header);
     if (record_reader.header.tag != .page) {
         return error.UnexpectedRecordTag;
     }
@@ -500,7 +530,10 @@ pub const Header = struct {
     /// Suggested capacity for the native non-default style set.
     style_capacity: u16,
 
-    /// Suggested native hyperlink storage capacity in bytes.
+    /// Suggested native hyperlink storage capacity in bytes. The native
+    /// page has two hyperlink capacities, a set size in bytes and a map
+    /// size in cells, and this one value covers both: see
+    /// `hyperlinkCapacityBytes` and `pageCapacity`.
     hyperlink_capacity_bytes: u16,
 
     /// Suggested native grapheme storage capacity in bytes.
@@ -552,11 +585,46 @@ pub const Header = struct {
             .style_count = @intCast(page.styles.count()),
             .hyperlink_count = @intCast(page.hyperlink_set.count()),
             .style_capacity = page.capacity.styles,
-            .hyperlink_capacity_bytes = page.capacity.hyperlink_bytes,
+            .hyperlink_capacity_bytes = hyperlinkCapacityBytes(page.capacity),
             .grapheme_capacity_bytes = page.capacity.grapheme_bytes,
             .string_capacity_bytes = page.capacity.string_bytes,
         };
     }
+
+    /// The single hyperlink capacity hint for a native capacity.
+    ///
+    /// The native page sizes its hyperlink set from `hyperlink_bytes`
+    /// and its hyperlink map from `hyperlink_cells`, but the PAGE header
+    /// carries one value, which `pageCapacity` turns back into both:
+    /// the set gets the bytes and the map gets `hyperlink_cell_multiplier`
+    /// cells per set item, which is how a native page sized its map
+    /// before it had `hyperlink_cells`. So this is the larger of the set
+    /// bytes and the bytes whose derived map holds `hyperlink_cells`,
+    /// and a decoded page has at least the encoded page's capacity in
+    /// both tables, possibly more in one of them.
+    ///
+    /// The hint saturates for maps of more than
+    /// `max_hinted_hyperlink_cells` cells. `pageCapacity` sizes the map
+    /// for every cell of the page in that case, so no link is lost.
+    fn hyperlinkCapacityBytes(capacity: TerminalPageCapacity) u16 {
+        const items_for_cells = std.math.divCeil(
+            usize,
+            capacity.hyperlink_cells,
+            terminal_page.hyperlink_cell_multiplier,
+        ) catch unreachable;
+        return @intCast(@min(
+            @max(capacity.hyperlink_bytes, items_for_cells * hyperlink_item_size),
+            std.math.maxInt(u16),
+        ));
+    }
+
+    const hyperlink_item_size = @sizeOf(terminal_hyperlink.Set.Item);
+
+    /// The most set items the hint can express, and the most map cells
+    /// it can express without saturating.
+    const max_hinted_hyperlink_items = std.math.maxInt(u16) / hyperlink_item_size;
+    pub const max_hinted_hyperlink_cells = max_hinted_hyperlink_items *
+        terminal_page.hyperlink_cell_multiplier;
 
     pub const CapacityError = error{
         InvalidDimensions,
@@ -569,11 +637,25 @@ pub const Header = struct {
             return error.InvalidDimensions;
         }
 
+        // See `hyperlinkCapacityBytes` for how one hint sizes both
+        // hyperlink tables. A saturated hint means the encoded page's
+        // map was larger than the hint can say, so size the map for
+        // every cell of the page: a page can't have more linked cells
+        // than cells, so the payload always fits.
+        const hyperlink_items = @divFloor(
+            @as(usize, self.hyperlink_capacity_bytes),
+            hyperlink_item_size,
+        );
+        const hyperlink_cells: usize = if (hyperlink_items >= max_hinted_hyperlink_items)
+            @as(usize, self.columns) * @as(usize, self.rows)
+        else
+            hyperlink_items * terminal_page.hyperlink_cell_multiplier;
         const cap: TerminalPageCapacity = .{
             .cols = self.columns,
             .rows = self.rows,
             .styles = self.style_capacity,
             .hyperlink_bytes = self.hyperlink_capacity_bytes,
+            .hyperlink_cells = @intCast(@min(hyperlink_cells, std.math.maxInt(u16))),
             .grapheme_bytes = self.grapheme_capacity_bytes,
             .string_bytes = self.string_capacity_bytes,
         };
@@ -677,7 +759,7 @@ test "framed PAGE encode and decode a sparse native page" {
         .flags = .{ .italic = true },
     });
     const style_b = try page.styles.add(page.memory, .{
-        .bg_color = .{ .palette = 42 },
+        .bg_color = .palette(42),
     });
     page.styles.release(page.memory, dead_style);
 
@@ -808,7 +890,7 @@ test "framed PAGE encode and decode a sparse native page" {
     const decoded_style_b = style_it.next().?;
     try std.testing.expectEqual(@as(TerminalStyleId, 2), decoded_style_b.id);
     try std.testing.expect((TerminalStyle{
-        .bg_color = .{ .palette = 42 },
+        .bg_color = .palette(42),
     }).eql(decoded_style_b.value_ptr.*));
     try std.testing.expectEqual(null, style_it.next());
     try std.testing.expectEqual(
@@ -875,12 +957,101 @@ test "framed PAGE encode and decode a sparse native page" {
     );
 }
 
+test "PAGE header hyperlink capacity hint covers both tables" {
+    // The header has one hyperlink capacity value. A page with many
+    // linked cells and few links, or the reverse, decodes to a
+    // capacity that holds both its set and its map, and a page whose
+    // map is too large for the hint gets a map for every cell.
+    const cases = [_]TerminalPageCapacity{
+        .{ .cols = 80, .rows = 24, .hyperlink_bytes = 2 * Header.hyperlink_item_size, .hyperlink_cells = 1500 },
+        .{ .cols = 80, .rows = 24, .hyperlink_bytes = 300 * Header.hyperlink_item_size, .hyperlink_cells = 8 },
+        .{ .cols = 80, .rows = 24, .hyperlink_bytes = 0, .hyperlink_cells = 0 },
+        .{ .cols = 80, .rows = 24 },
+        .{ .cols = 200, .rows = 200, .hyperlink_cells = std.math.maxInt(u16) },
+        .{ .cols = 200, .rows = 200, .hyperlink_cells = Header.max_hinted_hyperlink_cells + 1 },
+    };
+    for (cases) |capacity| {
+        var page = try TerminalPage.init(capacity);
+        defer page.deinit();
+        const decoded = try Header.init(&page).pageCapacity();
+        try std.testing.expect(decoded.hyperlink_bytes >= capacity.hyperlink_bytes);
+        // A page can't link more cells than it has, so a map sized for
+        // every cell is as large as any map the page can need.
+        const cells = @as(usize, capacity.cols) * @as(usize, capacity.rows);
+        try std.testing.expect(decoded.hyperlink_cells >= @min(capacity.hyperlink_cells, cells));
+        try std.testing.expectEqual(capacity.styles, decoded.styles);
+        try std.testing.expectEqual(capacity.string_bytes, decoded.string_bytes);
+    }
+
+    // A zero capacity stays zero, and the default stays the default.
+    {
+        var page = try TerminalPage.init(cases[2]);
+        defer page.deinit();
+        const decoded = try Header.init(&page).pageCapacity();
+        try std.testing.expectEqual(0, decoded.hyperlink_cells);
+        try std.testing.expectEqual(0, decoded.hyperlink_bytes);
+    }
+    {
+        var page = try TerminalPage.init(cases[3]);
+        defer page.deinit();
+        try std.testing.expectEqual(cases[3], try Header.init(&page).pageCapacity());
+    }
+}
+
+test "framed PAGE keeps every link of a map larger than the hint" {
+    // More linked cells than the hint can express: the encoded page's
+    // map holds them all, and so must the decoded page's.
+    const cols = 200;
+    const rows = 150;
+    const linked = Header.max_hinted_hyperlink_cells + 1000;
+    comptime std.debug.assert(linked <= cols * rows);
+    var page = try TerminalPage.init(.{
+        .cols = cols,
+        .rows = rows,
+        .hyperlink_cells = linked,
+    });
+    defer page.deinit();
+    page.size = .{ .cols = cols, .rows = rows };
+
+    const id = try page.insertHyperlink(.{
+        .id = .{ .implicit = 1 },
+        .uri = "https://example.com/large",
+    });
+    var count: usize = 0;
+    outer: for (0..rows) |y| {
+        for (0..cols) |x| {
+            if (count == linked) break :outer;
+            const rac = page.getRowAndCell(x, y);
+            rac.cell.* = .{
+                .content_tag = .codepoint,
+                .content = .{ .codepoint = .{ .data = 'L' } },
+            };
+            if (count > 0) page.hyperlink_set.use(page.memory, id);
+            try page.setHyperlink(rac.row, rac.cell, id);
+            count += 1;
+        }
+    }
+    try std.testing.expectEqual(linked, page.hyperlinkCount());
+
+    var encoded: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer encoded.deinit();
+    try encodePayload(&page, &encoded.writer);
+
+    var reader: std.Io.Reader = .fixed(encoded.written());
+    var decoded = try decodePayload(&reader, std.testing.allocator);
+    defer decoded.deinit();
+    try decoded.verifyIntegrity(std.testing.allocator);
+    try std.testing.expectEqual(linked, decoded.hyperlinkCount());
+    try std.testing.expect(decoded.capacity.hyperlink_cells >= linked);
+}
+
 test "framed PAGE golden empty record" {
     const capacity: TerminalPageCapacity = .{
         .cols = 1,
         .rows = 1,
         .styles = 0,
         .hyperlink_bytes = 0,
+        .hyperlink_cells = 0,
         .grapheme_bytes = 0,
         .string_bytes = 0,
     };
@@ -904,7 +1075,11 @@ test "framed PAGE golden empty record" {
     );
 
     var source: std.Io.Reader = .fixed(&test_empty_framed_page_fixture);
-    var decoded = try decode(&source, std.testing.allocator);
+    var decoded = try decode(
+        &source,
+        try record.nextHeader(&source),
+        std.testing.allocator,
+    );
     defer decoded.deinit();
     try std.testing.expectEqual(
         Header.init(&page),
@@ -957,7 +1132,7 @@ test "framed PAGE rejects a different record tag" {
     var reader: std.Io.Reader = .fixed(&wrong_tag);
     try std.testing.expectError(
         error.UnexpectedRecordTag,
-        decode(&reader, std.testing.allocator),
+        decode(&reader, try record.nextHeader(&reader), std.testing.allocator),
     );
 }
 
@@ -965,7 +1140,11 @@ test "framed PAGE preserves following bytes" {
     var source: std.Io.Reader = .fixed(
         test_empty_framed_page_fixture ++ "next",
     );
-    var decoded = try decode(&source, std.testing.allocator);
+    var decoded = try decode(
+        &source,
+        try record.nextHeader(&source),
+        std.testing.allocator,
+    );
     defer decoded.deinit();
     try std.testing.expectEqualStrings("next", try source.take(4));
 }
@@ -1510,7 +1689,7 @@ test "decode normalizes duplicate default and invalid style entries" {
     );
     const released_style_b = try grid_page.styles.add(
         grid_page.memory,
-        .{ .bg_color = .{ .palette = 1 } },
+        .{ .bg_color = .palette(1) },
     );
     const encoded_style_id = try grid_page.styles.add(
         grid_page.memory,
@@ -1772,7 +1951,7 @@ test "discard consumes exactly one PAGE record" {
     try encoded.writer.writeAll("next");
 
     var source: std.Io.Reader = .fixed(encoded.written());
-    try discard(&source);
+    try discard(&source, try record.nextHeader(&source));
     try testing.expectEqualStrings("next", try source.take(4));
 
     // Only PAGE records may be discarded; the tag remains strict.
@@ -1792,7 +1971,7 @@ test "discard consumes exactly one PAGE record" {
     var wrong_tag_source: std.Io.Reader = .fixed(wrong_tag.written());
     try testing.expectError(
         error.UnexpectedRecordTag,
-        discard(&wrong_tag_source),
+        discard(&wrong_tag_source, try record.nextHeader(&wrong_tag_source)),
     );
 
     // Discarded bytes are still covered by the record CRC.
@@ -1803,13 +1982,19 @@ test "discard consumes exactly one PAGE record" {
     defer testing.allocator.free(corrupted);
     corrupted[corrupted.len - 1] ^= 1;
     var corrupted_source: std.Io.Reader = .fixed(corrupted);
-    try testing.expectError(error.InvalidChecksum, discard(&corrupted_source));
+    try testing.expectError(
+        error.InvalidChecksum,
+        discard(&corrupted_source, try record.nextHeader(&corrupted_source)),
+    );
 
     // A truncated payload is detected before `finish`.
     var truncated_source: std.Io.Reader = .fixed(
         encoded.written()[0 .. record_len - 1],
     );
-    try testing.expectError(error.EndOfStream, discard(&truncated_source));
+    try testing.expectError(
+        error.EndOfStream,
+        discard(&truncated_source, try record.nextHeader(&truncated_source)),
+    );
 }
 
 test "decode ignores empty hyperlink strings" {

@@ -76,7 +76,10 @@ pub fn output(
 ) []const u8 {
     var rest = buf;
     if (self.snapshot_pending) {
-        const consumed = stream.nextSliceUntilGround(rest) orelse rest.len;
+        const consumed = if (stream.nextSliceUntil(rest, .initOne(.ground))) |stop|
+            stop.consumed
+        else
+            rest.len;
         rest = rest[consumed..];
         if (!stream.ground()) return rest;
         self.emitSnapshot(alloc, t);

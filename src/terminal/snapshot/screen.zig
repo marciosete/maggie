@@ -218,6 +218,7 @@ const terminal_page = @import("../page.zig");
 const TerminalPageList = @import("../PageList.zig");
 const TerminalScreen = @import("../Screen.zig");
 const TerminalScreenKey = @import("../ScreenSet.zig").Key;
+const terminal_size = @import("../size.zig");
 const terminal_style = @import("../style.zig");
 
 const TerminalHyperlink = terminal_hyperlink.Hyperlink;
@@ -287,12 +288,12 @@ pub fn encode(
 /// Errors possible while restoring a SCREEN and its declared PAGE sequence.
 pub const DecodeError = PayloadDecodeError ||
     page.DecodeError ||
-    record.Reader.InitError ||
+    record.NextHeaderError ||
     record.Reader.FinishError ||
     TerminalPageList.Builder.FinishError ||
     TerminalPageList.IncreaseCapacityError ||
     error{
-        /// The next record is valid but is not a SCREEN.
+        /// The record is valid but is not a SCREEN.
         UnexpectedRecordTag,
 
         /// A SCREEN must declare at least one PAGE.
@@ -319,8 +320,25 @@ pub const Decoded = struct {
 /// is decoded transactionally: on failure, all page, pin, hyperlink, and
 /// temporary allocations are released and no partially restored Screen escapes.
 /// The returned key selects the ScreenSet slot that owns the decoded screen.
+///
+/// `record_header` is the SCREEN record's header, already read from
+/// `source`. A header for any other kind of record returns
+/// `error.UnexpectedRecordTag`. This function reads the headers of the PAGE
+/// records that follow itself. See "Decoding Records" in `record.zig`.
+///
+/// ```zig
+/// var decoded = try screen.decode(
+///     source,
+///     try record.nextHeader(source),
+///     io,
+///     alloc,
+///     options,
+/// );
+/// defer decoded.deinit();
+/// ```
 pub fn decode(
     source: *std.Io.Reader,
+    record_header: record.Header,
     io_: std.Io,
     alloc: Allocator,
     options: TerminalScreen.Options,
@@ -328,7 +346,7 @@ pub fn decode(
     // Decode and finish the self-contained SCREEN record before consuming any
     // of the PAGE records which follow it.
     var record_reader: record.Reader = undefined;
-    try record_reader.init(source);
+    record_reader.initHeader(source, record_header);
     if (record_reader.header.tag != .screen) {
         return error.UnexpectedRecordTag;
     }
@@ -380,7 +398,7 @@ pub fn decode(
         // builder-owned storage, avoiding an intermediate page representation.
         for (0..header.page_count) |_| {
             var decoder: page.Decoder = undefined;
-            try decoder.init(source);
+            try decoder.init(source, try record.nextHeader(source));
             const native_page = try builder.allocatePage(decoder.capacity());
             try decoder.decode(native_page, alloc);
         }
@@ -472,7 +490,10 @@ pub fn decode(
     // `seen` is derived state. Only resident prompt metadata participates
     // because omitted history is outside the restored Screen model.
     result.semantic_prompt.seen = seen: {
-        if (result.cursor.semantic_content == .prompt) break :seen true;
+        // A cursor in prompt or input content counts even when no row is
+        // marked yet, because the next linefeed marks a row as a prompt
+        // continuation. See `SemanticPrompt.seen`.
+        if (result.cursor.semantic_content != .output) break :seen true;
 
         var node = result.pages.getTopLeft(.screen).node;
         while (true) {
@@ -1172,12 +1193,12 @@ fn testHeader() Header {
         },
         .cursor_pen = .{
             .fg_color = .none,
-            .bg_color = .{ .palette = 0x7f },
-            .underline_color = .{ .rgb = .{
+            .bg_color = .palette(0x7f),
+            .underline_color = .rgb(.{
                 .r = 0x12,
                 .g = 0x34,
                 .b = 0x56,
-            } },
+            }),
             .flags = .{
                 .bold = true,
                 .italic = true,
@@ -1747,6 +1768,7 @@ test "framed native SCREEN and PAGE sequence" {
     var restore_source: std.Io.Reader = .fixed(destination.written()[6..]);
     var decoded = try decode(
         &restore_source,
+        try record.nextHeader(&restore_source),
         std.testing.io,
         std.testing.allocator,
         .{ .cols = 8, .rows = 8, .max_scrollback_bytes = 0 },
@@ -1871,9 +1893,17 @@ test "SCREEN encodes the minimal complete-page active suffix" {
     // Mark each native page so the encoded sequence proves both omission and
     // oldest-to-newest ordering. The mixed page's marker is in its incidental
     // history prefix and must survive because complete pages are encoded.
-    historical.page().getRowAndCell(0, 0).cell.* = .init('A');
-    mixed.page().getRowAndCell(0, 0).cell.* = .init('B');
-    newest.page().getRowAndCell(0, 0).cell.* = .init('C');
+    // Rows that scrolling created are marked blank, so writing a cell
+    // directly must clear that like the terminal's own writers do.
+    inline for (.{
+        .{ historical, 'A' },
+        .{ mixed, 'B' },
+        .{ newest, 'C' },
+    }) |marker| {
+        const rac = marker[0].page().getRowAndCell(0, 0);
+        rac.cell.* = .init(marker[1]);
+        rac.row.blank = false;
+    }
 
     var destination: std.Io.Writer.Allocating = .init(
         std.testing.allocator,
@@ -1906,14 +1936,22 @@ test "SCREEN encodes the minimal complete-page active suffix" {
     );
     try screen_record.finish();
 
-    var decoded_mixed = try page.decode(&source, std.testing.allocator);
+    var decoded_mixed = try page.decode(
+        &source,
+        try record.nextHeader(&source),
+        std.testing.allocator,
+    );
     defer decoded_mixed.deinit();
     try std.testing.expectEqual(
         @as(u21, 'B'),
         decoded_mixed.getRowAndCell(0, 0).cell.codepoint(),
     );
 
-    var decoded_newest = try page.decode(&source, std.testing.allocator);
+    var decoded_newest = try page.decode(
+        &source,
+        try record.nextHeader(&source),
+        std.testing.allocator,
+    );
     defer decoded_newest.deinit();
     try std.testing.expectEqual(
         @as(u21, 'C'),
@@ -1926,6 +1964,7 @@ test "SCREEN encodes the minimal complete-page active suffix" {
     var restore_source: std.Io.Reader = .fixed(destination.written());
     var decoded = try decode(
         &restore_source,
+        try record.nextHeader(&restore_source),
         std.testing.io,
         std.testing.allocator,
         .{
@@ -2015,6 +2054,7 @@ test "SCREEN encoding preserves a compressed suffix page" {
     var source: std.Io.Reader = .fixed(destination.written());
     var decoded = try decode(
         &source,
+        try record.nextHeader(&source),
         testing.io,
         testing.allocator,
         .{ .cols = 8, .rows = 2, .max_scrollback_bytes = 0 },
@@ -2095,6 +2135,7 @@ test "SCREEN restoration normalizes invalid cursor positions" {
         var source: std.Io.Reader = .fixed(destination.written());
         var decoded = try decode(
             &source,
+            try record.nextHeader(&source),
             std.testing.io,
             std.testing.allocator,
             .{ .cols = 2, .rows = 2, .max_scrollback_bytes = 0 },
@@ -2151,6 +2192,7 @@ test "SCREEN validates pending wrap against a mixed-width cursor page" {
     var source: std.Io.Reader = .fixed(destination.written());
     var decoded = try decode(
         &source,
+        try record.nextHeader(&source),
         std.testing.io,
         std.testing.allocator,
         .{ .cols = 8, .rows = 1, .max_scrollback_bytes = 0 },
@@ -2160,6 +2202,60 @@ test "SCREEN validates pending wrap against a mixed-width cursor page" {
     try std.testing.expectEqual(@as(u16, 4), decoded.screen.cursor.page_pin.node.cols());
     try std.testing.expectEqual(@as(u16, 3), decoded.screen.cursor.x);
     try std.testing.expect(decoded.screen.cursor.pending_wrap);
+    decoded.screen.assertIntegrity();
+}
+
+test "SCREEN resizes a decoded max-width page to a narrow width" {
+    var screen = try TerminalScreen.init(
+        std.testing.io,
+        std.testing.allocator,
+        .{ .cols = 8, .rows = 1, .max_scrollback_bytes = 0 },
+    );
+    defer screen.deinit();
+
+    // A snapshot can restore a page much wider than the terminal. Narrowing
+    // this page to 2 columns frees memory for more rows than a page can
+    // hold, so the resize must cap the row count. A page with only a couple
+    // of rows is too small to trigger this, so it uses 215 rows.
+    var wide_page = try terminal_page.Page.init(.{
+        .cols = std.math.maxInt(terminal_size.CellCountInt),
+        .rows = 215,
+    });
+    defer wide_page.deinit();
+
+    var destination: std.Io.Writer.Allocating = .init(
+        std.testing.allocator,
+    );
+    defer destination.deinit();
+    var stream: record.Writer = .init(
+        std.testing.allocator,
+        &destination.writer,
+    );
+    defer stream.deinit();
+
+    var header = Header.init(&screen, .primary, 1);
+    header.cursor_x = 0;
+    header.cursor_y = 0;
+    header.saved_cursor_present = false;
+
+    const screen_payload = stream.begin(.screen);
+    errdefer stream.cancel();
+    try header.encode(screen_payload);
+    try screen_payload.writeByte(0);
+    try stream.finish();
+    try page.encode(&wide_page, &stream);
+
+    var source: std.Io.Reader = .fixed(destination.written());
+    var decoded = try decode(
+        &source,
+        try record.nextHeader(&source),
+        std.testing.io,
+        std.testing.allocator,
+        .{ .cols = 8, .rows = 1, .max_scrollback_bytes = 0 },
+    );
+    defer decoded.deinit();
+
+    try decoded.screen.resize(.{ .cols = 2, .rows = 1 });
     decoded.screen.assertIntegrity();
 }
 
@@ -2202,6 +2298,7 @@ test "SCREEN clamps a decoded saved cursor to terminal dimensions" {
     var source: std.Io.Reader = .fixed(destination.written());
     var decoded = try decode(
         &source,
+        try record.nextHeader(&source),
         std.testing.io,
         std.testing.allocator,
         .{ .cols = 2, .rows = 2, .max_scrollback_bytes = 0 },
@@ -2239,8 +2336,10 @@ test "SCREEN restoration rejects invalid and incomplete sequences" {
         var source: std.Io.Reader = .fixed(
             destination.written()[0..fixture_len],
         );
+        const header = record.nextHeader(&source) catch continue;
         var restored = decode(
             &source,
+            header,
             std.testing.io,
             std.testing.allocator,
             .{ .cols = 2, .rows = 2, .max_scrollback_bytes = 0 },
@@ -2260,6 +2359,7 @@ test "SCREEN restoration rejects invalid and incomplete sequences" {
             error.OutOfMemory,
             decode(
                 &source,
+                try record.nextHeader(&source),
                 std.testing.io,
                 failing.allocator(),
                 .{ .cols = 2, .rows = 2, .max_scrollback_bytes = 0 },
@@ -2291,6 +2391,7 @@ test "SCREEN restoration rejects invalid and incomplete sequences" {
         error.InvalidPageCount,
         decode(
             &empty_source,
+            try record.nextHeader(&empty_source),
             std.testing.io,
             std.testing.allocator,
             .{ .cols = 2, .rows = 2, .max_scrollback_bytes = 0 },
@@ -2371,6 +2472,7 @@ test "SCREEN decode ignores an invalid cursor hyperlink" {
     var source: std.Io.Reader = .fixed(destination.written());
     var decoded = try decode(
         &source,
+        try record.nextHeader(&source),
         std.testing.io,
         std.testing.allocator,
         .{ .cols = 1, .rows = 1 },
@@ -2441,6 +2543,7 @@ test "SCREEN decode ignores a PAGE with an empty hyperlink URI" {
     var source: std.Io.Reader = .fixed(destination.written());
     var decoded = try decode(
         &source,
+        try record.nextHeader(&source),
         std.testing.io,
         std.testing.allocator,
         .{ .cols = 1, .rows = 1 },

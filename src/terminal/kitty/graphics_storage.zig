@@ -154,7 +154,12 @@ pub const ImageStorage = struct {
     /// The set of placements for loaded images.
     placements: PlacementMap = .{},
 
-    /// Non-null if there is an in-progress loading image.
+    /// The chunked image or animation frame load that is in progress,
+    /// or null if there isn't one.
+    ///
+    /// A load starts when a direct (t=d) transmission arrives with m=1
+    /// and ends when its final chunk (m=0) arrives. It is abandoned early
+    /// by a delete command or by a transmission that uses another medium.
     loading: ?*LoadingImage = null,
 
     /// The limits of what medium types are allowed for image loading.
@@ -166,26 +171,61 @@ pub const ImageStorage = struct {
     total_bytes: usize = 0,
     total_limit: usize = 320 * 1000 * 1000, // 320MB
 
-    /// Identifies one exact pending image transmission. The generation is
-    /// assigned by this storage when the pending image is inserted, so a
-    /// later replacement of the same ID cannot consume stale payload bytes.
+    /// A ticket for attaching pixels to an image that was added before its
+    /// pixels arrived. `addPendingImage` returns one.
+    ///
+    /// A pending image takes part in storage like any other image. It can
+    /// be placed, queried and evicted, and its full size is reserved
+    /// against the storage limit. It just has nothing to draw yet. When
+    /// the pixels arrive, `complete` attaches them, and `completeFrame`
+    /// does the same for the image's pending animation frames.
+    ///
+    /// The ticket only works for the exact image it was issued for. If
+    /// the image was deleted, evicted, or replaced by a new transmission
+    /// with the same ID in the meantime, completing it does nothing and
+    /// returns false. That way, pixels that arrive late can never end up
+    /// on the wrong image.
+    ///
+    /// ```zig
+    /// const ticket = try storage.addPendingImage(io, alloc, screen, .{
+    ///     .id = 1,
+    ///     .width = 2,
+    ///     .height = 2,
+    ///     .format = .rgba,
+    ///     .data = .{ .pending = 16 },
+    /// });
+    ///
+    /// // ... later, once the 16 bytes of pixels have arrived ...
+    ///
+    /// if (!ticket.complete(&storage, io, pixels)) {
+    ///     // The image is gone or was replaced, so the pixels are still ours.
+    ///     alloc.free(pixels);
+    /// }
+    /// ```
     pub const PendingImage = struct {
+        /// The ID of the pending image.
         id: u32,
-        generation: u64,
 
-        /// Attach owned decoded bytes if this exact pending transmission is
-        /// still resident. On true, storage owns `data`; on false, the caller
-        /// retains ownership. Completion preserves the image generation (and
-        /// therefore eviction age) while marking storage content as mutated.
+        /// The `Image.transmission` of the pending image, which tells it
+        /// apart from any later image with the same ID.
+        transmission: u64,
+
+        /// Attach the image's decoded pixels.
+        ///
+        /// Returns true if the image is still the one this ticket was
+        /// issued for, its pixels are still pending, and `data` has
+        /// exactly the expected length. The storage then owns `data`.
+        /// Otherwise this returns false, changes nothing, and the caller
+        /// still owns `data`.
+        ///
+        /// Completing an image keeps its `generation`.
         pub fn complete(
             self: PendingImage,
             storage: *ImageStorage,
             io: std.Io,
             data: []const u8,
         ) bool {
-            const img = storage.images.getPtr(self.id) orelse return false;
-            if (img.generation != self.generation) return false;
-
+            const img = self.image(storage) orelse return false;
             const expected_len = switch (img.data) {
                 .complete => return false,
                 .pending => |len| len,
@@ -195,6 +235,54 @@ pub const ImageStorage = struct {
             img.data = .{ .complete = data };
             storage.markMutated(io);
             return true;
+        }
+
+        /// Attach the RGBA pixels of one pending animation frame.
+        ///
+        /// `number` is the frame number as the Kitty graphics protocol
+        /// counts frames, the same numbering `Image.frameData` uses.
+        /// Frame 1 is the image itself, so animation frames start at 2.
+        /// Use `complete` for frame 1.
+        ///
+        /// This follows the same rules as `complete`: it returns true and
+        /// takes ownership of `data` only if the image is still the one
+        /// this ticket was issued for, the frame is still pending, and
+        /// `data` has exactly the frame's length. The storage keeps
+        /// `data` mutable because later frame edits draw into it.
+        ///
+        /// If the completed frame is the one on screen, the image gets a
+        /// new `generation` so that renderers pick up the new pixels.
+        pub fn completeFrame(
+            self: PendingImage,
+            storage: *ImageStorage,
+            io: std.Io,
+            number: u32,
+            data: []u8,
+        ) bool {
+            if (number < 2) return false;
+            const img = self.image(storage) orelse return false;
+            const anim = img.animation orelse return false;
+            const index = number - 2;
+            if (index >= anim.frames.items.len) return false;
+            const frame = &anim.frames.items[index];
+            if (!frame.isPending()) return false;
+            if (data.len != frame.pending_len) return false;
+
+            frame.* = .{ .data = data, .gap_ms = frame.gap_ms };
+            if (anim.current_index == number - 1) {
+                storage.markImageContentChanged(io, img);
+            } else {
+                storage.markMutated(io);
+            }
+            return true;
+        }
+
+        /// The image this ticket was issued for, or null if it is no
+        /// longer in storage.
+        fn image(self: PendingImage, storage: *ImageStorage) ?*Image {
+            const img = storage.images.getPtr(self.id) orelse return null;
+            if (img.transmission != self.transmission) return null;
+            return img;
         }
     };
 
@@ -378,12 +466,16 @@ pub const ImageStorage = struct {
         // every add/replace a unique stamp even when the same image ID
         // is retransmitted with identical dimensions, so consumers
         // (e.g. renderer texture caches) can detect content changes.
+        // The transmission starts out with the same stamp and keeps it
+        // for the life of this image.
         self.markMutated(io);
         gop.value_ptr.generation = self.generation;
+        gop.value_ptr.transmission = self.generation;
     }
 
-    /// Add an image whose decoded payload bytes have not arrived yet.
-    /// Returns the token required to complete this exact transmission.
+    /// Add an image whose pixels have not arrived yet. `img.data` must be
+    /// `.pending` with the length of the decoded pixels. Returns the
+    /// ticket to attach those pixels later. See `PendingImage`.
     pub fn addPendingImage(
         self: *ImageStorage,
         io: std.Io,
@@ -394,7 +486,7 @@ pub const ImageStorage = struct {
         assert(img.data == .pending);
         try self.addImage(io, alloc, s, img);
         const stored = self.images.get(img.id).?;
-        return .{ .id = stored.id, .generation = stored.generation };
+        return .{ .id = stored.id, .transmission = stored.transmission };
     }
 
     /// Add a placement for a given image. The caller must verify in advance
@@ -666,6 +758,47 @@ pub const ImageStorage = struct {
         self.markMutated(io);
     }
 
+    /// Remove pin-backed placements anchored in the history rows that
+    /// `Screen.eraseHistory` is about to erase, from the top of history
+    /// through `bl` (or all of history if null), along with any relative
+    /// placements orphaned by that. This must be called before the rows
+    /// are erased: afterward, the tracked pins have been moved to the
+    /// top-left of the retained rows and are indistinguishable from
+    /// placements that were already there.
+    pub fn eraseHistory(
+        self: *ImageStorage,
+        io: std.Io,
+        s: *terminal.Screen,
+        bl: ?point.Point,
+    ) void {
+        const history_rows = s.pages.total_rows - s.pages.rows;
+        if (history_rows == 0) return;
+        const limit: usize = limit: {
+            const pt = bl orelse break :limit history_rows - 1;
+            const bl_pin = s.pages.pin(pt) orelse return;
+            const bl_pt = s.pages.pointFromPin(.history, bl_pin) orelse return;
+            break :limit bl_pt.coord().y;
+        };
+
+        var removed = false;
+        var it = self.placements.iterator();
+        while (it.next()) |entry| {
+            const pin = switch (entry.value_ptr.location) {
+                .pin => |pin| pin,
+                .virtual, .relative => continue,
+            };
+            const pt = s.pages.pointFromPin(.history, pin.*) orelse continue;
+            if (pt.coord().y > limit) continue;
+
+            self.removePlacement(s, entry);
+            removed = true;
+        }
+        if (!removed) return;
+
+        _ = self.removeOrphans(s, null);
+        self.markMutated(io);
+    }
+
     fn clearPlacements(self: *ImageStorage, s: *terminal.Screen) void {
         var it = self.placements.iterator();
         while (it.next()) |entry| entry.value_ptr.deinit(s);
@@ -917,7 +1050,7 @@ pub const ImageStorage = struct {
         }
     }
 
-    /// Returns the placement that a unicode placeholder cell referencing
+    /// Returns the virtual placement a unicode placeholder cell referencing
     /// this image/placement ID pair targets, or null if there is none. A
     /// zero placement ID targets one of the image's virtual placements,
     /// chosen by PlacementId.preferredOver so the choice is stable (an
@@ -935,6 +1068,7 @@ pub const ImageStorage = struct {
                 .placement_id = .{ .tag = .external, .id = placement_id },
             };
             const p = self.placements.get(key) orelse return null;
+            if (p.location != .virtual) return null;
             return .{ .key = key, .placement = p };
         }
 
@@ -969,7 +1103,7 @@ pub const ImageStorage = struct {
         while (it.next()) |kv| {
             if (kv.value_ptr.number == image_number) {
                 if (newest == null or
-                    kv.value_ptr.generation > newest.?.generation)
+                    kv.value_ptr.transmission > newest.?.transmission)
                 {
                     newest = kv.value_ptr.*;
                 }
@@ -996,7 +1130,7 @@ pub const ImageStorage = struct {
         while (it.next()) |kv| {
             if (kv.value_ptr.number != image_number) continue;
             if (newest == null or
-                kv.value_ptr.generation > newest.?.generation)
+                kv.value_ptr.transmission > newest.?.transmission)
             {
                 newest = kv.value_ptr;
             }
@@ -1137,6 +1271,10 @@ pub const ImageStorage = struct {
             // The base pixel data hasn't arrived yet (e.g. an image
             // restored from a snapshot); nothing can be displayed.
             if (img.data.isPending()) continue;
+
+            // For the same reason, playback waits until every frame's
+            // pixels have arrived.
+            if (anim.hasPendingFrames()) continue;
 
             // A zero total duration means every frame is gapless and
             // no frame can ever be displayed, so the animation can
@@ -1594,16 +1732,20 @@ pub const ImageStorage = struct {
 
         if (number == 1) {
             // Deleting the root frame promotes frame 2 to root. The
-            // promoted frame's bytes stay reserved; only the old root
-            // data is freed.
+            // promoted frame's bytes stay reserved and only the old root
+            // data is freed. If the promoted frame is still pending, the
+            // image's own pixels become pending.
             self.releaseAnimationBytes(img.data.len());
             img.data.deinit(alloc);
             const promoted = anim.frames.orderedRemove(0);
-            img.data = .{ .complete = promoted.data };
+            img.data = if (promoted.isPending())
+                .{ .pending = promoted.pending_len }
+            else
+                .{ .complete = promoted.data };
             anim.root_gap_ms = promoted.gap_ms;
         } else {
             const removed = anim.frames.orderedRemove(number - 2);
-            self.releaseAnimationBytes(removed.data.len);
+            self.releaseAnimationBytes(removed.storageSize());
             alloc.free(removed.data);
         }
 
@@ -1690,7 +1832,7 @@ pub const ImageStorage = struct {
 
         const Candidate = struct {
             id: u32,
-            generation: u64,
+            transmission: u64,
 
             // Lower values are evicted first:
             // 0: transient, unused
@@ -1702,7 +1844,7 @@ pub const ImageStorage = struct {
             fn init(img: *const Image) @This() {
                 return .{
                     .id = img.id,
-                    .generation = img.generation,
+                    .transmission = img.transmission,
                     .priority = (if (img.metadata.transient) @as(u2, 0) else @as(u2, 1)) +
                         (if (img.metadata.placement_count > 0) @as(u2, 2) else @as(u2, 0)),
                 };
@@ -1711,8 +1853,8 @@ pub const ImageStorage = struct {
             fn lessThan(lhs: @This(), rhs: @This()) bool {
                 if (lhs.priority != rhs.priority)
                     return lhs.priority < rhs.priority;
-                if (lhs.generation != rhs.generation)
-                    return lhs.generation < rhs.generation;
+                if (lhs.transmission != rhs.transmission)
+                    return lhs.transmission < rhs.transmission;
                 return lhs.id < rhs.id;
             }
         };
@@ -1770,7 +1912,7 @@ pub const ImageStorage = struct {
     /// complete.
     pub const ScrollMargins = struct {
         screen: *terminal.Screen,
-        restores: std.ArrayListUnmanaged(Restore) = .empty,
+        restores: std.ArrayList(Restore) = .empty,
 
         const Restore = struct {
             pin: *PageList.Pin,
@@ -3142,6 +3284,79 @@ test "storage: erase display preserves scrollback and reclaims unplaced images" 
     try testing.expect(!s.images.contains(3));
 }
 
+test "storage: erase scrollback removes placements in history" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    const io = testing.io;
+    var t = try terminal.Terminal.init(io, alloc, .{
+        .rows = 2,
+        .cols = 2,
+        .max_scrollback_bytes = 4096,
+    });
+    defer t.deinit(alloc);
+    t.width_px = 2;
+    t.height_px = 2;
+
+    const s = &t.screens.active.kitty_images;
+    try s.addImage(io, alloc, t.screens.active, .{ .id = 1, .width = 1, .height = 1 });
+    try s.addPlacement(io, alloc, t.screens.active, 1, 1, .{
+        .location = .{ .pin = try trackPin(&t, .{ .y = 0 }) },
+    });
+    try t.scrollUp(1);
+    try s.addImage(io, alloc, t.screens.active, .{ .id = 2, .width = 1, .height = 1 });
+    try s.addPlacement(io, alloc, t.screens.active, 2, 1, .{
+        .location = .{ .pin = try trackPin(&t, .{ .y = 0 }) },
+    });
+
+    // Erasing history must not move the history placement onto the
+    // top of the active area, where it would be visible again.
+    t.eraseDisplay(.scrollback, false);
+    try testing.expectEqual(@as(usize, 1), s.placements.count());
+    try testing.expect(s.placements.contains(.{
+        .image_id = 2,
+        .placement_id = .{ .tag = .external, .id = 1 },
+    }));
+}
+
+test "storage: partial history erase keeps later history placements" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+    const io = testing.io;
+    var t = try terminal.Terminal.init(io, alloc, .{
+        .rows = 2,
+        .cols = 2,
+        .max_scrollback_bytes = 4096,
+    });
+    defer t.deinit(alloc);
+    t.width_px = 2;
+    t.height_px = 2;
+
+    const s = &t.screens.active.kitty_images;
+    try s.addImage(io, alloc, t.screens.active, .{ .id = 1, .width = 1, .height = 1 });
+    try s.addPlacement(io, alloc, t.screens.active, 1, 1, .{
+        .location = .{ .pin = try trackPin(&t, .{ .y = 0 }) },
+    });
+    try s.addImage(io, alloc, t.screens.active, .{ .id = 2, .width = 1, .height = 1 });
+    try s.addPlacement(io, alloc, t.screens.active, 2, 1, .{
+        .location = .{ .pin = try trackPin(&t, .{ .y = 1 }) },
+    });
+    try t.scrollUp(2);
+
+    t.screens.active.eraseHistory(.{ .history = .{ .y = 0 } });
+    try testing.expectEqual(@as(usize, 1), s.placements.count());
+    const key: ImageStorage.PlacementKey = .{
+        .image_id = 2,
+        .placement_id = .{ .tag = .external, .id = 1 },
+    };
+    try testing.expectEqual(
+        point.Point{ .history = .{ .x = 0, .y = 0 } },
+        t.screens.active.pages.pointFromPin(
+            .history,
+            s.placements.get(key).?.location.pin.*,
+        ).?,
+    );
+}
+
 test "storage: cell offsets stay within explicit destination rectangle" {
     const testing = std.testing;
     const alloc = testing.allocator;
@@ -3509,6 +3724,11 @@ test "storage: imageByNumber returns most recently transmitted" {
     // Retransmit the first: it becomes the newest.
     try s.addImage(io, alloc, t.screens.active, .{ .id = 1, .number = 7 });
     try testing.expectEqual(@as(u32, 1), s.imageByNumber(7).?.id);
+
+    // Showing another frame of the second doesn't make it the newest.
+    s.markImageContentChanged(io, s.images.getPtr(2).?);
+    try testing.expectEqual(@as(u32, 1), s.imageByNumber(7).?.id);
+    try testing.expectEqual(@as(u32, 1), s.imagePtrByIdOrNumber(0, 7).?.id);
 }
 
 test "storage: nextGeneration is unique and monotonic" {
@@ -3623,6 +3843,9 @@ test "storage: eviction releases placement pins" {
     });
     try testing.expectEqual(tracked + 2, t.screens.active.pages.countTrackedPins());
 
+    // Showing another frame of the first doesn't make it newer.
+    s.markImageContentChanged(io, s.images.getPtr(1).?);
+
     // Adding a third image evicts the oldest equally-ranked image and its
     // placement. The newer image's placement and tracked pin remain intact.
     try s.addImage(io, alloc, t.screens.active, .{
@@ -3673,13 +3896,14 @@ test "storage: pending image completes once and preserves age" {
     defer alloc.free(wrong);
 
     const storage_generation = s.generation;
+    const image_generation = s.imageById(1).?.generation;
     const dirty = s.dirty;
     const pixels = try alloc.alloc(u8, 16);
     @memset(pixels, '*');
     try testing.expect(pending.complete(&s, io, pixels));
     try testing.expect(s.dirty != dirty);
     try testing.expect(s.generation > storage_generation);
-    try testing.expectEqual(pending.generation, s.imageById(1).?.generation);
+    try testing.expectEqual(image_generation, s.imageById(1).?.generation);
     try testing.expectEqual(@as(usize, 16), s.total_bytes);
     try testing.expectEqualSlices(u8, pixels, s.imageById(1).?.data.bytes().?);
 
@@ -3801,6 +4025,102 @@ test "storage: replacement reuses pending reservation and removes placements" {
     s.delete(io, alloc, &t, .{ .id = .{ .delete = true, .image_id = 1 } });
     try testing.expectEqual(@as(usize, 0), s.images.count());
     try testing.expectEqual(@as(usize, 0), s.placements.count());
+}
+
+test "storage: pending completion survives a change of displayed frame" {
+    const testing = std.testing;
+    const io = testing.io;
+    const alloc = testing.allocator;
+    var t = try terminal.Terminal.init(io, alloc, .{ .rows = 3, .cols = 3 });
+    defer t.deinit(alloc);
+
+    var s: ImageStorage = .{};
+    defer s.deinit(alloc, t.screens.active);
+
+    const pending = try s.addPendingImage(io, alloc, t.screens.active, .{
+        .id = 1,
+        .width = 1,
+        .height = 1,
+        .format = .rgba,
+        .data = .{ .pending = 4 },
+    });
+
+    // Showing another frame stamps a new image generation, but the image
+    // is still the same transmission.
+    const img = s.images.getPtr(1).?;
+    s.markImageContentChanged(io, img);
+    try testing.expect(img.generation != pending.transmission);
+    try testing.expectEqual(pending.transmission, img.transmission);
+
+    const pixels = try alloc.dupe(u8, "rgba");
+    try testing.expect(pending.complete(&s, io, pixels));
+}
+
+test "storage: pending animation frames" {
+    const testing = std.testing;
+    const io = testing.io;
+    const alloc = testing.allocator;
+    var t = try terminal.Terminal.init(io, alloc, .{ .rows = 3, .cols = 3 });
+    defer t.deinit(alloc);
+
+    var s: ImageStorage = .{};
+    defer s.deinit(alloc, t.screens.active);
+
+    const pending = try s.addPendingImage(io, alloc, t.screens.active, .{
+        .id = 1,
+        .width = 1,
+        .height = 1,
+        .format = .rgba,
+        .data = .{ .pending = 4 },
+    });
+    const anim = try alloc.create(animation.Animation);
+    anim.* = .{ .state = .running, .current_index = 2 };
+    for (0..2) |_| try anim.frames.append(alloc, .{
+        .data = &.{},
+        .gap_ms = 10,
+        .pending_len = 4,
+    });
+    try s.reserveAnimationBytes(io, alloc, t.screens.active, 1, anim.frameBytes());
+    s.images.getPtr(1).?.animation = anim;
+    try s.addPlacement(io, alloc, t.screens.active, 1, 1, .{
+        .location = .{ .pin = try trackPin(&t, .{ .x = 0, .y = 0 }) },
+    });
+    try testing.expectEqual(@as(usize, 12), s.total_bytes);
+    try testing.expectEqual(@as(usize, 12), s.imageById(1).?.storageSize());
+
+    // Nothing is displayable or playable until every frame arrives.
+    try testing.expect(pending.complete(&s, io, try alloc.dupe(u8, "base")));
+    var img = s.imageById(1).?;
+    try testing.expect(img.renderData().isPending());
+    try testing.expect(img.frameData(3) == null);
+    try testing.expect(s.animationTick(io, 0) == null);
+
+    // A frame with the wrong length, a missing frame, and frame 1 (the
+    // image itself, completed with `complete`) are all refused.
+    const wrong = try alloc.dupe(u8, "short");
+    defer alloc.free(wrong);
+    try testing.expect(!pending.completeFrame(&s, io, 2, wrong));
+    const missing = try alloc.dupe(u8, "none");
+    defer alloc.free(missing);
+    try testing.expect(!pending.completeFrame(&s, io, 4, missing));
+    try testing.expect(!pending.completeFrame(&s, io, 1, missing));
+
+    // Completing the current frame (frame 3) changes the displayed
+    // content.
+    const generation = img.generation;
+    try testing.expect(pending.completeFrame(&s, io, 3, try alloc.dupe(u8, "two!")));
+    img = s.imageById(1).?;
+    try testing.expect(img.generation != generation);
+    try testing.expectEqualStrings("two!", img.renderData().bytes().?);
+    try testing.expect(s.animationTick(io, 0) == null);
+
+    // Deleting the pending frame releases its reservation.
+    s.delete(io, alloc, &t, .{ .animation_frames = .{
+        .image_id = 1,
+        .frame = 2,
+    } });
+    try testing.expectEqual(@as(usize, 8), s.total_bytes);
+    try testing.expect(s.animationTick(io, 0) != null);
 }
 
 test "storage: pending images share exact eviction ordering" {
@@ -4481,6 +4801,12 @@ test "storage: placeholderTarget lookup" {
 
     try testing.expect(s.placeholderTarget(1, 9) == null);
     try testing.expect(s.placeholderTarget(2, 0) == null);
+
+    // A non-virtual placement can't be targeted, even by its exact ID.
+    try s.addPlacement(io, alloc, t.screens.active, 1, 7, .{
+        .location = .{ .pin = try trackPin(&t, .{ .x = 0, .y = 0 }) },
+    });
+    try testing.expect(s.placeholderTarget(1, 7) == null);
 
     // With multiple virtual placements, the zero-ID fallback picks
     // deterministically by PlacementId.preferredOver: lowest external.

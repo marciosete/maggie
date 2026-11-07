@@ -22,7 +22,7 @@ pub const State = struct {
 
     /// The placements for the Kitty image protocol, sorted by layer and
     /// then by z-index.
-    kitty_placements: std.ArrayListUnmanaged(Placement),
+    kitty_placements: std.ArrayList(Placement),
 
     /// Where the layers of `kitty_placements` end. Placements before
     /// `kitty_bg_end` are drawn below the cell backgrounds. Placements
@@ -45,7 +45,7 @@ pub const State = struct {
     kitty_storage_generation: u64,
 
     /// Overlays
-    overlay_placements: std.ArrayListUnmanaged(Placement),
+    overlay_placements: std.ArrayList(Placement),
 
     pub const empty: State = .{
         .images = .empty,
@@ -299,9 +299,11 @@ pub const State = struct {
                 switch (kv.key_ptr.*) {
                     // We're only looking at Kitty images
                     .kitty => |id| if (storage.imageById(id)) |image| {
-                        // A pending source must not keep an older texture for
-                        // the same ID renderable while its placements wait.
-                        if (image.data.isPending()) {
+                        // An image whose displayed pixels are pending must
+                        // not keep an older texture for the same ID drawable
+                        // while its placements wait. For an animation, the
+                        // displayed pixels are the current frame's.
+                        if (image.renderData().isPending()) {
                             kv.value_ptr.image.markForUnload();
                         }
                     } else {
@@ -901,7 +903,7 @@ test "kitty renderer ignores pending payloads and removes replaced placements" {
     state.kittyUpdate(alloc, &t, &render_state);
     try testing.expectEqual(@as(usize, 1), state.kitty_placements.items.len);
     try testing.expectEqual(
-        pending.generation,
+        storage.imageById(1).?.generation,
         state.images.get(.{ .kitty = 1 }).?.generation,
     );
 

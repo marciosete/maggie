@@ -330,8 +330,8 @@ final class RemoteTapHub: @unchecked Sendable {
 }
 
 /// The C tap: forwards each event to its hub.
-private func remoteTapHubCallback(_ userdata: UnsafeMutableRawPointer?, _ event: UnsafePointer<ghostty_pty_tap_event_s>?) {
-    guard let userdata, let event else { return }
+private func remoteTapHubCallback(_ userdata: UnsafeMutableRawPointer?, _ event: UnsafePointer<ghostty_pty_tap_event_s>) {
+    guard let userdata else { return }
     Unmanaged<RemoteTapHub>.fromOpaque(userdata).takeUnretainedValue().received(event.pointee)
 }
 
