@@ -40,6 +40,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The gate: GhosttyKit built, the Swift tests, SwiftLint, zig fmt and typos
+  # (test.yml). Nothing is built for release until it is green.
+  test:
+    uses: ./.github/workflows/test.yml
+
   # What the commits since the last release call for. No feat, fix or perf
   # since the last tag means no release.
   version:
@@ -78,7 +83,7 @@ jobs:
           path: notes.md
 
   release:
-    needs: version
+    needs: [test, version]
     if: needs.version.outputs.bump != 'none'
     runs-on: macos-26
     # The notary service has taken an hour on a first submission.

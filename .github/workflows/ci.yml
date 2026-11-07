@@ -1,0 +1,21 @@
+# Pull requests and every branch but main run the tests (test.yml). main isn't
+# here on purpose: each push to it runs release.yml, which runs the same tests
+# before it builds anything, so the gate is one and the same.
+
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml

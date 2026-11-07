@@ -1,0 +1,92 @@
+# The gate a change passes before it ships: GhosttyKit built with the Zig the
+# release builds with, the Swift tests under macos/Tests, SwiftLint, zig fmt and
+# typos. One job on a Mac, since all but two of the checks need Xcode.
+#
+# Reusable, never triggered on its own: ci.yml calls it for pull requests and for
+# every branch but main, and release.yml calls it before building anything for
+# main, so a red test blocks the release. The UI tests are skipped; they need
+# permissions a runner can't grant, as in macos/build.nu.
+
+name: Test
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# A newer push to a branch supersedes the tests running for it. Nothing on main is
+# cancelled: release.yml serialises its runs and each must see its tests through.
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: Build, Swift tests, lint, format, typos
+    runs-on: macos-26
+    # A cold Zig cache compiles every C dependency from source; warm, the job is
+    # a fraction of this.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # The Zig the release builds with. The action keeps Zig's cache between runs,
+      # the local one folded into the global one. The key keeps this Debug, native
+      # cache apart from the release's; the limit is raised from 2 GiB because one
+      # Ghostty build is bigger than that, and a cache past its limit is cleared.
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+          cache-key: test
+          cache-size-limit: 6144
+
+      - name: Toolchain
+        run: |
+          zig version
+          xcodebuild -version
+
+      # The quick checks first, so a slip in formatting or spelling is reported in
+      # seconds rather than after the build.
+      - run: zig fmt --check build.zig src
+
+      - uses: crate-ci/typos@v1.52.0
+        with:
+          config: typos.toml
+
+      - name: SwiftLint
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: |
+          brew install swiftlint
+          cd macos
+          swiftlint lint --strict
+
+      # Only the runner's own architecture: the tests run on it, and the release
+      # builds its universal framework for itself.
+      - name: Build GhosttyKit
+        run: zig build -Demit-macos-app=false -Dxcframework-target=native
+
+      # The Debug build, signed by nobody: the runner has no identity, and XCTest
+      # loads into an unsigned host as it does into an ad hoc one. The result
+      # bundle is kept for a failure; it opens in Xcode with each test's log.
+      - name: Swift tests
+        id: tests
+        run: |
+          cd macos
+          xcodebuild test \
+            -project Ghostty.xcodeproj \
+            -scheme Ghostty \
+            -destination 'platform=macOS' \
+            -skip-testing GhosttyUITests \
+            -resultBundlePath "$RUNNER_TEMP/GhosttyTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.tests.outcome == 'failure'
+        with:
+          name: GhosttyTests.xcresult
+          path: ${{ runner.temp }}/GhosttyTests.xcresult
