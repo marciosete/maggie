@@ -26,7 +26,7 @@ struct RemoteSettingsView: View {
             } header: {
                 Text("Mobile")
             } footer: {
-                Text("Your phone or iPad reaches this Mac on the same network, or from anywhere when Tailscale runs on both. Only devices paired here can connect.")
+                Text("Your phone or iPad reaches this Mac on the same network, or from anywhere when Tailscale runs on both. Only devices paired here can connect. Maggie Mobile, the iPhone and iPad app, is coming; it is a paid companion app, and this Mac side stays free.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
