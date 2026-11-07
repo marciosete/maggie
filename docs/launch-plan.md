@@ -27,7 +27,9 @@ Already done and verified: Developer ID signing, notarization with a stapled tic
 
 ## The date
 
-**Show HN on Tuesday 1 December 2026, 6–7am US Eastern** (7–8pm Perth, 10–11pm Sydney). **LinkedIn post on Thursday 3 December.**
+**Decided 8 November: launch is today, 8 November 2026**, as soon as the screenshots, the recording and the launch texts are done (Marcio is doing those himself). The milestone dates below were written for a 1 December launch and now read as a checklist rather than a calendar; what has to be true before posting is the "Definition of launch-ready" at the end. One timing fact for the Show HN: 8 November is a Saturday evening and Sunday in the United States; Hacker News traffic is lowest then and competition is too. Posting it in the US Monday or Tuesday morning instead (Tuesday or Wednesday before dawn in Perth) costs a day or two and is the usual advice; the call is yours.
+
+Earlier plan, kept for the record: Show HN on Tuesday 1 December 2026, 6–7am US Eastern (7–8pm Perth, 10–11pm Sydney); LinkedIn post on Thursday 3 December.
 
 Why not sooner: the aggressive option was Tuesday 17 November, nine days from now, with the LinkedIn series starting on the 10th and comms sign-off still pending. The quality of the recording and the README is the launch; a week more is cheap. Why not the week after the 17th: Thursday 26 November is US Thanksgiving and that whole week is soft on Hacker News. 1 December is the first clean Tuesday.
 
@@ -59,7 +61,14 @@ Decisions that gate later milestones, and two applications with lead times.
 - [x] **[M] GitHub Sponsors.** Applied and live on 8 November; the sponsor button is on the profile and, through `FUNDING.yml`, on this repository. The 27 November fallback is no longer needed.
 - [x] **[M] The phone: "coming".** Maggie Mobile is a paid companion app, not open source, not yet released. The Mac side of pairing stays visible and says so. Revisit if TestFlight opens before launch.
 - [x] **[M] Open-core statement** decided; see "Decisions so far". In the README ("What is open and what is not") and both site footers.
-- [ ] **[M] `free-code`.** The public repo described as Claude Code with "security-prompt guardrails stripped" is one click from Maggie's README. Private, archived, or left. Recommendation: private before M8.
+- [ ] **[M] `free-code`: delete it** (decided 8 November). The `gh` token in this session lacks the `delete_repo` scope, so from your terminal:
+
+  ```sh
+  gh auth refresh -h github.com -s delete_repo
+  gh repo delete marciosete/free-code --yes
+  ```
+
+  Or Settings › Danger Zone on the repository. GitHub keeps a deleted repository restorable for 90 days.
 - [ ] **[M] Confirm the date** above, or pick the aggressive one and drop M6's optional items.
 
 **Done when:** Sponsors application submitted; the three decisions written at the top of this file.
@@ -76,7 +85,7 @@ Written 8 November, modelled on the KIT agent-harness workflows (their shape onl
 - [x] **[A] `.github/workflows/ci.yml`**: `pull_request` and `push` to every branch but `main`, calling `test.yml`. `main` is covered by the release.
 - [x] **[A] `release.yml`**: a `test` job calling `test.yml`; the release job now `needs: [test, version]`, so a red test produces no release. Nothing else changed.
 - [x] **[A] README**: a badge for the release workflow on `main` (it includes the gate; `ci.yml` never runs on `main`, so its badge would mislead).
-- [ ] **Prove it.** Proven on the blocking side twice on 8 November, by accident: run 1 stopped at typos (five words that were right; `typos.toml` now knows them) and run 2 stopped when the Swift test target would not compile on the runner (a chain of six `+` on `Data` inside an `#expect` in `VoiceTests.swift` that the runner's compiler could not type-check in time; it is now built in steps). Both times the release job was skipped, which is the gate working. Still to see: one green run on `main`, and its duration on a cold Zig cache; if well over 15 minutes, consider a weekly warm-up or a smaller build.
+- [ ] **Prove it.** Proven on the blocking side twice on 8 November, by accident: run 1 stopped at typos (five words that were right; `typos.toml` now knows them) and run 2 stopped when the Swift test target would not compile on the runner (a chain of six `+` on `Data` inside an `#expect` in `VoiceTests.swift` that the runner's compiler could not type-check in time; it is now built in steps). Run 3 compiled and ran the suite, and three voice tests each died at exactly 60 seconds: they ask macOS for microphone permission first, and on a runner nobody answers the prompt. The gate now sets `TEST_RUNNER_MAGGIE_NO_MICROPHONE`, which xcodebuild hands to the test process, and the four tests that open the microphone are skipped there and reported as skipped; on a developer's Mac they still ask once and fail loudly if denied, as their author intended. All three times the release job was skipped, which is the gate working. Still to see: one green run on `main`, and its duration on a cold Zig cache; if well over 15 minutes, consider a weekly warm-up or a smaller build.
 
 **Done when:** a red test blocks a release, the badge is green on `main`, and CI runs on pull requests.
 
@@ -170,16 +179,14 @@ The single largest gap: there is no screenshot or recording anywhere. **You are 
 
 ## M6 — Community scaffolding (by Wed 25 Nov)
 
-So the Issues tab is not empty on launch day and visitors can see direction.
+Revised 8 November after Marcio's call: **no seeded issues and no milestones.** The repository should be open to receive issues, not pre-filled with them, and the roadmap is not a list of tickets. The seven seeded issues and the two milestones were deleted the same day. What stays is structure that helps when real issues arrive, and the two discussions.
 
-- [ ] **[M] Two GitHub milestones**: `v0.32 — launch` (the fixes and docs from this plan) and `After launch` (the roadmap).
-- [ ] **[A] Labels** mirroring the commit scopes in `CONTRIBUTING.md`: `sidebar`, `board`, `source-control`, `usage`, `voice`, `remote`, `install`, `release`, plus `upstream` (belongs to Ghostty), `needs-info`. Keep the defaults.
-- [ ] **[M] Six to eight issues** from the roadmap, two labelled `good first issue`, each with context and a "done when". Public, so they are your roadmap; write them as such.
-- [ ] **[M] Three pinned Discussions**: *Roadmap* (Announcements), *What are you running Maggie on?* (Show and tell), *Launch FAQ* (Q&A, from M7).
-- [ ] **[A] Discussions welcome post** template for the first fifty people, short.
-- [ ] Optional: GitHub Project board public view of the two milestones.
+- [x] **Labels** mirroring the commit scopes: `sidebar`, `board`, `source-control`, `usage`, `voice`, `remote`, `install`, `release`, plus `upstream` and `needs-info`. Defaults kept.
+- [x] **Two Discussions**: *Roadmap* (#9, Announcements) with the real roadmap, which is Maggie Mobile as a paid companion app and team and collaboration features as a paid subscription tier later, the Mac app staying MIT, and what is not planned (Linux, Windows, other agents for now); and *What are you running Maggie on?* (#10, Show and tell).
+- [ ] **[M] Pin them.** GitHub has no API for pinning a discussion; on each thread, the ⋯ menu › *Pin discussion*.
+- [ ] **Third Discussion, *Launch FAQ*** (Q&A): with the launch content; pin it the same way.
 
-**Done when:** the Issues tab shows direction, the Discussions tab has three pinned threads, and milestones exist.
+**Done when:** labels exist, the two threads are pinned, and the Issues tab is empty and open.
 
 ---
 
