@@ -61,14 +61,7 @@ Decisions that gate later milestones, and two applications with lead times.
 - [x] **[M] GitHub Sponsors.** Applied and live on 8 November; the sponsor button is on the profile and, through `FUNDING.yml`, on this repository. The 27 November fallback is no longer needed.
 - [x] **[M] The phone: "coming".** Maggie Mobile is a paid companion app, not open source, not yet released. The Mac side of pairing stays visible and says so. Revisit if TestFlight opens before launch.
 - [x] **[M] Open-core statement** decided; see "Decisions so far". In the README ("What is open and what is not") and both site footers.
-- [ ] **[M] `free-code`: delete it** (decided 8 November). The `gh` token in this session lacks the `delete_repo` scope, so from your terminal:
-
-  ```sh
-  gh auth refresh -h github.com -s delete_repo
-  gh repo delete marciosete/free-code --yes
-  ```
-
-  Or Settings › Danger Zone on the repository. GitHub keeps a deleted repository restorable for 90 days.
+- [x] **[M] `free-code` deleted**, 8 November, by Marcio (the session's token lacked the `delete_repo` scope). Confirmed gone.
 - [ ] **[M] Confirm the date** above, or pick the aggressive one and drop M6's optional items.
 
 **Done when:** Sponsors application submitted; the three decisions written at the top of this file.
@@ -85,7 +78,7 @@ Written 8 November, modelled on the KIT agent-harness workflows (their shape onl
 - [x] **[A] `.github/workflows/ci.yml`**: `pull_request` and `push` to every branch but `main`, calling `test.yml`. `main` is covered by the release.
 - [x] **[A] `release.yml`**: a `test` job calling `test.yml`; the release job now `needs: [test, version]`, so a red test produces no release. Nothing else changed.
 - [x] **[A] README**: a badge for the release workflow on `main` (it includes the gate; `ci.yml` never runs on `main`, so its badge would mislead).
-- [ ] **Prove it.** Proven on the blocking side twice on 8 November, by accident: run 1 stopped at typos (five words that were right; `typos.toml` now knows them) and run 2 stopped when the Swift test target would not compile on the runner (a chain of six `+` on `Data` inside an `#expect` in `VoiceTests.swift` that the runner's compiler could not type-check in time; it is now built in steps). Run 3 compiled and ran the suite, and three voice tests each died at exactly 60 seconds: they ask macOS for microphone permission first, and on a runner nobody answers the prompt. The gate now sets `TEST_RUNNER_MAGGIE_NO_MICROPHONE`, which xcodebuild hands to the test process, and the four tests that open the microphone are skipped there and reported as skipped; on a developer's Mac they still ask once and fail loudly if denied, as their author intended. All three times the release job was skipped, which is the gate working. Still to see: one green run on `main`, and its duration on a cold Zig cache; if well over 15 minutes, consider a weekly warm-up or a smaller build.
+- [ ] **Prove it.** Proven on the blocking side twice on 8 November, by accident: run 1 stopped at typos (five words that were right; `typos.toml` now knows them) and run 2 stopped when the Swift test target would not compile on the runner (a chain of six `+` on `Data` inside an `#expect` in `VoiceTests.swift` that the runner's compiler could not type-check in time; it is now built in steps). Run 3 compiled and ran the suite, and three voice tests each died at exactly 60 seconds: they ask macOS for microphone permission first, and on a runner nobody answers the prompt. The gate now sets `TEST_RUNNER_MAGGIE_NO_MICROPHONE`, which xcodebuild hands to the test process, and the four tests that open the microphone are skipped there and reported as skipped; on a developer's Mac they still ask once and fail loudly if denied, as their author intended. All three times the release job was skipped, which is the gate working. **Run 4 was green** (8 November, 21:58–22:08 UTC): 9 minutes 22 seconds end to end, of which Zig setup 20 seconds from a warm cache, SwiftLint 15 seconds, the GhosttyKit build 3 minutes 5 seconds and the Swift tests 4 minutes 53 seconds; the four microphone tests reported as skipped, as designed. Well under the 15-minute target, so no warm-up run is needed. The release job followed it: **v0.31.1 published at 22:29 UTC** with the DMG, the zip and the appcast, and the Homebrew cask bumped to 0.31.1 seventeen seconds later. Every Mac running Maggie gets today's work on its next update check.
 
 **Done when:** a red test blocks a release, the badge is green on `main`, and CI runs on pull requests.
 
