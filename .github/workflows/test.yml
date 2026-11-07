@@ -75,6 +75,11 @@ jobs:
       # bundle is kept for a failure; it opens in Xcode with each test's log.
       - name: Swift tests
         id: tests
+        env:
+          # Nobody here can answer macOS's microphone prompt. xcodebuild hands
+          # TEST_RUNNER_-prefixed variables to the test process without the prefix,
+          # and the voice tests that open the microphone skip on this one.
+          TEST_RUNNER_MAGGIE_NO_MICROPHONE: "1"
         run: |
           cd macos
           xcodebuild test \

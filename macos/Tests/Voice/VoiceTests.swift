@@ -430,8 +430,15 @@ struct VoiceAudioFormatTests {
 /// decided is asked once, by whoever is running the tests; denied, they fail and say
 /// where to allow it, rather than skip and let a regression through unseen. The host is
 /// signed with the Apple Development identity so the answer outlives a rebuild.
+///
+/// The one place they do skip is where nobody can answer the prompt: the CI gate sets
+/// MAGGIE_NO_MICROPHONE (through xcodebuild's TEST_RUNNER_ prefix), and the four tests
+/// that open the microphone are reported as skipped there instead of waiting a minute
+/// each for an answer that never comes.
 @Suite(.serialized)
 struct VoiceAudioEngineTests {
+    static let microphoneUsable = ProcessInfo.processInfo.environment["MAGGIE_NO_MICROPHONE"] == nil
+
     static func requireMicrophone() async throws {
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             _ = await AVCaptureDevice.requestAccess(for: .audio)
@@ -479,7 +486,7 @@ struct VoiceAudioEngineTests {
         #expect(!audio.isPlaying)
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(1)), .enabled(if: VoiceAudioEngineTests.microphoneUsable, "no one here can allow the microphone"))
     func hangingUpLetsGoOfTheEngineAndItsVoiceProcessing() async throws {
         try await Self.requireMicrophone()
         let microphone = try #require(VoiceDevices.defaultDevice(input: true))
@@ -513,7 +520,7 @@ struct VoiceAudioEngineTests {
         }
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(1)), .enabled(if: VoiceAudioEngineTests.microphoneUsable, "no one here can allow the microphone"))
     func everyCallGetsAnEngineOfItsOwn() async throws {
         try await Self.requireMicrophone()
         let audio = VoiceAudioEngine()
@@ -531,7 +538,7 @@ struct VoiceAudioEngineTests {
         #expect(engines.count == 3)
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(1)), .enabled(if: VoiceAudioEngineTests.microphoneUsable, "no one here can allow the microphone"))
     func startingAgainReplacesTheRunningEngine() async throws {
         // Settings changes restart the engine mid-call; the one before must not linger.
         try await Self.requireMicrophone()
@@ -561,7 +568,7 @@ struct VoiceAudioEngineTests {
 @Suite
 @MainActor
 struct LocalVoiceEndpointTests {
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(1)), .enabled(if: VoiceAudioEngineTests.microphoneUsable, "no one here can allow the microphone"))
     func hangingUpStopsTheMacsAudio() async throws {
         // What the agent calls when the GPT-Live session ends, by request or not.
         try await VoiceAudioEngineTests.requireMicrophone()
