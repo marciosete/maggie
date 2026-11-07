@@ -4,7 +4,7 @@ Written 8 November 2026. Closes every gap found in the 7 November readiness audi
 
 ## Decisions so far (8 November)
 
-- **GitHub Sponsors:** application started on 8 November from the Sponsors accounts page for the personal account `marciosete`. GitHub asked for sudo-mode two-factor confirmation at `github.com/sponsors/marciosete/signup`; that step, and what follows it (profile, tiers, Stripe Connect, tax form, submit), is yours. Until approved, the sponsor links in the README and site keep redirecting to the profile.
+- **GitHub Sponsors:** live. The application was started on 8 November and completed the same day; GitHub confirms the sponsor button is on the `marciosete` profile. `.github/FUNDING.yml` in this repository already names the account, so the repository's Sponsor button follows. The sponsor links in the README and site now resolve.
 - **The phone:** Maggie Mobile, the iPhone and iPad app, is coming. It is a **paid companion app and not open source**. The "coming" route is taken: the pairing UI stays visible (it works today and the app is in testing) and says so in one sentence; README, site and privacy page say "coming, paid".
 - **Open-core statement:** the Mac app, everything in this repository, is MIT and stays MIT, and needs nothing paid to work fully. Maggie Mobile is a paid app, not open source, and is how the project is funded alongside sponsorship. The protocol between the two halves is in this repository. No accounts, analytics or crash reporting in either half.
 - **Contact email:** `marcio.sete@gmail.com` everywhere in this repository (replaces `marcio@ai-foundry.au`).
@@ -56,7 +56,7 @@ Roughly eleven evenings over three weeks, about half of them delegable.
 
 Decisions that gate later milestones, and two applications with lead times.
 
-- [x] **[M] Apply for GitHub Sponsors today.** Started 8 November; stopped at GitHub's two-factor confirmation, which is yours to enter. Finish at `github.com/sponsors/marciosete/signup`. Approval needs identity and Stripe Connect and can take days to weeks. If it is not approved by 27 November, M4 removes the sponsor asks from README and site and keeps Buy Me a Coffee.
+- [x] **[M] GitHub Sponsors.** Applied and live on 8 November; the sponsor button is on the profile and, through `FUNDING.yml`, on this repository. The 27 November fallback is no longer needed.
 - [x] **[M] The phone: "coming".** Maggie Mobile is a paid companion app, not open source, not yet released. The Mac side of pairing stays visible and says so. Revisit if TestFlight opens before launch.
 - [x] **[M] Open-core statement** decided; see "Decisions so far". In the README ("What is open and what is not") and both site footers.
 - [ ] **[M] `free-code`.** The public repo described as Claude Code with "security-prompt guardrails stripped" is one click from Maggie's README. Private, archived, or left. Recommendation: private before M8.
@@ -76,7 +76,7 @@ Written 8 November, modelled on the KIT agent-harness workflows (their shape onl
 - [x] **[A] `.github/workflows/ci.yml`**: `pull_request` and `push` to every branch but `main`, calling `test.yml`. `main` is covered by the release.
 - [x] **[A] `release.yml`**: a `test` job calling `test.yml`; the release job now `needs: [test, version]`, so a red test produces no release. Nothing else changed.
 - [x] **[A] README**: a badge for the release workflow on `main` (it includes the gate; `ci.yml` never runs on `main`, so its badge would mislead).
-- [ ] **[M] Prove it**: push a branch with a deliberately failing test and watch CI fail; then a `fix:` to `main` and watch release wait for green. Watch the first run's time with a cold Zig cache; if it is well over 15 minutes, consider a weekly warm-up or a smaller build.
+- [ ] **Prove it.** Proven on the blocking side twice on 8 November, by accident: run 1 stopped at typos (five words that were right; `typos.toml` now knows them) and run 2 stopped when the Swift test target would not compile on the runner (a chain of six `+` on `Data` inside an `#expect` in `VoiceTests.swift` that the runner's compiler could not type-check in time; it is now built in steps). Both times the release job was skipped, which is the gate working. Still to see: one green run on `main`, and its duration on a cold Zig cache; if well over 15 minutes, consider a weekly warm-up or a smaller build.
 
 **Done when:** a red test blocks a release, the badge is green on `main`, and CI runs on pull requests.
 
@@ -100,14 +100,14 @@ The 46× LinkedIn post goes out Thursday 12 November and its first comment says 
 ## M3 — Repository housekeeping (by Sun 15 Nov)
 
 - [x] **[A] Replace `AGENTS.md`.** Done 8 November: Maggie's own guide, with the build and test commands, the directory map (what is Ghostty's and what is Maggie's), the conventions from `CONTRIBUTING.md`, the every-push-is-a-release and privacy-page rules, and a pointer to Ghostty's guide for changes meant for upstream. The `CLAUDE.md` symlink stays.
-- [ ] **[M] Clean `origin`.** Attempted on 8 November through the GitHub API; the session's permission classifier denied the deletions as destructive, so they are yours. They are reversible: every ref still exists on the `upstream` remote. From the repository:
+- [x] **[M] Clean `origin`, branches.** Ghostty's seven branches were deleted from `origin` on 8 November (`1.1.x`, `1.2.x`, `1.3.x`, `offset-audit`, `push-tuwykoykluyz`, `setneedle-crash`, `tristan957/gtk-ng`). `origin` now has `main` only.
+- [ ] **[M] Clean `origin`, tags.** The session's permission classifier denied the tag deletion twice, so this one is yours. Reversible: every tag still exists on the `upstream` remote. From the repository:
 
   ```sh
-  git push origin --delete 1.1.x 1.2.x 1.3.x offset-audit push-tuwykoykluyz setneedle-crash tristan957/gtk-ng
   git push origin --delete tip v1.0.0 v1.0.1 v1.1.0 v1.1.1 v1.1.2 v1.1.3 v1.2.0 v1.2.1 v1.2.2 v1.2.3 v1.3.0 v1.3.1
   ```
 
-  The list was checked against `gh release list`: every `v0.x` tag on `origin` is a Maggie release and stays; `tip` and `v1.*` are Ghostty's. The stray local `v2026.10.2-17975` is already deleted. The Tags page should then show v0.31.0 first.
+  Checked against `gh release list`: every `v0.x` tag on `origin` is a Maggie release and stays; `tip` and `v1.*` are Ghostty's. The stray local `v2026.10.2-17975` is already deleted. The Tags page then shows v0.31.0 first.
 - [x] **[M] Archive `marciosete/homebrew-tap`.** Done 8 November: its README now points at `marciosete/homebrew-maggie` with `brew untap` and the right install line, and the repository is archived (which also stops its hourly bump workflow). `homebrew-maggie` is updated by `release.yml` and is the one the README and site name.
 - [x] **[A] `CODE_OF_CONDUCT.md`**, Contributor Covenant 2.1, contact `marcio.sete@gmail.com`. Ghostty has none, so this is not an inheritance.
 - [x] **[A] `.github/PULL_REQUEST_TEMPLATE.md`**: what changes for the person, the commit type and scope, tests, AI-assistance statement, a three-line checklist.
@@ -129,7 +129,7 @@ What the README and site say must match what 0.31 does, and must say what is ope
 - [x] "What it does" catches up with the product (8 November): **A board** (⌘K, columns, work items, colours and labels, folding columns, per window, filters narrow the sidebar), **A status bar** (plan limits, memory, keep-awake, voice), **A voice** ("hey Maggie" via on-device recognition, what it announces, OpenAI live speech with your key, the speaker with Mac voices or ElevenLabs), **A phone** (pairing by QR, same network or Tailscale, terminal drawn by Ghostty's engine, push via your APNs key held while the Mac is in use; app coming, paid), nested groups and folder groups, subagents under the row, ⌘-click Markdown, **Capture and timing**, bundled prices in Usage, **The force multiplier** with the install one-liner. Command palette, App Intents and AppleScript are Ghostty's and stay out. [M] review the voice paragraph against what the voice actually does today.
 - [x] **"What is open and what is not"** section, before "Install".
 - [x] **Comparables** paragraph at the end of "How it works", no names.
-- [x] Sponsor ask kept (application in progress). Revisit 27 November.
+- [x] Sponsor ask kept; Sponsors is live as of 8 November.
 - [x] Release, downloads, licence and tests-and-release badges under the title.
 
 **The phone (`[M]`, per M0: "coming")**
