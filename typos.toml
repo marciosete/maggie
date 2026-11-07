@@ -69,8 +69,9 @@ iterm = "iterm"
 ACCES = "ACCES"
 wdth = "wdth"
 Strat = "Strat"
-grey = "gray"
-greyscale = "grayscale"
+# Maggie writes British English; upstream maps these to the US spelling
+grey = "grey"
+greyscale = "greyscale"
 DECID = "DECID"
 flate = "flate"
 typ = "typ"
@@ -88,6 +89,10 @@ loca = "loca"
 # TinyIo
 tio = "tio"
 WRONLY = "WRONLY"
+# GLSL tessellation evaluation shader extension (force-multiplier skill)
+tese = "tese"
+# mach_timebase_info's numerator field
+numer = "numer"
 
 [type.po]
 extend-glob = ["*.po"]
