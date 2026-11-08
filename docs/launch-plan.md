@@ -11,6 +11,15 @@ Written 8 November 2026. Closes every gap found in the 7 November readiness audi
 - **Force-multiplier skill:** no separate repository (see M2). The README carries a one-liner that installs it from this repository without Maggie.
 - **Still open:** `free-code` (private, archived, or left); the launch date.
 
+## Decisions, 9 November
+
+- **LinkedIn only, for now.** The launch is the LinkedIn post with the film. Show HN, Reddit, X, the Launch FAQ and the site's FAQ section are deferred; nothing written for them is lost (`launch/README.md` in the website repo keeps the drafts).
+- **No release freeze.** The CI gate is the protection; `main` keeps moving.
+- **No pinned discussions.** #9 Roadmap and #10 What are you running Maggie on? stay as they are.
+- **The film replaces the screen recording.** A 100-second narrated film at 1.1× with captions, the app drawn in HTML and operated by a cursor; source in the website repo at `launch/film/`, review copies in `~/Downloads/maggie-launch-film/`, every check in its `VERIFY.md`.
+- **The force-multiplier one-liner is tested** on a fresh account (Marcio).
+- **The source control panel has no Auto tab.** The README, the site and the film said it had; the README and the site were corrected on 9 November, the film on the 8th.
+
 ## Where we start
 
 Public since 22 September 2026, MIT, v0.31.0 released 27 October. Never announced. Baseline to beat, recorded 7 November:
@@ -62,7 +71,7 @@ Decisions that gate later milestones, and two applications with lead times.
 - [x] **[M] The phone: "coming".** Maggie Mobile is a paid companion app, not open source, not yet released. The Mac side of pairing stays visible and says so. Revisit if TestFlight opens before launch.
 - [x] **[M] Open-core statement** decided; see "Decisions so far". In the README ("What is open and what is not") and both site footers.
 - [x] **[M] `free-code` deleted**, 8 November, by Marcio (the session's token lacked the `delete_repo` scope). Confirmed gone.
-- [ ] **[M] Confirm the date** above, or pick the aggressive one and drop M6's optional items.
+- [x] **[M] The channel and the date.** Decided 9 November: LinkedIn only for now; Show HN, Reddit and X deferred. The post goes in the series' slot for post 4, or earlier if Marcio moves it.
 
 **Done when:** Sponsors application submitted; the three decisions written at the top of this file.
 
@@ -92,7 +101,7 @@ The 46× LinkedIn post goes out Thursday 12 November and its first comment says 
 
 - [x] **[A] README one-liner** under "The force multiplier", with what the skill measures and its caveats (volume not value; 150 is a convention; the team is the unit).
 - [x] **[A] `loc.sh` finds `loc-report.html` beside itself** through its own `SCRIPT_DIR` (`dirname "${BASH_SOURCE[0]}"`, line 76; the page is read from `$SCRIPT_DIR/loc-report.html`, line 900), so the personal-skill install works wherever the three files sit together. The `${CLAUDE_SKILL_DIR}` in `SKILL.md` is only how Claude Code is told where to run it from.
-- [ ] **[M] Fresh-Mac test**: a clean user account, install by the README one-liner, run on any repository, dashboard opens, no names shown by default. Time it.
+- [x] **[M] Fresh-Mac test**: done by Marcio, 9 November.
 - [ ] **[A] marciosete.com**: link the skill folder from the essay where the measurement system is described (Part II, §5) and from the Research page.
 
 **Done when:** a stranger with Claude Code and no Maggie installs and runs it in under ten minutes from the README alone.
@@ -127,6 +136,7 @@ What the README and site say must match what 0.31 does, and must say what is ope
 - [x] **Comparables** paragraph at the end of "How it works", no names.
 - [x] Sponsor ask kept; Sponsors is live as of 8 November.
 - [x] Release, downloads, licence and tests-and-release badges under the title.
+- [x] **The source control paragraph no longer describes an Auto tab** (there is none; found while reviewing the film, 8 November; README fixed 9 November, the site's two sentences the same day).
 
 **The phone (`[M]`, per M0: "coming")**
 
@@ -153,10 +163,10 @@ The single largest gap: there is no screenshot or recording anywhere. **You are 
 
 **Already in hand (found 8 November):** the website repo has `launch/staging/stage.sh`, which builds three fictional repositories (`lumen-shop`, `atlas-api`, `harbour-books`) with believable trees and histories and refuses to run inside `~/projects`, and `launch/staging/shot-list.md`, a seven-shot, 30–45 second script with the four session prompts that put the rows in four colours. Start there. Fictional repositories are safer than the personal ones suggested below, and the names match the HTML mock on the site.
 
-- [ ] **[M] Demo workspace.** `sh launch/staging/stage.sh ~/Desktop/maggie-demo`, then the four sessions from the shot list. If you prefer real code, personal and open-source repositories only (this repo, marciosete.com, brightkind, rovik); no client names, no Kinetic IT code. Dark theme, a clean font, 1920×1200 window.
+- [x] ~~**[M] Demo workspace.**~~ Not needed: the film draws its workspace (the fictional repositories maggie-docs and maggie, a contributor named Alex). The staging script stays for anyone who wants a live demo.
 - [x] **Screenshots** (8 November): sixteen sanitised images in `~/Downloads/maggie launch images/sanitised-for-opensource-launch`, redrawn by an image model from the real captures around a fictional contributor, Alex Morgan, and the repositories maggie, maggie-docs and maggie-tools, with the package's own review notes beside them. Six are in use: sidebar, board, source control, usage, the voice popover and a terminal. They are illustrations of the product rather than pixel-exact captures: softer glyphs, and small slips (the usage window's status bar reads `-20% 4h`; a path in the source control tree carries a stray quote). The menu bar was cropped off each. No row is red in the sidebar shot; the recording should show one.
-- [ ] **[M] 60–90 second recording**, scripted: six sessions working → one turns red → click, answer the permission → it turns yellow, then teal as it commits → the Auto tab lands the worktree → hover for cost → the board → "hey Maggie, what's waiting on me?" → the phone buzzes (if shipping). No narration; captions if any. Record at 1920×1200 with CleanShot or QuickTime.
-- [ ] **[A] Exports**: MP4 1080p for site, LinkedIn and X; GIF ≤ 10 MB of the first 20–30 seconds for README and the Show HN comment (gifski or ffmpeg palettegen); a poster frame for Open Graph.
+- [x] **The film** (8 November) in place of the recording: 100 s at 1.1×, eight acts (name, the job, the colours, worktrees, the board, the voice, nothing leaves the Mac, open and close), narrated, captioned, the app drawn in HTML and operated by a cursor from the user's point of view. Source `maggie-website/launch/film/`, review copies and one file per act in `~/Downloads/maggie-launch-film/`.
+- [ ] **[A] Exports from the film**: the 1080p MP4 for LinkedIn and the site hero (with a poster frame); a GIF ≤ 10 MB of the opening for the README (gifski or ffmpeg palettegen); the film's home in a repository decided (`launch/film/` is untracked in the website repo).
 - [x] **[A] Place them** (8 November): README top and beside the board, voice, source control and usage paragraphs (`docs/images/*.webp`, 23 to 149 KB each); site hero and the four feature panels (`assets/shots/*.webp`), replacing the HTML mocks; `og:image` re-rendered. The repository's social preview is the same card, uploaded through the browser on 8 November (GitHub has no API for it); the site's deploy was checked live with curl, and the hero and panels in Chrome.
 - [ ] **[M] Optional, for the LinkedIn components post later**: a 2–3 minute narrated walkthrough on YouTube, which also unlocks the `/videos` page on marciosete.com.
 
@@ -170,10 +180,10 @@ Revised 8 November after Marcio's call: **no seeded issues and no milestones.** 
 
 - [x] **Labels** mirroring the commit scopes: `sidebar`, `board`, `source-control`, `usage`, `voice`, `remote`, `install`, `release`, plus `upstream` and `needs-info`. Defaults kept.
 - [x] **Two Discussions**: *Roadmap* (#9, Announcements) with the real roadmap, which is Maggie Mobile as a paid companion app and team and collaboration features as a paid subscription tier later, the Mac app staying MIT, and what is not planned (Linux, Windows, other agents for now); and *What are you running Maggie on?* (#10, Show and tell).
-- [ ] **[M] Pin them.** GitHub has no API for pinning a discussion; on each thread, the ⋯ menu › *Pin discussion*.
-- [ ] **Third Discussion, *Launch FAQ*** (Q&A): with the launch content; pin it the same way.
+- [x] ~~**[M] Pin them.**~~ Not pinning (Marcio, 9 November).
+- [ ] ~~**Third Discussion, *Launch FAQ***~~ Deferred with the Show HN content (9 November).
 
-**Done when:** labels exist, the two threads are pinned, and the Issues tab is empty and open.
+**Done when:** labels exist and the Issues tab is empty and open. True as of 9 November.
 
 ---
 
@@ -181,21 +191,23 @@ Revised 8 November after Marcio's call: **no seeded issues and no milestones.** 
 
 **Separate piece of work, by your call.** Start from what exists: `launch/README.md` in the website repo already holds a Show HN title and first comment, X, LinkedIn and Reddit drafts, a one-line description and a checklist. It predates the 46× framing, the open-core statement and the libghostty answer, so M7 is a revision of that kit, not a blank page. The items below are what the revision has to add.
 
-- [ ] **[A] Show HN title**, under 80 characters. The kit has `Show HN: Maggie – a Mac terminal for running many coding agents in parallel`; the alternative is `Show HN: Maggie – an agent development environment for Mac, built on Ghostty`. Pick one.
-- [ ] **[A] First comment** (you post it immediately after submitting): why you built it (46× moved the bottleneck to attention); what is Ghostty's and what is Maggie's; why a fork of the macOS app and not a libghostty embed (the sidebar, workspace, restore, splits and tabs live in the app layer, and upstream is merged after each Ghostty release); the open-core statement; the privacy page in one line; built with the agents it manages, with the force-multiplier number for this repo. Four short paragraphs, no marketing.
-- [ ] **[A] Launch FAQ**, eight answers, used on HN, Reddit, Discussions and the site: Why macOS only? Why a fork and not a plugin or a libghostty app? What is commercial? Does it work with Gemini CLI, opencode, aider? It reads my `~/.claude` transcripts, what leaves the Mac? Voice needs my OpenAI key, why? Linux or Windows? How does it compare with TUI session managers and cloud agent runners?
-- [ ] **[A] Reddit posts** for r/ClaudeAI, r/macapps, r/commandline, each in that subreddit's register, each linking the site, not the repo.
-- [ ] **[A] X thread**, five posts, GIF on the first.
+- [ ] ~~**[A] Show HN title**~~ Deferred (LinkedIn only, 9 November). Under 80 characters. The kit has `Show HN: Maggie – a Mac terminal for running many coding agents in parallel`; the alternative is `Show HN: Maggie – an agent development environment for Mac, built on Ghostty`. Pick one.
+- [ ] ~~**[A] First comment**~~ Deferred with the Show HN: why you built it (46× moved the bottleneck to attention); what is Ghostty's and what is Maggie's; why a fork of the macOS app and not a libghostty embed (the sidebar, workspace, restore, splits and tabs live in the app layer, and upstream is merged after each Ghostty release); the open-core statement; the privacy page in one line; built with the agents it manages, with the force-multiplier number for this repo. Four short paragraphs, no marketing.
+- [ ] ~~**[A] Launch FAQ**~~ Deferred (9 November). Eight answers, used on HN, Reddit, Discussions and the site: Why macOS only? Why a fork and not a plugin or a libghostty app? What is commercial? Does it work with Gemini CLI, opencode, aider? It reads my `~/.claude` transcripts, what leaves the Mac? Voice needs my OpenAI key, why? Linux or Windows? How does it compare with TUI session managers and cloud agent runners?
+- [ ] ~~**[A] Reddit posts**~~ Deferred (9 November), for r/ClaudeAI, r/macapps, r/commandline, each in that subreddit's register, each linking the site, not the repo.
+- [ ] ~~**[A] X thread**~~ Deferred (9 November).
 - [ ] **[A] LinkedIn post 4** is drafted in `marciosete.com/docs/linkedin-comeback-series.md`; refresh the numbers from the M2 skill run.
-- [ ] **[M] Heads-up to Ghostty.** Ghostty's Discussions have no show-and-tell category and are vouch-gated, so do not post there. Send Mitchell Hashimoto a short direct note 48 hours before: what Maggie is, that it says "built on Ghostty, not affiliated", merges upstream after each release, and that a Show HN is coming on the 1st. No ask.
-- [ ] **[M] Release freeze** from Friday 27 November to Wednesday 2 December: `fix:` only on `main`. No upstream merge in that window. Every push is a release.
+- [ ] **[M] Heads-up to Ghostty.** Ghostty's Discussions have no show-and-tell category and are vouch-gated, so do not post there. The note and the email are written in `docs/launch/heads-up-mitchell.md` (9 November); his site publishes `m@mitchellh.com`. Send a couple of days before the LinkedIn post. No ask.
+- [x] ~~**[M] Release freeze**~~ No freeze (Marcio, 9 November); the CI gate is the protection.
 - [ ] **[M] Record the baseline** again on 30 November: stars, views, clones, downloads, site visits.
 
-**Done when:** every text above exists in `docs/launch/` in this repo, Mitchell has been told, and `main` is frozen.
+**Done when:** the LinkedIn post and the note to Mitchell exist in `docs/launch/`, and Mitchell has been told.
 
 ---
 
 ## M8 — Launch (Tue 1 Dec – Thu 3 Dec)
+
+**Revised 9 November: LinkedIn only.** The Show HN, Reddit and X steps below are deferred and kept for the record. What remains is the LinkedIn post, on the day Marcio picks, with the film as the media and the repository and the site linked; then answering every comment, Discussion and issue within the day.
 
 **Tuesday 1 December**
 
@@ -266,16 +278,16 @@ Post 8 ("Make trust less necessary") becomes an essay chapter, or a January post
 
 All true on Monday 30 November:
 
-- [ ] CI runs tests on PRs and `main`; release waits for green; badge is green.
-- [ ] README opens on a real screenshot and a GIF, lists every shipped feature, states what is open and what is not. (Screenshot, features and the open statement done 8 November; the GIF waits on the recording.)
-- [ ] Site hero is the real recording; site and README agree; privacy page says "checked against 0.3x". (The hero is the screenshot for now; the rest done 8 November.)
+- [x] CI runs tests on PRs and `main`; release waits for green; badge is green (run 4, v0.31.1, 8 November).
+- [ ] README opens on a real screenshot and a GIF, lists every shipped feature, states what is open and what is not. (Screenshot, features and the open statement done 8 November; the GIF is cut from the film next.)
+- [ ] Site hero is the film; site and README agree; privacy page says "checked against 0.3x". (The hero is the screenshot for now; the rest done 8 November.)
 - [x] Sponsors live, or the ask removed.
 - [x] The phone is installable or clearly "coming".
 - [x] `origin` has only `main` and Maggie's tags; duplicate tap archived; `AGENTS.md` is Maggie's; code of conduct present.
-- [ ] Force-multiplier skill installs standalone in under ten minutes.
-- [ ] The Roadmap discussion carries the roadmap (no seeded issues, by decision); discussions #9 and #10 pinned, and a Launch FAQ once M7 writes it.
-- [ ] Show HN text, first comment, FAQ, Reddit and X drafts written; Mitchell told; `main` frozen.
-- [ ] `free-code` dealt with.
+- [x] Force-multiplier skill installs standalone in under ten minutes (Marcio, 9 November).
+- [x] The Roadmap discussion carries the roadmap (no seeded issues, by decision). Pinning and the Launch FAQ dropped, 9 November.
+- [ ] LinkedIn post 4 written, with the film; Mitchell told. (Show HN, Reddit and X deferred; no freeze.)
+- [x] `free-code` dealt with (deleted 8 November).
 - [ ] Baseline numbers recorded.
 
 ## Working agreement

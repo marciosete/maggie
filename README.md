@@ -154,9 +154,8 @@ and agent session is restored where it was, resumed with `claude --resume` or
 
 **Worktrees and source control.** A session started with `claude -w` or
 `codex --worktree` runs in its own worktree. Maggie follows it: the source
-control panel shows that worktree's branch, changes and commits ahead of
-`main`, and an Auto tab counts what is left to commit and lands the worktree
-when it is clean.
+control panel shows that worktree's branch, its changes and its commits ahead
+of `main`.
 
 <p align="center"><img src="docs/images/source-control.webp" alt="The source control panel beside a session: the worktree's branch, its changes as a file tree, and how far it is ahead of main." width="900"></p>
 
