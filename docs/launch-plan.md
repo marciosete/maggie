@@ -103,13 +103,7 @@ The 46× LinkedIn post goes out Thursday 12 November and its first comment says 
 
 - [x] **[A] Replace `AGENTS.md`.** Done 8 November: Maggie's own guide, with the build and test commands, the directory map (what is Ghostty's and what is Maggie's), the conventions from `CONTRIBUTING.md`, the every-push-is-a-release and privacy-page rules, and a pointer to Ghostty's guide for changes meant for upstream. The `CLAUDE.md` symlink stays.
 - [x] **[M] Clean `origin`, branches.** Ghostty's seven branches were deleted from `origin` on 8 November (`1.1.x`, `1.2.x`, `1.3.x`, `offset-audit`, `push-tuwykoykluyz`, `setneedle-crash`, `tristan957/gtk-ng`). `origin` now has `main` only.
-- [ ] **[M] Clean `origin`, tags.** The session's permission classifier denied the tag deletion twice, so this one is yours. Reversible: every tag still exists on the `upstream` remote. From the repository:
-
-  ```sh
-  git push origin --delete tip v1.0.0 v1.0.1 v1.1.0 v1.1.1 v1.1.2 v1.1.3 v1.2.0 v1.2.1 v1.2.2 v1.2.3 v1.3.0 v1.3.1
-  ```
-
-  Checked against `gh release list`: every `v0.x` tag on `origin` is a Maggie release and stays; `tip` and `v1.*` are Ghostty's. The stray local `v2026.10.2-17975` is already deleted. The Tags page then shows v0.31.0 first.
+- [x] **[M] Clean `origin`, tags.** Done 8 November: `tip` and `v1.0.0` to `v1.3.1`, Ghostty's, deleted from `origin` by Marcio (the session's permission classifier had refused twice), and the same tags plus the local-only `v1.4.0` deleted from the clone. Every `v0.x` tag is a Maggie release and stays; the Tags page shows v0.31.1 first. Reversible: every tag still exists on the `upstream` remote.
 - [x] **[M] Archive `marciosete/homebrew-tap`.** Done 8 November: its README now points at `marciosete/homebrew-maggie` with `brew untap` and the right install line, and the repository is archived (which also stops its hourly bump workflow). `homebrew-maggie` is updated by `release.yml` and is the one the README and site name.
 - [x] **[A] `CODE_OF_CONDUCT.md`**, Contributor Covenant 2.1, contact `marcio.sete@gmail.com`. Ghostty has none, so this is not an inheritance.
 - [x] **[A] `.github/PULL_REQUEST_TEMPLATE.md`**: what changes for the person, the commit type and scope, tests, AI-assistance statement, a three-line checklist.
@@ -117,7 +111,7 @@ The 46× LinkedIn post goes out Thursday 12 November and its first comment says 
 - [x] **[A] `fork/minimum-version`**: confirmed empty (comments only). No mandatory-update hold during launch week.
 - [x] **Contact email** replaced in `SECURITY.md` and the new files.
 
-**Done when:** `git ls-remote origin` lists only `main` and Maggie's tags (the one step left); the four files exist; the duplicate tap is archived.
+**Done when:** `git ls-remote origin` lists only `main` and Maggie's tags; the four files exist; the duplicate tap is archived. All true as of 8 November.
 
 ---
 
@@ -273,13 +267,13 @@ Post 8 ("Make trust less necessary") becomes an essay chapter, or a January post
 All true on Monday 30 November:
 
 - [ ] CI runs tests on PRs and `main`; release waits for green; badge is green.
-- [ ] README opens on a real screenshot and a GIF, lists every shipped feature, states what is open and what is not.
-- [ ] Site hero is the real recording; site and README agree; privacy page says "checked against 0.3x".
-- [ ] Sponsors live, or the ask removed.
-- [ ] The phone is installable or clearly "coming".
-- [ ] `origin` has only `main` and Maggie's tags; duplicate tap archived; `AGENTS.md` is Maggie's; code of conduct present.
+- [ ] README opens on a real screenshot and a GIF, lists every shipped feature, states what is open and what is not. (Screenshot, features and the open statement done 8 November; the GIF waits on the recording.)
+- [ ] Site hero is the real recording; site and README agree; privacy page says "checked against 0.3x". (The hero is the screenshot for now; the rest done 8 November.)
+- [x] Sponsors live, or the ask removed.
+- [x] The phone is installable or clearly "coming".
+- [x] `origin` has only `main` and Maggie's tags; duplicate tap archived; `AGENTS.md` is Maggie's; code of conduct present.
 - [ ] Force-multiplier skill installs standalone in under ten minutes.
-- [ ] Issues tab has the roadmap; three Discussions pinned.
+- [ ] The Roadmap discussion carries the roadmap (no seeded issues, by decision); discussions #9 and #10 pinned, and a Launch FAQ once M7 writes it.
 - [ ] Show HN text, first comment, FAQ, Reddit and X drafts written; Mitchell told; `main` frozen.
 - [ ] `free-code` dealt with.
 - [ ] Baseline numbers recorded.
