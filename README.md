@@ -172,7 +172,7 @@ accountant.
 or Codex, as a file you can hand to anyone. A session's title bar shows how
 long the reply took once the turn ends.
 
-**Keep the Mac awake** from the sidebar, lid closed included, while the flock
+**Keep the Mac awake** from the sidebar, lid closed included, while the fleet
 works.
 
 **The force multiplier.** Every session Maggie starts has
