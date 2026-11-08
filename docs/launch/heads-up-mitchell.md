@@ -9,8 +9,9 @@ text; he can ignore it without cost.
 
 Hi Mitchell. A heads-up rather than an ask: I've been building Maggie, a Mac
 app for running many Claude Code and Codex sessions at once, as a fork of
-Ghostty's macOS app (MIT, public since September). It says "built on Ghostty,
-not affiliated" everywhere, and I merge upstream after each of your releases.
+Ghostty's macOS app (MIT, public since September). It calls itself "built on
+Ghostty", carries your copyright line and says it is not affiliated, and I
+merge upstream after each of your releases.
 I'm announcing it publicly in the next few days and didn't want you to hear it
 second-hand. getmaggie.dev. Thank you for Ghostty; it is the reason this
 exists.
@@ -31,10 +32,11 @@ the workspace and the agent side are mine. It is MIT, public on GitHub since
 September, and I merge upstream after each Ghostty release so it stays close
 to the real thing.
 
-It says "built on Ghostty, not affiliated with the Ghostty project" in the
-README, on the site and in the app, and it uses none of your marks beyond that
-sentence. If anything about how it credits Ghostty should be different, tell
-me and I'll change it.
+The README's notice says Ghostty is a trademark of its owners and that Maggie
+uses its own name and icon and describes itself as built on Ghostty; the
+site's footer carries your copyright line and says Maggie is an independent
+project, not affiliated with Ghostty. If anything about how it credits Ghostty
+should be different, tell me and I'll change it.
 
 I'm announcing it publicly in the next few days, on LinkedIn first, and I
 didn't want you to find out second-hand.
