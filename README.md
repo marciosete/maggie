@@ -30,8 +30,9 @@
   </p>
 </p>
 
-<!-- Screenshots and the recording go here (launch plan, M5):
-<p align="center"><img src="docs/images/sidebar.png" alt="…" width="900"></p>
+<p align="center"><img src="docs/images/sidebar.webp" alt="Maggie's window. The sidebar lists agent sessions in folders, each row coloured by what its agent is doing, with the active session's terminal beside it." width="900"></p>
+
+<!-- The recording goes here when it exists (launch plan, M5):
 <p align="center"><img src="docs/images/maggie.gif" alt="…" width="900"></p>
 -->
 
@@ -119,6 +120,8 @@ colours and colours take labels, so a board can be read at a glance; columns
 fold to a strip so the ones being worked in have the room. The board's filters
 narrow the sidebar too, and each window has a board of its own.
 
+<p align="center"><img src="docs/images/board.webp" alt="The session board: columns for Next, Now, Parking lot, In progress and Done, with coloured, labelled cards in each." width="900"></p>
+
 **A status bar.** Under every window: your Claude and Codex plan limits and when
 they reset, the Mac's memory, whether it is being kept awake, and the voice.
 
@@ -132,6 +135,8 @@ turn that died on a rate limit, a session exiting. The conversation itself runs
 on OpenAI's live speech service with your own API key; hear each voice before
 choosing one. The speaker on a session row reads a reply aloud with the Mac's
 voices, or with ElevenLabs if you give it a key.
+
+<p align="center"><img src="docs/images/voice.webp" alt="The voice popover over the status bar, which reads Speaking: Maggie says “Hi Alex. Your twelve Maggie launch sessions are ready.”" width="700"></p>
 
 **A phone.** Maggie Mobile pairs an iPhone or iPad with your Mac by scanning a
 QR code, on the same network or from anywhere when Tailscale runs on both, with
@@ -153,11 +158,15 @@ control panel shows that worktree's branch, changes and commits ahead of
 `main`, and an Auto tab counts what is left to commit and lands the worktree
 when it is clean.
 
+<p align="center"><img src="docs/images/source-control.webp" alt="The source control panel beside a session: the worktree's branch, its changes as a file tree, and how far it is ahead of main." width="900"></p>
+
 **Usage.** A panel with the cost and tokens of every Claude Code and Codex
 session, by day, project and model, priced at current rates, with your Claude
 and Codex plan limits alongside. The price table ships inside the app, so the
 panel is never blank, and refreshes when it can. A custom range for the
 accountant.
+
+<p align="center"><img src="docs/images/usage.webp" alt="The usage panel: cost and tokens by account, agent and day over ninety days, with each plan's limit and when it resets." width="900"></p>
 
 **Capture and timing.** The View menu captures a session's context, Claude Code
 or Codex, as a file you can hand to anyone. A session's title bar shows how

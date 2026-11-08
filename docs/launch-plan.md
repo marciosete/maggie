@@ -141,13 +141,13 @@ What the README and site say must match what 0.31 does, and must say what is ope
 
 **Website (private repo `maggie-website`, cloned to `/Users/marciosete/projects/maggie-website`; `[A]` draft, `[M]` deploy with `vercel --prod`)**
 
-- [ ] Hero: the real screen recording (MP4, muted, looping) with the HTML mock kept below it or dropped. Waits on M5.
+- [x] Hero: the sidebar screenshot replaced the HTML mock on 8 November, in the same window frame, and the four feature panels (board, source control, usage, voice) are screenshots too; the mock's animation script is gone. The recording takes the hero when it exists, with the screenshot as its poster.
 - [x] Feature parity: the site already had fifteen feature cards covering everything in the README (it was ahead of the README, not behind). The phone card now says coming and paid.
 - [ ] **FAQ section** with the launch FAQ from M7.
 - [x] Privacy page: destinations in the code enumerated on 8 November (getmaggie.dev appcast, the LiteLLM price file on GitHub, OpenAI live speech, ElevenLabs, Apple's push service directly), nothing new since 0.20; phone paragraph reworded (same network or Tailscale, pushes held while the Mac is in use, app not yet released); "last checked" set to 8 November 2026, Maggie 0.31.
 - [x] Open-core sentence in both footers (index and privacy).
-- [ ] Open Graph image: a real screenshot, not the magpie, so the HN and LinkedIn cards show the product. Waits on M5.
-- [ ] **[M] Deploy** the site changes (`vercel --prod` in the clone) once reviewed; they are uncommitted in the clone.
+- [x] Open Graph image: `og.html` carries the sidebar screenshot beside the headline and was rendered to `assets/og.png` on 8 November.
+- [x] **Deploy**: the site deploys from `main`; each push on 8 November was checked live with curl.
 
 **Done when:** a stranger can list every feature from the README alone, knows what is free, and the site and README agree.
 
@@ -160,10 +160,10 @@ The single largest gap: there is no screenshot or recording anywhere. **You are 
 **Already in hand (found 8 November):** the website repo has `launch/staging/stage.sh`, which builds three fictional repositories (`lumen-shop`, `atlas-api`, `harbour-books`) with believable trees and histories and refuses to run inside `~/projects`, and `launch/staging/shot-list.md`, a seven-shot, 30–45 second script with the four session prompts that put the rows in four colours. Start there. Fictional repositories are safer than the personal ones suggested below, and the names match the HTML mock on the site.
 
 - [ ] **[M] Demo workspace.** `sh launch/staging/stage.sh ~/Desktop/maggie-demo`, then the four sessions from the shot list. If you prefer real code, personal and open-source repositories only (this repo, marciosete.com, brightkind, rovik); no client names, no Kinetic IT code. Dark theme, a clean font, 1920×1200 window.
-- [ ] **[M] Four screenshots** (PNG, 2× Retina): (1) the sidebar with one session red; (2) the usage panel by project and model; (3) the session board; (4) source control on a worktree with the Auto tab ready to land. Plus (5) a phone notification if TestFlight ships.
+- [x] **Screenshots** (8 November): sixteen sanitised images in `~/Downloads/maggie launch images/sanitised-for-opensource-launch`, redrawn by an image model from the real captures around a fictional contributor, Alex Morgan, and the repositories maggie, maggie-docs and maggie-tools, with the package's own review notes beside them. Six are in use: sidebar, board, source control, usage, the voice popover and a terminal. They are illustrations of the product rather than pixel-exact captures: softer glyphs, and small slips (the usage window's status bar reads `-20% 4h`; a path in the source control tree carries a stray quote). The menu bar was cropped off each. No row is red in the sidebar shot; the recording should show one.
 - [ ] **[M] 60–90 second recording**, scripted: six sessions working → one turns red → click, answer the permission → it turns yellow, then teal as it commits → the Auto tab lands the worktree → hover for cost → the board → "hey Maggie, what's waiting on me?" → the phone buzzes (if shipping). No narration; captions if any. Record at 1920×1200 with CleanShot or QuickTime.
 - [ ] **[A] Exports**: MP4 1080p for site, LinkedIn and X; GIF ≤ 10 MB of the first 20–30 seconds for README and the Show HN comment (gifski or ffmpeg palettegen); a poster frame for Open Graph.
-- [ ] **[A] Place them**: README top, site hero, `og:image`, `.github` social preview re-upload.
+- [x] **[A] Place them** (8 November): README top and beside the board, voice, source control and usage paragraphs (`docs/images/*.webp`, 23 to 149 KB each); site hero and the four feature panels (`assets/shots/*.webp`), replacing the HTML mocks; `og:image` re-rendered. The repository's social preview is uploaded by hand: Settings › General › Social preview, `assets/og.png`; GitHub has no API for it.
 - [ ] **[M] Optional, for the LinkedIn components post later**: a 2–3 minute narrated walkthrough on YouTube, which also unlocks the `/videos` page on marciosete.com.
 
 **Done when:** README and site open on a real picture of the product, and the GIF plays in the GitHub README on mobile.
