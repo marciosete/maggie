@@ -13,10 +13,10 @@ Written 8 November 2026. Closes every gap found in the 7 November readiness audi
 
 ## Decisions, 9 November
 
-- **LinkedIn only, for now.** The launch is the LinkedIn post with the film. Show HN, Reddit, X, the Launch FAQ and the site's FAQ section are deferred; nothing written for them is lost (`launch/README.md` in the website repo keeps the drafts).
+- **LinkedIn only, for now.** The launch is the LinkedIn post with the film. Show HN, Reddit, X, the Launch FAQ and the site's FAQ section are deferred; nothing written for them is lost (the drafts are in the private repository, `marketing/launch/README.md`).
 - **No release freeze.** The CI gate is the protection; `main` keeps moving.
 - **No pinned discussions.** #9 Roadmap and #10 What are you running Maggie on? stay as they are.
-- **The film replaces the screen recording.** A 100-second narrated film at 1.1× with captions, the app drawn in HTML and operated by a cursor; source in the website repo at `launch/film/`, review copies in `~/Downloads/maggie-launch-film/`, every check in its `VERIFY.md`.
+- **The film replaces the screen recording.** A 100-second narrated film at 1.1× with captions, the app drawn in HTML and operated by a cursor; source in the private repository at `marketing/launch/film/`, review copies in `~/Downloads/maggie-launch-film/`, every check in its `VERIFY.md`.
 - **The force-multiplier one-liner is tested** on a fresh account (Marcio).
 - **The source control panel has no Auto tab.** The README, the site and the film said it had; the README and the site were corrected on 9 November, the film on the 8th.
 - **The film is on YouTube**, public: https://youtu.be/yjvg1CKXk-Q ("Introducing Maggie — Agent Development Environment", 100 s).
@@ -24,6 +24,7 @@ Written 8 November 2026. Closes every gap found in the 7 November readiness audi
 - **No GIF** in the README, and **no link to the force-multiplier skill** from marciosete.com.
 - **The baseline numbers are part of the content**: they are taken when the LinkedIn post is written.
 - **Mitchell was told** by email on 9 November.
+- **The launch material lives in the private repository**, under `marketing/launch/` (Marcio, 9 November): the film's source, the launch kit and the staging script. They were in the website repository, which the site serves as it is, so the kit and the staging files were readable at `getmaggie.dev/launch/…` until they were removed that day; the film had never been committed anywhere. Source only is committed (renders and the mixed audio are rebuilt by the tools), and a rebuild from the commit gave the shipped mix sample for sample.
 
 ## Where we start
 
@@ -166,13 +167,13 @@ What the README and site say must match what 0.31 does, and must say what is ope
 
 The single largest gap: there is no screenshot or recording anywhere. **You are running this milestone in a separate stream.**
 
-**Already in hand (found 8 November):** the website repo has `launch/staging/stage.sh`, which builds three fictional repositories (`lumen-shop`, `atlas-api`, `harbour-books`) with believable trees and histories and refuses to run inside `~/projects`, and `launch/staging/shot-list.md`, a seven-shot, 30–45 second script with the four session prompts that put the rows in four colours. Start there. Fictional repositories are safer than the personal ones suggested below, and the names match the HTML mock on the site.
+**Already in hand (found 8 November; in the private repository under `marketing/launch/staging/` since 9 November):** the website repo had `launch/staging/stage.sh`, which builds three fictional repositories (`lumen-shop`, `atlas-api`, `harbour-books`) with believable trees and histories and refuses to run inside `~/projects`, and `launch/staging/shot-list.md`, a seven-shot, 30–45 second script with the four session prompts that put the rows in four colours. Start there. Fictional repositories are safer than the personal ones suggested below, and the names match the HTML mock on the site.
 
 - [x] ~~**[M] Demo workspace.**~~ Not needed: the film draws its workspace (the fictional repositories maggie-docs and maggie, a contributor named Alex). The staging script stays for anyone who wants a live demo.
 - [x] **Screenshots** (8 November): sixteen sanitised images in `~/Downloads/maggie launch images/sanitised-for-opensource-launch`, redrawn by an image model from the real captures around a fictional contributor, Alex Morgan, and the repositories maggie, maggie-docs and maggie-tools, with the package's own review notes beside them. Six are in use: sidebar, board, source control, usage, the voice popover and a terminal. They are illustrations of the product rather than pixel-exact captures: softer glyphs, and small slips (the usage window's status bar reads `-20% 4h`; a path in the source control tree carries a stray quote). The menu bar was cropped off each. No row is red in the sidebar shot; the recording should show one.
-- [x] **The film** (8 November) in place of the recording: 100 s at 1.1×, eight acts (name, the job, the colours, worktrees, the board, the voice, nothing leaves the Mac, open and close), narrated, captioned, the app drawn in HTML and operated by a cursor from the user's point of view. Source `maggie-website/launch/film/`, review copies and one file per act in `~/Downloads/maggie-launch-film/`.
+- [x] **The film** (8 November) in place of the recording: 100 s at 1.1×, eight acts (name, the job, the colours, worktrees, the board, the voice, nothing leaves the Mac, open and close), narrated, captioned, the app drawn in HTML and operated by a cursor from the user's point of view. Source in the private repository at `marketing/launch/film/` (moved from the website repo's working copy on 9 November), review copies and one file per act in `~/Downloads/maggie-launch-film/`.
 - [x] **[A] Exports from the film**, closed 9 November: the 1080p file (H.264, AAC, 100 s, 9.8 MB) uploads to LinkedIn as it is; the film is on YouTube and plays from there on the site, with a frame of it as the still (`assets/film-poster.webp`); no GIF, by decision.
-- [ ] **[M] The film's home**: `launch/film/` is untracked in the website repo, so the composition, the takes and the tools exist on one Mac. Decide where the source lives.
+- [x] **[M] The film's home** (9 November): the private repository, `marketing/launch/film/`, with the launch kit and the staging script beside it. Committed and pushed; the website repo no longer has a `launch/` folder.
 - [x] **[A] Place them** (8 November): README top and beside the board, voice, source control and usage paragraphs (`docs/images/*.webp`, 23 to 149 KB each); site hero and the four feature panels (`assets/shots/*.webp`), replacing the HTML mocks; `og:image` re-rendered. The repository's social preview is the same card, uploaded through the browser on 8 November (GitHub has no API for it); the site's deploy was checked live with curl, and the hero and panels in Chrome.
 - [ ] **[M] Optional, for the LinkedIn components post later**: a 2–3 minute narrated walkthrough on YouTube, which also unlocks the `/videos` page on marciosete.com.
 
@@ -195,7 +196,7 @@ Revised 8 November after Marcio's call: **no seeded issues and no milestones.** 
 
 ## M7 — Launch content, heads-up, freeze (by Fri 27 Nov)
 
-**Separate piece of work, by your call.** Start from what exists: `launch/README.md` in the website repo already holds a Show HN title and first comment, X, LinkedIn and Reddit drafts, a one-line description and a checklist. It predates the 46× framing, the open-core statement and the libghostty answer, so M7 is a revision of that kit, not a blank page. The items below are what the revision has to add.
+**Separate piece of work, by your call.** Start from what exists: the launch kit (`marketing/launch/README.md` in the private repository since 9 November) already holds a Show HN title and first comment, X, LinkedIn and Reddit drafts, a one-line description and a checklist. It predates the 46× framing, the open-core statement and the libghostty answer, so M7 is a revision of that kit, not a blank page. The items below are what the revision has to add.
 
 - [ ] ~~**[A] Show HN title**~~ Deferred (LinkedIn only, 9 November). Under 80 characters. The kit has `Show HN: Maggie – a Mac terminal for running many coding agents in parallel`; the alternative is `Show HN: Maggie – an agent development environment for Mac, built on Ghostty`. Pick one.
 - [ ] ~~**[A] First comment**~~ Deferred with the Show HN: why you built it (46× moved the bottleneck to attention); what is Ghostty's and what is Maggie's; why a fork of the macOS app and not a libghostty embed (the sidebar, workspace, restore, splits and tabs live in the app layer, and upstream is merged after each Ghostty release); the open-core statement; the privacy page in one line; built with the agents it manages, with the force-multiplier number for this repo. Four short paragraphs, no marketing.
