@@ -147,7 +147,7 @@ What the README and site say must match what 0.31 does, and must say what is ope
 
 - [x] Hero: the sidebar screenshot replaced the HTML mock on 8 November, in the same window frame, and the four feature panels (board, source control, usage, voice) are screenshots too; the mock's animation script is gone. The recording takes the hero when it exists, with the screenshot as its poster.
 - [x] Feature parity: the site already had fifteen feature cards covering everything in the README (it was ahead of the README, not behind). The phone card now says coming and paid.
-- [ ] **FAQ section** with the launch FAQ from M7.
+- [ ] ~~**FAQ section** with the launch FAQ from M7.~~ Deferred with the Launch FAQ (9 November).
 - [x] Privacy page: destinations in the code enumerated on 8 November (getmaggie.dev appcast, the LiteLLM price file on GitHub, OpenAI live speech, ElevenLabs, Apple's push service directly), nothing new since 0.20; phone paragraph reworded (same network or Tailscale, pushes held while the Mac is in use, app not yet released); "last checked" set to 8 November 2026, Maggie 0.31.
 - [x] Open-core sentence in both footers (index and privacy).
 - [x] Open Graph image: `og.html` carries the sidebar screenshot beside the headline and was rendered to `assets/og.png` on 8 November.
@@ -197,7 +197,7 @@ Revised 8 November after Marcio's call: **no seeded issues and no milestones.** 
 - [ ] ~~**[A] Reddit posts**~~ Deferred (9 November), for r/ClaudeAI, r/macapps, r/commandline, each in that subreddit's register, each linking the site, not the repo.
 - [ ] ~~**[A] X thread**~~ Deferred (9 November).
 - [ ] **[A] LinkedIn post 4** is drafted in `marciosete.com/docs/linkedin-comeback-series.md`; refresh the numbers from the M2 skill run.
-- [ ] **[M] Heads-up to Ghostty.** Ghostty's Discussions have no show-and-tell category and are vouch-gated, so do not post there. The note and the email are written in `docs/launch/heads-up-mitchell.md` (9 November); his site publishes `m@mitchellh.com`. Send a couple of days before the LinkedIn post. No ask.
+- [x] **[M] Heads-up to Ghostty.** Ghostty's Discussions have no show-and-tell category and are vouch-gated, so do not post there. The note and the email are written in `docs/launch/heads-up-mitchell.md` (9 November); his site publishes `m@mitchellh.com`. **The email was sent by Marcio on 9 November.** No ask.
 - [x] ~~**[M] Release freeze**~~ No freeze (Marcio, 9 November); the CI gate is the protection.
 - [ ] **[M] Record the baseline** again on 30 November: stars, views, clones, downloads, site visits.
 
@@ -286,7 +286,7 @@ All true on Monday 30 November:
 - [x] `origin` has only `main` and Maggie's tags; duplicate tap archived; `AGENTS.md` is Maggie's; code of conduct present.
 - [x] Force-multiplier skill installs standalone in under ten minutes (Marcio, 9 November).
 - [x] The Roadmap discussion carries the roadmap (no seeded issues, by decision). Pinning and the Launch FAQ dropped, 9 November.
-- [ ] LinkedIn post 4 written, with the film; Mitchell told. (Show HN, Reddit and X deferred; no freeze.)
+- [ ] LinkedIn post 4 written, with the film. (Mitchell told, 9 November. Show HN, Reddit and X deferred; no freeze.)
 - [x] `free-code` dealt with (deleted 8 November).
 - [ ] Baseline numbers recorded.
 
