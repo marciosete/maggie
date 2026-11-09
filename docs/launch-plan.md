@@ -19,6 +19,11 @@ Written 8 November 2026. Closes every gap found in the 7 November readiness audi
 - **The film replaces the screen recording.** A 100-second narrated film at 1.1× with captions, the app drawn in HTML and operated by a cursor; source in the website repo at `launch/film/`, review copies in `~/Downloads/maggie-launch-film/`, every check in its `VERIFY.md`.
 - **The force-multiplier one-liner is tested** on a fresh account (Marcio).
 - **The source control panel has no Auto tab.** The README, the site and the film said it had; the README and the site were corrected on 9 November, the film on the 8th.
+- **The film is on YouTube**, public: https://youtu.be/yjvg1CKXk-Q ("Introducing Maggie — Agent Development Environment", 100 s).
+- **The site's hero stays the screenshot.** The film has its own section lower down, between the feature list and the feature rows (`#film`): a still from the film with a play button, and the YouTube player in its place on the click, so nothing is requested from YouTube before then; the privacy page says so. Live 9 November.
+- **No GIF** in the README, and **no link to the force-multiplier skill** from marciosete.com.
+- **The baseline numbers are part of the content**: they are taken when the LinkedIn post is written.
+- **Mitchell was told** by email on 9 November.
 
 ## Where we start
 
@@ -102,7 +107,7 @@ The 46× LinkedIn post goes out Thursday 12 November and its first comment says 
 - [x] **[A] README one-liner** under "The force multiplier", with what the skill measures and its caveats (volume not value; 150 is a convention; the team is the unit).
 - [x] **[A] `loc.sh` finds `loc-report.html` beside itself** through its own `SCRIPT_DIR` (`dirname "${BASH_SOURCE[0]}"`, line 76; the page is read from `$SCRIPT_DIR/loc-report.html`, line 900), so the personal-skill install works wherever the three files sit together. The `${CLAUDE_SKILL_DIR}` in `SKILL.md` is only how Claude Code is told where to run it from.
 - [x] **[M] Fresh-Mac test**: done by Marcio, 9 November.
-- [ ] **[A] marciosete.com**: link the skill folder from the essay where the measurement system is described (Part II, §5) and from the Research page.
+- [ ] ~~**[A] marciosete.com**: link the skill folder from the essay where the measurement system is described (Part II, §5) and from the Research page.~~ Not needed (Marcio, 9 November).
 
 **Done when:** a stranger with Claude Code and no Maggie installs and runs it in under ten minutes from the README alone.
 
@@ -145,7 +150,7 @@ What the README and site say must match what 0.31 does, and must say what is ope
 
 **Website (private repo `maggie-website`, cloned to `/Users/marciosete/projects/maggie-website`; `[A]` draft, `[M]` deploy with `vercel --prod`)**
 
-- [x] Hero: the sidebar screenshot replaced the HTML mock on 8 November, in the same window frame, and the four feature panels (board, source control, usage, voice) are screenshots too; the mock's animation script is gone. The recording takes the hero when it exists, with the screenshot as its poster.
+- [x] Hero: the sidebar screenshot replaced the HTML mock on 8 November, in the same window frame, and the four feature panels (board, source control, usage, voice) are screenshots too; the mock's animation script is gone. ~~The recording takes the hero when it exists, with the screenshot as its poster.~~ Revised 9 November: the hero stays the screenshot, and the film has its own section lower down.
 - [x] Feature parity: the site already had fifteen feature cards covering everything in the README (it was ahead of the README, not behind). The phone card now says coming and paid.
 - [ ] ~~**FAQ section** with the launch FAQ from M7.~~ Deferred with the Launch FAQ (9 November).
 - [x] Privacy page: destinations in the code enumerated on 8 November (getmaggie.dev appcast, the LiteLLM price file on GitHub, OpenAI live speech, ElevenLabs, Apple's push service directly), nothing new since 0.20; phone paragraph reworded (same network or Tailscale, pushes held while the Mac is in use, app not yet released); "last checked" set to 8 November 2026, Maggie 0.31.
@@ -166,11 +171,12 @@ The single largest gap: there is no screenshot or recording anywhere. **You are 
 - [x] ~~**[M] Demo workspace.**~~ Not needed: the film draws its workspace (the fictional repositories maggie-docs and maggie, a contributor named Alex). The staging script stays for anyone who wants a live demo.
 - [x] **Screenshots** (8 November): sixteen sanitised images in `~/Downloads/maggie launch images/sanitised-for-opensource-launch`, redrawn by an image model from the real captures around a fictional contributor, Alex Morgan, and the repositories maggie, maggie-docs and maggie-tools, with the package's own review notes beside them. Six are in use: sidebar, board, source control, usage, the voice popover and a terminal. They are illustrations of the product rather than pixel-exact captures: softer glyphs, and small slips (the usage window's status bar reads `-20% 4h`; a path in the source control tree carries a stray quote). The menu bar was cropped off each. No row is red in the sidebar shot; the recording should show one.
 - [x] **The film** (8 November) in place of the recording: 100 s at 1.1×, eight acts (name, the job, the colours, worktrees, the board, the voice, nothing leaves the Mac, open and close), narrated, captioned, the app drawn in HTML and operated by a cursor from the user's point of view. Source `maggie-website/launch/film/`, review copies and one file per act in `~/Downloads/maggie-launch-film/`.
-- [ ] **[A] Exports from the film**: the 1080p MP4 for LinkedIn and the site hero (with a poster frame); a GIF ≤ 10 MB of the opening for the README (gifski or ffmpeg palettegen); the film's home in a repository decided (`launch/film/` is untracked in the website repo).
+- [x] **[A] Exports from the film**, closed 9 November: the 1080p file (H.264, AAC, 100 s, 9.8 MB) uploads to LinkedIn as it is; the film is on YouTube and plays from there on the site, with a frame of it as the still (`assets/film-poster.webp`); no GIF, by decision.
+- [ ] **[M] The film's home**: `launch/film/` is untracked in the website repo, so the composition, the takes and the tools exist on one Mac. Decide where the source lives.
 - [x] **[A] Place them** (8 November): README top and beside the board, voice, source control and usage paragraphs (`docs/images/*.webp`, 23 to 149 KB each); site hero and the four feature panels (`assets/shots/*.webp`), replacing the HTML mocks; `og:image` re-rendered. The repository's social preview is the same card, uploaded through the browser on 8 November (GitHub has no API for it); the site's deploy was checked live with curl, and the hero and panels in Chrome.
 - [ ] **[M] Optional, for the LinkedIn components post later**: a 2–3 minute narrated walkthrough on YouTube, which also unlocks the `/videos` page on marciosete.com.
 
-**Done when:** README and site open on a real picture of the product, and the GIF plays in the GitHub README on mobile.
+**Done when:** README and site open on a real picture of the product. (No GIF, 9 November.)
 
 ---
 
@@ -199,7 +205,7 @@ Revised 8 November after Marcio's call: **no seeded issues and no milestones.** 
 - [ ] **[A] LinkedIn post 4** is drafted in `marciosete.com/docs/linkedin-comeback-series.md`; refresh the numbers from the M2 skill run.
 - [x] **[M] Heads-up to Ghostty.** Ghostty's Discussions have no show-and-tell category and are vouch-gated, so do not post there. The note and the email are written in `docs/launch/heads-up-mitchell.md` (9 November); his site publishes `m@mitchellh.com`. **The email was sent by Marcio on 9 November.** No ask.
 - [x] ~~**[M] Release freeze**~~ No freeze (Marcio, 9 November); the CI gate is the protection.
-- [ ] **[M] Record the baseline** again on 30 November: stars, views, clones, downloads, site visits.
+- [ ] **[M] Record the baseline** when the LinkedIn post is written; it is part of the content (9 November): stars, views, clones, downloads, site visits.
 
 **Done when:** the LinkedIn post and the note to Mitchell exist in `docs/launch/`, and Mitchell has been told.
 
@@ -279,8 +285,8 @@ Post 8 ("Make trust less necessary") becomes an essay chapter, or a January post
 All true on Monday 30 November:
 
 - [x] CI runs tests on PRs and `main`; release waits for green; badge is green (run 4, v0.31.1, 8 November).
-- [ ] README opens on a real screenshot and a GIF, lists every shipped feature, states what is open and what is not. (Screenshot, features and the open statement done 8 November; the GIF is cut from the film next.)
-- [ ] Site hero is the film; site and README agree; privacy page says "checked against 0.3x". (The hero is the screenshot for now; the rest done 8 November.)
+- [x] README opens on a real screenshot, lists every shipped feature, states what is open and what is not. (Done 8 November. No GIF, by decision, 9 November.)
+- [x] The film is on the site, below the feature list (9 November; the hero stays the screenshot, by decision); site and README agree; privacy page says "checked against 0.3x".
 - [x] Sponsors live, or the ask removed.
 - [x] The phone is installable or clearly "coming".
 - [x] `origin` has only `main` and Maggie's tags; duplicate tap archived; `AGENTS.md` is Maggie's; code of conduct present.
@@ -288,7 +294,7 @@ All true on Monday 30 November:
 - [x] The Roadmap discussion carries the roadmap (no seeded issues, by decision). Pinning and the Launch FAQ dropped, 9 November.
 - [ ] LinkedIn post 4 written, with the film. (Mitchell told, 9 November. Show HN, Reddit and X deferred; no freeze.)
 - [x] `free-code` dealt with (deleted 8 November).
-- [ ] Baseline numbers recorded.
+- [ ] Baseline numbers recorded (with the content, 9 November).
 
 ## Working agreement
 

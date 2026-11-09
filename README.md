@@ -32,10 +32,6 @@
 
 <p align="center"><img src="docs/images/sidebar.webp" alt="Maggie's window. The sidebar lists agent sessions in folders, each row coloured by what its agent is doing, with the active session's terminal beside it." width="900"></p>
 
-<!-- The recording goes here when it exists (launch plan, M5):
-<p align="center"><img src="docs/images/maggie.gif" alt="…" width="900"></p>
--->
-
 Maggie is an ADE, an Agent Development Environment: a desktop app for running
 many AI coding agents side by side, [Claude Code](https://claude.com/product/claude-code)
 and [Codex](https://developers.openai.com/codex/cli), each in a session of its own,
