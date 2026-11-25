@@ -84,6 +84,18 @@ enum Git {
             .map { URL(fileURLWithPath: $0) }
     }()
 
+    /// The PATH git runs with: the app's own, then the usual places it lacks. Git starts
+    /// other programs by name, such as `git-lfs` for a repository's filters, and they
+    /// are rarely on a GUI app's minimal PATH.
+    static func searchPath(inherited: String?) -> String {
+        var directories = (inherited ?? "").split(separator: ":").map(String.init)
+        for directory in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+        where !directories.contains(directory) {
+            directories.append(directory)
+        }
+        return directories.joined(separator: ":")
+    }
+
     /// Finds the repository containing `directory`, or nil if it isn't in one.
     static func repository(containing directory: URL) -> Repository? {
         guard let output = run(
@@ -505,6 +517,7 @@ enum Git {
             environment["GIT_OPTIONAL_LOCKS"] = "0"
         }
         environment["LC_ALL"] = "C"
+        environment["PATH"] = searchPath(inherited: environment["PATH"])
         for key in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
             environment[key] = nil
         }

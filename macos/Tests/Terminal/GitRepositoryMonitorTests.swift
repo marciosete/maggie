@@ -47,6 +47,16 @@ struct GitRepositoryMonitorTests {
         #expect(spoken.message == "oops")
     }
 
+    /// Git starts programs such as `git-lfs` by name, from places a GUI app's PATH
+    /// leaves out.
+    @Test func gitFindsTheProgramsItStarts() {
+        #expect(Git.searchPath(inherited: "/usr/bin:/bin:/usr/sbin:/sbin")
+            == "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin")
+        #expect(Git.searchPath(inherited: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
+            == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
+        #expect(Git.searchPath(inherited: nil) == "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
+    }
+
     @Test func statusSaysWhyItFailed() throws {
         let root = try Self.repository()
         defer { try? FileManager.default.removeItem(at: root) }
