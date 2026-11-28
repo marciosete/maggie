@@ -378,6 +378,45 @@ struct GitHookTests {
         #expect(tracker.runs["pre-push"]?.outcome == .passed)
     }
 
+    /// Worktrees share the hooks in the git directory, so the same script runs for each.
+    /// A commit in one is that one's: the panel on another says where it ran, and lets it
+    /// go once that checkout has its commit.
+    @Test @MainActor func tellsWhichWorktreeRanAHookTheyShare() async throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent("hooks-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: root) }
+        try Self.git(["init", "-q"], in: root)
+        try Self.git(["config", "user.name", "Test"], in: root)
+        try Self.git(["config", "user.email", "test@example.com"], in: root)
+        try Self.git(["commit", "-q", "--allow-empty", "-m", "first"], in: root)
+        try Self.write("#!/bin/sh\necho \"[1/1] One…\"\nsleep 2\n", to: root.appendingPathComponent(".git/hooks/pre-commit"))
+        let worktree = root.appendingPathComponent("wt")
+        try Self.git(["worktree", "add", "-q", worktree.path], in: root)
+
+        let repository = try #require(Git.repository(containing: worktree))
+        let tracker = GitHookTracker.tracker(for: repository)
+        let watch = tracker.watch()
+        defer { watch.cancel() }
+        try await Self.wait { !tracker.scripts.isEmpty }
+
+        let commit = try Self.commitThroughPipe(in: root)
+        defer { if commit.isRunning { commit.terminate() } }
+        try await Self.wait { tracker.runs["pre-commit"] != nil }
+        #expect(tracker.runs["pre-commit"]?.worktree == root.lastPathComponent)
+
+        // The commit lands in the main checkout, whose HEAD is the one that moves.
+        commit.waitUntilExit()
+        try await Self.wait { tracker.runs["pre-commit"] == nil }
+
+        // Its own commit is its own.
+        let own = try Self.commitThroughPipe(in: worktree)
+        defer { if own.isRunning { own.terminate() } }
+        try await Self.wait { tracker.runs["pre-commit"] != nil }
+        #expect(tracker.runs["pre-commit"]?.worktree == nil)
+        own.waitUntilExit()
+    }
+
     @Test @MainActor func timesTheStepsOfAHookThatPasses() async throws {
         let root = try Self.huskyRepository(prePush: """
             echo "[1/3] One…"

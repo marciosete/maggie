@@ -62,6 +62,8 @@ struct GitHookRun: Equatable {
 /// A hook run from another worktree of the same repository counts too, since a team
 /// often commits in a worktree and pushes from the main checkout. Its script is that
 /// checkout's, read for its own steps, and the run says which worktree it came from.
+/// Worktrees that share the git directory's hooks run the same script, so the directory
+/// it runs from says which of them a run belongs to.
 ///
 /// Output that goes through a pipe, such as `git commit 2>&1 | tail`, can't be read. The
 /// commands the script runs say which step it is on then, and whether git went on to
@@ -305,7 +307,15 @@ final class GitHookTracker: ObservableObject {
                 let found: Running
                 if let script = scripts.first(where: { $0.path == realPath }),
                    let startedAt = RunningProcess.startTime(pid) {
-                    found = Running(pid: pid, startedAt: startedAt, script: script, repository: repository)
+                    // Worktrees share the hooks of the git directory, so the script alone
+                    // doesn't say which checkout runs it. Where it runs does.
+                    var ranIn = repository
+                    if let directory, let checkout = checkout(at: directory), checkout.root != repository.root {
+                        // The same script, run for another repository, isn't this one's.
+                        guard checkout.commonDir == repository.commonDir else { continue }
+                        ranIn = checkout
+                    }
+                    found = Running(pid: pid, startedAt: startedAt, script: script, repository: ranIn)
                 } else if let other = worktreeScript(at: realPath, runningIn: directory),
                           let startedAt = RunningProcess.startTime(pid) {
                     found = Running(pid: pid, startedAt: startedAt, script: other.script, repository: other.checkout)
